@@ -1,9 +1,10 @@
 import React from 'react';
 import { StyleSheet } from 'react-native';
-import { Text, Surface } from 'react-native-paper';
+import { Text } from 'react-native-paper';
 import { COLORS, SPACING, RADIUS } from '@/src/constants/theme';
 import { CategorySalesEntry } from '@/src/types/dashboard';
 import DonutChart from './DonutChart';
+import AnimatedCard from './AnimatedCard';
 
 const CATEGORY_COLORS = ['#8B5CF6', '#2563EB', '#059669', '#F59E0B', '#DC2626', '#0891B2', '#EC4899', '#6366F1'];
 
@@ -36,7 +37,7 @@ export default function CategorySalesChart({ data }: Props) {
   }));
 
   return (
-    <Surface style={styles.card}>
+    <AnimatedCard style={styles.card}>
       <Text style={styles.title}>Category Sales</Text>
       <DonutChart
         data={chartData}
@@ -46,7 +47,7 @@ export default function CategorySalesChart({ data }: Props) {
         centerLabel="Sales"
         valuePrefix="₹"
       />
-    </Surface>
+    </AnimatedCard>
   );
 }
 

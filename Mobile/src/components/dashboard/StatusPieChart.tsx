@@ -1,24 +1,21 @@
 import React from "react";
-import { StyleSheet } from "react-native";
-import { Text, Surface } from "react-native-paper";
+import { View, StyleSheet } from "react-native";
+import { Text } from "react-native-paper";
 import { COLORS, SPACING, RADIUS } from "@/src/constants/theme";
 import { StatusDistEntry } from "@/src/types/dashboard";
 import DonutChart from "./DonutChart";
+import AnimatedCard from "./AnimatedCard";
 
 const STATUS_COLORS: Record<string, string> = {
-  submitted: "#2563EB",
-  pending_approval: "#F59E0B",
-  approved: "#22C55E",
-  rejected: "#DC2626",
-  sap_created: "#6366F1",
-};
-
-const STATUS_LABELS: Record<string, string> = {
-  submitted: "Submitted",
-  pending_approval: "Pending",
-  approved: "Approved",
-  rejected: "Rejected",
-  sap_created: "SAP Created",
+  CREATED: "#2563EB",
+  RATE_APPROVAL: "#F59E0B",
+  BILLING: "#8B5CF6",
+  NEED_APPROVAL: "#F97316",
+  BILLING_PENDING: "#A855F7",
+  APPROVED: "#22C55E",
+  REJECTED: "#DC2626",
+  BILLING_REJECTED: "#E11D48",
+  COMPLETED: "#059669",
 };
 
 interface Props {
@@ -26,17 +23,16 @@ interface Props {
 }
 
 export default function StatusPieChart({ data }: Props) {
-  const filtered = data.filter((d) => d.status !== "sap_created");
-  const total = filtered.reduce((sum, d) => sum + d.count, 0);
+  const total = data.reduce((sum, d) => sum + d.count, 0);
 
-  const chartData = filtered.map((entry) => ({
-    label: STATUS_LABELS[entry.status] || entry.status,
+  const chartData = data.map((entry) => ({
+    label: entry.label || entry.status,
     value: entry.count,
     color: STATUS_COLORS[entry.status] || "#94A3B8",
   }));
 
   return (
-    <Surface style={styles.card}>
+    <AnimatedCard style={styles.card}>
       <Text style={styles.title}>Order Status</Text>
       <DonutChart
         data={chartData}
@@ -45,7 +41,7 @@ export default function StatusPieChart({ data }: Props) {
         centerValue={String(total)}
         centerLabel="Total"
       />
-    </Surface>
+    </AnimatedCard>
   );
 }
 

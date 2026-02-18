@@ -12,6 +12,7 @@ export interface StatewiseEntry {
 
 export interface StatusDistEntry {
   status: string;
+  label: string;
   count: number;
 }
 

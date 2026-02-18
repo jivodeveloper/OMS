@@ -7,7 +7,8 @@ import {
   ScrollView,
   Dimensions,
 } from "react-native";
-import { Text, Surface } from "react-native-paper";
+import { Text } from "react-native-paper";
+import AnimatedCard from "./AnimatedCard";
 import { COLORS, SPACING, RADIUS } from "@/src/constants/theme";
 import { TopPartyEntry } from "@/src/types/dashboard";
 import DonutChart from "./DonutChart";
@@ -60,7 +61,7 @@ export default function TopPartiesChart({ data }: Props) {
   const screenWidth = Dimensions.get("window").width;
 
   return (
-    <Surface style={styles.card}>
+    <AnimatedCard style={styles.card}>
       <View style={styles.header}>
         <Text style={styles.title}>Top Parties</Text>
         <View style={styles.toggleRow}>
@@ -164,7 +165,7 @@ export default function TopPartiesChart({ data }: Props) {
           </View>
         </View>
       </Modal>
-    </Surface>
+    </AnimatedCard>
   );
 }
 

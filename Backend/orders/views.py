@@ -155,7 +155,7 @@ class DashboardChartsView(APIView):
             .values_list('status', 'count')
         )
         status_data = [
-            {'status': os.name, 'count': status_counts_map.get(os.id, 0)}
+            {'status': os.code, 'label': os.name, 'count': status_counts_map.get(os.id, 0)}
             for os in OrderStatus.objects.all()
         ]
 

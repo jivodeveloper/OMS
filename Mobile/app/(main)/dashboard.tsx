@@ -1,6 +1,12 @@
 import React, { useEffect, useState } from "react";
-import { View, StyleSheet, ScrollView, ActivityIndicator } from "react-native";
-import { Text, Surface } from "react-native-paper";
+import {
+  View,
+  StyleSheet,
+  ScrollView,
+  ActivityIndicator,
+  useWindowDimensions,
+} from "react-native";
+import { Text } from "react-native-paper";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import { Dropdown } from "react-native-element-dropdown";
@@ -15,6 +21,8 @@ import TopPartiesChart from "@/src/components/dashboard/TopPartiesChart";
 import StatusPieChart from "@/src/components/dashboard/StatusPieChart";
 import CategorySalesChart from "@/src/components/dashboard/CategorySalesChart";
 import StatewiseBarChart from "@/src/components/dashboard/StateWiseBarChart";
+import AnimatedCard from "@/src/components/dashboard/AnimatedCard";
+import AnimatedNumber from "@/src/components/dashboard/AnimatedNumber";
 
 const currentYear = new Date().getFullYear();
 const YEAR_OPTIONS = Array.from({ length: currentYear - 2023 }, (_, i) => ({
@@ -38,6 +46,8 @@ interface DashboardData {
 
 export default function DashboardScreen() {
   const { user } = useAuth();
+  const { width: screenWidth } = useWindowDimensions();
+  const isNarrow = screenWidth < 400;
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [chartData, setChartData] = useState<DashboardChartsData | null>(null);
@@ -140,6 +150,11 @@ export default function DashboardScreen() {
         </Text>
       </LinearGradient>
 
+      {/* Analytics Section */}
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Analytics</Text>
+      </View>
+
       {loading ? (
         <ActivityIndicator
           size="large"
@@ -147,9 +162,15 @@ export default function DashboardScreen() {
           style={{ marginTop: SPACING.xl }}
         />
       ) : (
-        <View style={styles.statsGrid}>
+        <View style={[styles.statsGrid, isNarrow && styles.statsGridWrap]}>
           {stats.map((stat, index) => (
-            <Surface key={index} style={styles.statCard}>
+            <AnimatedCard
+              key={index}
+              style={[
+                styles.statCard,
+                isNarrow && { width: (screenWidth - SPACING.md * 2 - SPACING.sm) / 2 },
+              ]}
+            >
               <View
                 style={[
                   styles.statIcon,
@@ -162,17 +183,12 @@ export default function DashboardScreen() {
                   color={stat.color}
                 />
               </View>
-              <Text style={styles.statValue}>{stat.value}</Text>
+              <AnimatedNumber value={stat.value} style={styles.statValue} />
               <Text style={styles.statTitle}>{stat.title}</Text>
-            </Surface>
+            </AnimatedCard>
           ))}
         </View>
       )}
-
-      {/* Analytics Section */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Analytics</Text>
-      </View>
       
       {chartLoading ? (
         <ActivityIndicator
@@ -208,7 +224,7 @@ export default function DashboardScreen() {
             onChangeMonth={setDonutMonth}
           />
           <View style={styles.chartsGrid}>
-            <View style={styles.chartsRow}>
+            <View style={[styles.chartsRow, isNarrow && styles.chartsRowWrap]}>
               <StatusPieChart data={chartData.status_distribution} />
               <CategorySalesChart data={chartData.category_sales} />
             </View>
@@ -286,11 +302,18 @@ const styles = StyleSheet.create({
   },
   statsGrid: {
     flexDirection: "row",
+    flexWrap: "wrap",
     paddingHorizontal: SPACING.md,
     gap: SPACING.sm,
   },
+  statsGridWrap: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "space-between",
+  },
   statCard: {
     flex: 1,
+    minWidth: 70,
     backgroundColor: COLORS.surface,
     borderRadius: RADIUS.md,
     padding: SPACING.md,
@@ -355,6 +378,9 @@ const styles = StyleSheet.create({
   chartsRow: {
     flexDirection: "row",
     gap: SPACING.sm,
+  },
+  chartsRowWrap: {
+    flexDirection: "column",
   },
   section: {
     padding: SPACING.lg,
