@@ -1,6 +1,6 @@
 from django.contrib import admin
 from django.urls import path,include
-from .views import AdminDashboardKPIView,OrderLogsByOrderView, OrdersByUserView,AdminDashboardChartsView,OrderStatusList,BranchView,PartyView,DispatchLocationListView,UpdateOrderStatusView,PartyAddressesView,ProductFiltersView,ProductListView,PartyProductsView,CreateOrderView,OrderListView,RejectOrderView,ApproveOrderView
+from .views import DashboardKPIView,OrderLogsByOrderView, OrdersByUserView,DashboardChartsView,OrderStatusList,BranchView,PartyView,DispatchLocationListView,UpdateOrderStatusView,PartyAddressesView,ProductFiltersView,ProductListView,PartyProductsView,CreateOrderView,OrderListView,RejectOrderView,ApproveOrderView
 
 urlpatterns=[
 
@@ -17,8 +17,8 @@ urlpatterns=[
     path('status/',OrderStatusList.as_view(),name='status'),
     path('branch/',BranchView.as_view(),name='branch'),
     path('<int:order_id>/update-status/',UpdateOrderStatusView.as_view(),name='update-status'),
-    path('dashboard/admin/', AdminDashboardKPIView.as_view(), name='dashboard'),
-    path('dashboard/admin/charts/', AdminDashboardChartsView.as_view(), name='dashboard-charts'),
+    path('dashboard/', DashboardKPIView.as_view(), name='dashboard'),
+    path('dashboard/charts/', DashboardChartsView.as_view(), name='dashboard-charts'),
     path("<int:order_id>/orderdetails/",OrderLogsByOrderView.as_view(),name="order-logs-by-orderid"),
     path("<int:user_id>/orderbyuserid/",OrdersByUserView.as_view(),name="order-logs-by-userid"),
 

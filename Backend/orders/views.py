@@ -40,7 +40,7 @@ def _get_base_orders(user):
     return Order.objects.none()
 
 
-class AdminDashboardKPIView(APIView):
+class DashboardKPIView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
@@ -67,7 +67,7 @@ class AdminDashboardKPIView(APIView):
         })
 
 
-class AdminDashboardChartsView(APIView):
+class DashboardChartsView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
