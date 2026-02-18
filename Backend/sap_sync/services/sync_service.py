@@ -400,14 +400,14 @@ class SyncService:
     def map_order_to_sap(self, order):
         return {
             "CardCode": order.card_code,
-            "DocDate": str(order.created_at),
-            "DocDueDate": str(order.created_at),
-            "TaxDate": str(order.created_at),
-            "NumAtCard": order.po_number,
-            "Comments": " ",
-            "ShipToCode": order.ship_to_address,
-            "PayToCode": order.bill_to_address,
-            "BPL_IDAssignedToInvoice": order.dispatch_from_id,
+            "DocDate": order.created_at.strftime("%Y-%m-%d"),
+            "DocDueDate": str(order.delivery_date) if order.delivery_date else order.created_at.strftime("%Y-%m-%d"),
+            "TaxDate": order.created_at.strftime("%Y-%m-%d"),
+            "NumAtCard": order.po_number or "",
+            "Comments": "",
+            "ShipToCode": order.ship_to_address,  # ← directly string use karo
+            "PayToCode": order.bill_to_address,   # ← directly string use karo
+            "BPL_IDAssignedToInvoice": int(order.dispatch_from_id) if order.dispatch_from_id else 1,
             "DocumentLines": [
                 {
                     "ItemCode": item.item_code,
@@ -445,7 +445,7 @@ class SyncService:
 
     def create_sales_quotation(self, order):
         quotation_payload = self.map_order_to_sap(order)
-
+ 
         log = SalesQuotationLog.objects.create(
             order_id=order.id,
             status='STARTED',

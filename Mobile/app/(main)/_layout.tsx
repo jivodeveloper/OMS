@@ -8,7 +8,6 @@ import { COLORS, RADIUS } from "@/src/constants/theme";
 
 export default function MainLayout() {
   const { user } = useAuth();
-<<<<<<< HEAD
   const userRole = user?.role?.toLowerCase() || "";
 
   const canSee: Record<string, string[]> = {
@@ -21,16 +20,6 @@ export default function MainLayout() {
     "sap/party-product-assignment": ["admin"],
     "approver/pending_approval": ["approver"],
     "orders/ordertracking": ["manager"],
-=======
-  const userRole = user?.role?.toLowerCase() || '';
-
-  const canSee: Record<string, string[]> = {
-    dashboard: ['admin', 'manager', 'approver'],
-    'orders/create': ['manager'],
-    'orders/orderlist': ['billing'],
-    'users/create': ['admin'],
-    'approver/pending_approval': ['approver'],
->>>>>>> 4975e9f2 (commit)
   };
 
   const visibleStyle = {
@@ -39,11 +28,7 @@ export default function MainLayout() {
     marginVertical: 2,
     paddingLeft: 8,
   };
-<<<<<<< HEAD
   const hiddenStyle = { display: "none" as const };
-=======
-  const hiddenStyle = { display: 'none' as const };
->>>>>>> 4975e9f2 (commit)
 
   const isVisible = (screen: string) => {
     const roles = canSee[screen];
@@ -54,20 +39,15 @@ export default function MainLayout() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <Drawer
         drawerContent={(props) => <CustomDrawer {...props} />}
-<<<<<<< HEAD
         screenOptions={
           {
             /* ...your existing screenOptions */
           }
         }
-=======
-        screenOptions={{ /* ...your existing screenOptions */ }}
->>>>>>> 4975e9f2 (commit)
       >
         <Drawer.Screen
           name="dashboard"
           options={{
-<<<<<<< HEAD
             drawerLabel: "Dashboard",
             title: "Dashboard",
             drawerIcon: ({ color }) => (
@@ -76,21 +56,12 @@ export default function MainLayout() {
             drawerItemStyle: isVisible("dashboard")
               ? visibleStyle
               : hiddenStyle,
-=======
-            drawerLabel: 'Dashboard',
-            title: 'Dashboard',
-            drawerIcon: ({ color }) => (
-              <Ionicons name="grid-outline" size={22} color={color} />
-            ),
-            drawerItemStyle: isVisible('dashboard') ? visibleStyle : hiddenStyle,
->>>>>>> 4975e9f2 (commit)
           }}
         />
 
         <Drawer.Screen
           name="orders/create"
           options={{
-<<<<<<< HEAD
             drawerLabel: "Create Order",
             title: "Create Order",
             drawerIcon: ({ color }) => (
@@ -99,21 +70,12 @@ export default function MainLayout() {
             drawerItemStyle: isVisible("orders/create")
               ? visibleStyle
               : hiddenStyle,
-=======
-            drawerLabel: 'Create Order',
-            title: 'Create Order',
-            drawerIcon: ({ color }) => (
-              <Ionicons name="add-circle-outline" size={22} color={color} />
-            ),
-            drawerItemStyle: isVisible('orders/create') ? visibleStyle : hiddenStyle,
->>>>>>> 4975e9f2 (commit)
           }}
         />
         
         <Drawer.Screen
           name="orders/orderlist"
           options={{
-<<<<<<< HEAD
             drawerLabel: "Order List",
             title: "Order List",
             drawerIcon: ({ color }) => (
@@ -122,21 +84,12 @@ export default function MainLayout() {
             drawerItemStyle: isVisible("orders/orderlist")
               ? visibleStyle
               : hiddenStyle,
-=======
-            drawerLabel: 'Order List',
-            title: 'Order List',
-            drawerIcon: ({ color }) => (
-              <Ionicons name="document-text-outline" size={22} color={color} />
-            ),
-            drawerItemStyle: isVisible('orders/orderlist') ? visibleStyle : hiddenStyle,
->>>>>>> 4975e9f2 (commit)
           }}
         />
 
         <Drawer.Screen
           name="users/create"
           options={{
-<<<<<<< HEAD
             drawerLabel: "Create User",
             title: "Create User",
             drawerIcon: ({ color }) => (
@@ -208,21 +161,12 @@ export default function MainLayout() {
             drawerItemStyle: isVisible("orders/ordertracking")
               ? visibleStyle
               : hiddenStyle,
-=======
-            drawerLabel: 'Create User',
-            title: 'Create User',
-            drawerIcon: ({ color }) => (
-              <Ionicons name="person-add-outline" size={22} color={color} />
-            ),
-            drawerItemStyle: isVisible('users/create') ? visibleStyle : hiddenStyle,
->>>>>>> 4975e9f2 (commit)
           }}
         />
 
         <Drawer.Screen
           name="approver/pending_approval"
           options={{
-<<<<<<< HEAD
             drawerLabel: "Pending Approvals",
             title: "Pending Approvals",
             drawerIcon: ({ color }) => (
@@ -231,21 +175,9 @@ export default function MainLayout() {
             drawerItemStyle: isVisible("approver/pending_approval")
               ? visibleStyle
               : hiddenStyle,
-=======
-            drawerLabel: 'Pending Approvals',
-            title: 'Pending Approvals',
-            drawerIcon: ({ color }) => (
-              <Ionicons name="checkmark-done-outline" size={22} color={color} />
-            ),
-            drawerItemStyle: isVisible('approver/pending_approval') ? visibleStyle : hiddenStyle,
->>>>>>> 4975e9f2 (commit)
           }}
         />
       </Drawer>
     </GestureHandlerRootView>
   );
 }
-<<<<<<< HEAD
-=======
-
->>>>>>> 4975e9f2 (commit)

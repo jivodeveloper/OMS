@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 import React, { useEffect, useState } from "react";
 import { View, StyleSheet, ScrollView, ActivityIndicator } from "react-native";
 import { Text, Surface } from "react-native-paper";
@@ -126,55 +125,21 @@ export default function DashboardScreen() {
 
   return (
     <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
-=======
-import React from 'react';
-import { View, StyleSheet, ScrollView } from 'react-native';
-import { Text, Surface } from 'react-native-paper';
-import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons } from '@expo/vector-icons';
-import { useAuth } from '@/src/context/AuthContext';
-import { COLORS, SPACING, RADIUS } from '@/src/constants/theme';
-
-export default function DashboardScreen() {
-  const { user } = useAuth();
-  
-  const stats = [
-    { title: 'Total Orders', value: '156', icon: 'document-text', color: '#2563EB' },
-    { title: 'Pending', value: '23', icon: 'time', color: '#F59E0B' },
-    { title: 'Completed', value: '133', icon: 'checkmark-circle', color: '#22C55E' },
-    { title: 'Revenue', value: '₹4.2L', icon: 'cash', color: '#8B5CF6' },
-  ];
-
-  return (
-    <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
-      
->>>>>>> 4975e9f2 (commit)
       <LinearGradient
         colors={[COLORS.primaryDark, COLORS.primary]}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
-<<<<<<< HEAD
         style={styles.welcomeCard}
       >
         <View style={styles.decorCircle1} />
         <View style={styles.decorCircle2} />
         <Text style={styles.welcomeText}>Welcome back,</Text>
         <Text style={styles.userName}>{user?.name || user?.username}!</Text>
-=======
-        style={styles.welcomeCard}>
-
-        <View style={styles.decorCircle1} />
-        <View style={styles.decorCircle2} />
-        
-        <Text style={styles.welcomeText}>Welcome back,</Text>
-        <Text style={styles.userName}>{user?.name || user?.username}! 👋</Text>
->>>>>>> 4975e9f2 (commit)
         <Text style={styles.welcomeSubtext}>
           Here's what's happening with your orders today.
         </Text>
       </LinearGradient>
 
-<<<<<<< HEAD
       {loading ? (
         <ActivityIndicator
           size="large"
@@ -254,22 +219,6 @@ export default function DashboardScreen() {
       ) : null}
 
       {/* <View style={styles.section}>
-=======
-      <View style={styles.statsGrid}>
-        {stats.map((stat, index) => (
-          <Surface key={index} style={styles.statCard}>
-            <View style={[styles.statIcon, { backgroundColor: `${stat.color}15` }]}>
-              <Ionicons name={stat.icon as any} size={24} color={stat.color} />
-            </View>
-            <Text style={styles.statValue}>{stat.value}</Text>
-            <Text style={styles.statTitle}>{stat.title}</Text>
-          </Surface>
-        ))}
-      </View>
-
-      {/* Quick Actions */}
-      <View style={styles.section}>
->>>>>>> 4975e9f2 (commit)
         <Text style={styles.sectionTitle}>Quick Actions</Text>
         <View style={styles.actionsRow}>
           <Surface style={styles.actionCard}>
@@ -285,11 +234,7 @@ export default function DashboardScreen() {
             <Text style={styles.actionText}>Reports</Text>
           </Surface>
         </View>
-<<<<<<< HEAD
       </View> */}
-=======
-      </View>
->>>>>>> 4975e9f2 (commit)
     </ScrollView>
   );
 }
@@ -303,41 +248,25 @@ const styles = StyleSheet.create({
     margin: SPACING.lg,
     padding: SPACING.lg,
     borderRadius: RADIUS.lg,
-<<<<<<< HEAD
     position: "relative",
     overflow: "hidden",
   },
   decorCircle1: {
     position: "absolute",
-=======
-    position: 'relative',
-    overflow: 'hidden',
-  },
-  decorCircle1: {
-    position: 'absolute',
->>>>>>> 4975e9f2 (commit)
     top: -30,
     right: -30,
     width: 100,
     height: 100,
     borderRadius: 50,
-<<<<<<< HEAD
     backgroundColor: "rgba(255,255,255,0.1)",
   },
   decorCircle2: {
     position: "absolute",
-=======
-    backgroundColor: 'rgba(255,255,255,0.1)',
-  },
-  decorCircle2: {
-    position: 'absolute',
->>>>>>> 4975e9f2 (commit)
     bottom: -20,
     left: -20,
     width: 60,
     height: 60,
     borderRadius: 30,
-<<<<<<< HEAD
     backgroundColor: "rgba(255,255,255,0.05)",
   },
   welcomeText: {
@@ -347,22 +276,10 @@ const styles = StyleSheet.create({
   userName: {
     fontSize: 26,
     fontWeight: "700",
-=======
-    backgroundColor: 'rgba(255,255,255,0.05)',
-  },
-  welcomeText: {
-    fontSize: 14,
-    color: 'rgba(255,255,255,0.8)',
-  },
-  userName: {
-    fontSize: 24,
-    fontWeight: '700',
->>>>>>> 4975e9f2 (commit)
     color: COLORS.textLight,
     marginTop: 4,
   },
   welcomeSubtext: {
-<<<<<<< HEAD
     fontSize: 14,
     color: "rgba(255,255,255,0.7)",
     marginTop: 8,
@@ -391,42 +308,11 @@ const styles = StyleSheet.create({
   statValue: {
     fontSize: 18,
     fontWeight: "700",
-=======
-    fontSize: 13,
-    color: 'rgba(255,255,255,0.7)',
-    marginTop: 8,
-  },
-  statsGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    paddingHorizontal: SPACING.md,
-    gap: SPACING.md,
-  },
-  statCard: {
-    width: '47%',
-    backgroundColor: COLORS.surface,
-    borderRadius: RADIUS.lg,
-    padding: SPACING.lg,
-    elevation: 2,
-  },
-  statIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: RADIUS.md,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: SPACING.sm,
-  },
-  statValue: {
-    fontSize: 24,
-    fontWeight: '700',
->>>>>>> 4975e9f2 (commit)
     color: COLORS.text,
   },
   statTitle: {
     fontSize: 12,
     color: COLORS.textSecondary,
-<<<<<<< HEAD
     marginTop: 2,
     textAlign: "center",
   },
@@ -469,30 +355,18 @@ const styles = StyleSheet.create({
   chartsRow: {
     flexDirection: "row",
     gap: SPACING.sm,
-=======
-    marginTop: 4,
->>>>>>> 4975e9f2 (commit)
   },
   section: {
     padding: SPACING.lg,
   },
   sectionTitle: {
-<<<<<<< HEAD
     fontSize: 18,
     fontWeight: "600",
-=======
-    fontSize: 16,
-    fontWeight: '600',
->>>>>>> 4975e9f2 (commit)
     color: COLORS.text,
     marginBottom: SPACING.md,
   },
   actionsRow: {
-<<<<<<< HEAD
     flexDirection: "row",
-=======
-    flexDirection: 'row',
->>>>>>> 4975e9f2 (commit)
     gap: SPACING.md,
   },
   actionCard: {
@@ -500,7 +374,6 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.surface,
     borderRadius: RADIUS.lg,
     padding: SPACING.lg,
-<<<<<<< HEAD
     alignItems: "center",
     elevation: 2,
   },
@@ -511,15 +384,3 @@ const styles = StyleSheet.create({
     marginTop: SPACING.sm,
   },
 });
-=======
-    alignItems: 'center',
-    elevation: 2,
-  },
-  actionText: {
-    fontSize: 12,
-    fontWeight: '500',
-    color: COLORS.text,
-    marginTop: SPACING.sm,
-  },
-});
->>>>>>> 4975e9f2 (commit)

@@ -36,11 +36,7 @@ export const authService = {
   login: async (credentials: LoginRequest): Promise<LoginResponse> => {
     return api.post('/auth/login/', credentials);
   },
-<<<<<<< HEAD
   
-=======
-
->>>>>>> 4975e9f2 (commit)
   getProfile: async (token: string): Promise<{ success: boolean; data: User }> => {
     return api.get('/auth/profile/', token);
   },

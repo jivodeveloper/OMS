@@ -9,10 +9,6 @@ import {
   StatusBar,
 } from "react-native";
 import { TextInput, Button, Text, HelperText } from "react-native-paper";
-<<<<<<< HEAD
-=======
-
->>>>>>> 4975e9f2 (commit)
 import { SafeAreaView } from "react-native-safe-area-context";
 import { router } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
@@ -53,19 +49,12 @@ export default function LoginScreen() {
 
     try {
       const result = await login({ username, password });
-<<<<<<< HEAD
       console.log(JSON.stringify(result));
-=======
->>>>>>> 4975e9f2 (commit)
 
       if (result.success) {
         router.replace("/(main)/dashboard" as any);
       } else {
-<<<<<<< HEAD
         Alert.alert(result.message, "Please try again.");
-=======
-        Alert.alert("Login Failed", result.message);
->>>>>>> 4975e9f2 (commit)
       }
     } catch (error) {
       Alert.alert("Error", "Something went wrong. Please try again.");

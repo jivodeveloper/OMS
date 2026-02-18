@@ -144,11 +144,7 @@ class OrdersLog(models.Model):
     performed_by = models.ForeignKey('users.User', on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
     remarks = models.TextField(blank=True, default='')
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
-<<<<<<< HEAD
     
-=======
-
->>>>>>> 4975e9f2 (commit)
     class Meta:
         managed = False
         db_table = 'order_logs'
@@ -156,11 +152,7 @@ class OrdersLog(models.Model):
 
     def __str__(self):
         return f"[{self.order.order_number}] {self.action.name}"
-<<<<<<< HEAD
     
-=======
-
->>>>>>> 4975e9f2 (commit)
 class OrderStatus(models.Model):
     code = models.CharField(max_length=30, unique=True)
     name = models.CharField(max_length=100)
@@ -193,10 +185,6 @@ def log_order_action(order, action_name, user=None, remarks=''):
     return OrdersLog.objects.create(
         order=order,
         action=action,
-<<<<<<< HEAD
         performed_by=user if user and user.is_authenticated else None,
-=======
-        performed_by=user,
->>>>>>> 4975e9f2 (commit)
         remarks=remarks
     )   

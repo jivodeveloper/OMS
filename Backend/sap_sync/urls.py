@@ -62,5 +62,5 @@ urlpatterns = [
 
     path('test-quotation/<int:pk>/', TestSalesQuotation.as_view()),
     path("approve-order/", ApproveOrderAPIView.as_view()),
-    
+     
 ]

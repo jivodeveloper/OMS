@@ -1,9 +1,5 @@
 from rest_framework import serializers
-<<<<<<< HEAD
 from .models import Parties,DispatchLocation,PartyAddress,ProductDetails,OrderItem,Branches,OrdersLog,Order
-=======
-from .models import Parties,DispatchLocation,PartyAddress,ProductDetails,OrderItem,Branches
->>>>>>> 4975e9f2 (commit)
 
 class PartiesSerializer(serializers.ModelSerializer):
     class Meta:
@@ -48,7 +44,6 @@ class BranchSerializer(serializers.ModelSerializer):
 class OrderStatusUpdateSerializer(serializers.Serializer):
     status = serializers.CharField()
     rejection_reason = serializers.CharField(required=False, allow_blank=True)       
-<<<<<<< HEAD
 
 class OrderListByUserIdSerializer(serializers.ModelSerializer):
     status_name = serializers.CharField(source="status.name")
@@ -83,8 +78,3 @@ class OrdersLogSerializer(serializers.ModelSerializer):
             "performed_by_name",
             "created_at",
         ]
-=======
-    
-
- 
->>>>>>> 4975e9f2 (commit)

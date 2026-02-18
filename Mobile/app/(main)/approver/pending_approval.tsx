@@ -56,11 +56,7 @@ export default function PendingApprovalScreen() {
       // console.log()
       setOrders(data);
     } catch (error) {
-<<<<<<< HEAD
       console.log("Error loading orders:", error);
-=======
-      console.error("Error loading orders:", error);
->>>>>>> 4975e9f2 (commit)
       Alert.alert("Error", "Failed to load orders");
     } finally {
       setLoading(false);
@@ -89,11 +85,7 @@ export default function PendingApprovalScreen() {
               Alert.alert("Success", `Order ${orderNumber} approved!`);
               loadOrders();
             } catch (error) {
-<<<<<<< HEAD
               console.log("Error approving:", error);
-=======
-              console.error("Error approving:", error);
->>>>>>> 4975e9f2 (commit)
               Alert.alert("Error", "Failed to approve order");
             } finally {
               setActionLoading(null);
@@ -123,11 +115,7 @@ export default function PendingApprovalScreen() {
       Alert.alert("Success", "Order rejected");
       loadOrders();
     } catch (error) {
-<<<<<<< HEAD
       console.log("Error rejecting:", error);
-=======
-      console.error("Error rejecting:", error);
->>>>>>> 4975e9f2 (commit)
       Alert.alert("Error", "Failed to reject order");
     } finally {
       setActionLoading(null);

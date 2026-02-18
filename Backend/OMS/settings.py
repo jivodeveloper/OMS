@@ -10,10 +10,7 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/6.0/ref/settings/
 """
 
-<<<<<<< HEAD
 import os
-=======
->>>>>>> 4975e9f2 (commit)
 from pathlib import Path
 from datetime import timedelta
 from decouple import config    
@@ -46,21 +43,14 @@ INSTALLED_APPS = [
 
     # Third party
     'rest_framework',
-<<<<<<< HEAD
     # 'rest_framework.authtoken',
     # 'rest_framework.authtoken',
-=======
-    'rest_framework_simplejwt',
->>>>>>> 4975e9f2 (commit)
     'corsheaders',
     
     # Local apps
     'users',
     'orders',
-<<<<<<< HEAD
     'sap_sync'
-=======
->>>>>>> 4975e9f2 (commit)
 ]
 
 MIDDLEWARE = [
@@ -109,14 +99,11 @@ DATABASES = {
     }
 }
 
-<<<<<<< HEAD
 #HAND credentials
 HANA_SERVICE_LAYER_URL = HANA_SERVICE_LAYER_URL = config('HANA_SERVICE_LAYER_URL')
 HANA_USERNAME = config('HANA_USERNAME')
 HANA_PASSWORD = config('HANA_PASSWORD')
 HANA_COMPANY_DB = config('HANA_COMPANY_DB')
-=======
->>>>>>> 4975e9f2 (commit)
 
 # Password validation
 # https://docs.djangoproject.com/en/6.0/ref/settings/#auth-password-validators
@@ -158,13 +145,8 @@ STATIC_URL = 'static/'
 
 # REST Framework
 REST_FRAMEWORK = {
-<<<<<<< HEAD
     "DEFAULT_AUTHENTICATION_CLASSES": (
         "rest_framework_simplejwt.authentication.JWTAuthentication",
-=======
-    'DEFAULT_AUTHENTICATION_CLASSES': (
-        'rest_framework_simplejwt.authentication.JWTAuthentication',
->>>>>>> 4975e9f2 (commit)
     ),
 }
 

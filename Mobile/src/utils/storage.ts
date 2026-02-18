@@ -7,20 +7,12 @@ const KEYS = {
 };
 
 export const storage = {
-<<<<<<< HEAD
   
-=======
-  // Tokens
->>>>>>> 4975e9f2 (commit)
   saveTokens: async (access: string, refresh: string) => {
     await AsyncStorage.setItem(KEYS.ACCESS_TOKEN, access);
     await AsyncStorage.setItem(KEYS.REFRESH_TOKEN, refresh);
   },
-<<<<<<< HEAD
   
-=======
-
->>>>>>> 4975e9f2 (commit)
   getAccessToken: async () => {
     return AsyncStorage.getItem(KEYS.ACCESS_TOKEN);
   },

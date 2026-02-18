@@ -13,10 +13,7 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import {
-<<<<<<< HEAD
   ApproveOr,
-=======
->>>>>>> 4975e9f2 (commit)
   OrderItemList,
   orderService,
   productService,
@@ -30,13 +27,10 @@ const STATUS_TABS = [
 ];
 
 export default function BillingOrderList() {
-<<<<<<< HEAD
   const [pendingActionType, setPendingActionType] = useState<
     "NEED_APPROVAL" | "BILLING_PENDING" | null
   >(null);
 
-=======
->>>>>>> 4975e9f2 (commit)
   const [orders, setOrders] = useState<OrderItemList[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -85,7 +79,6 @@ export default function BillingOrderList() {
     loadOrders();
   };
 
-<<<<<<< HEAD
   const handleApprove = (order: OrderItemList) => {
     console.log("Approve order:", order.id);
     Alert.alert("Approve Order", `Approve order ${order.order_number}?`, [
@@ -127,38 +120,6 @@ export default function BillingOrderList() {
         },
       },
     ]);
-=======
-  const handleApprove = (orderId: number, orderNumber: string) => {
-    Alert.alert(
-      "Approve Order",
-      `Are you sure you want to approve order ${orderNumber}?`,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Approve",
-          style: "default",
-          onPress: async () => {
-            try {
-              setActionLoading(orderId);
-              const respo = await productService.updatestatus(
-                orderId,
-                "6",
-                "NO REASON",
-              );
-              console.log("productservice" + JSON.stringify(respo));
-              Alert.alert("Success", `Order ${orderNumber} approved!`);
-              loadOrders();
-            } catch (error) {
-              console.log("Error approving:", error);
-              Alert.alert("Error", "Failed to approve order");
-            } finally {
-              setActionLoading(null);
-            }
-          },
-        },
-      ],
-    );
->>>>>>> 4975e9f2 (commit)
   };
 
   const openRejectModal = (orderId: number) => {
@@ -192,27 +153,16 @@ export default function BillingOrderList() {
       {/* Header */}
       <View style={styles.orderHeader}>
         <Text style={styles.orderNumber}>{item.order_number}</Text>
-<<<<<<< HEAD
         {/* <View
-=======
-        <View
->>>>>>> 4975e9f2 (commit)
           style={[
             styles.statusBadge,
             {
               backgroundColor:
                 STATUS_TABS.find((t) => t.key === item.status)?.color || "#666",
             },
-<<<<<<< HEAD
           ]}>
           <Text style={styles.statusText}>{item.status.toUpperCase()}</Text>
         </View> */}
-=======
-          ]}
-        >
-          <Text style={styles.statusText}>{item.status.toUpperCase()}</Text>
-        </View>
->>>>>>> 4975e9f2 (commit)
       </View>
 
       {/* Party Info */}
@@ -262,11 +212,7 @@ export default function BillingOrderList() {
 
             <TouchableOpacity
               style={[styles.actionBtn, styles.approveBtn]}
-<<<<<<< HEAD
               onPress={() => handleApprove(item)}
-=======
-              onPress={() => handleApprove(item.id, item.order_number)}
->>>>>>> 4975e9f2 (commit)
               disabled={actionLoading === item.id}
             >
               {actionLoading === item.id ? (
@@ -299,10 +245,7 @@ export default function BillingOrderList() {
                   style={styles.dropdownItem}
                   onPress={() => {
                     setActionMenuVisible(null);
-<<<<<<< HEAD
                     setPendingActionType("NEED_APPROVAL");
-=======
->>>>>>> 4975e9f2 (commit)
                     openPendingModal(item.id);
                   }}
                 >
@@ -313,7 +256,6 @@ export default function BillingOrderList() {
                   style={styles.dropdownItem}
                   onPress={() => {
                     setActionMenuVisible(null);
-<<<<<<< HEAD
                     setPendingActionType("BILLING_PENDING");
                     openPendingModal(item.id);
                   }}
@@ -325,17 +267,11 @@ export default function BillingOrderList() {
                   style={styles.dropdownItem}
                   onPress={() => {
                     setActionMenuVisible(null);
-=======
->>>>>>> 4975e9f2 (commit)
                     openPendingModal(item.id);
                   }}
                 >
                   <Text style={styles.dropdownText}>Pending</Text>
-<<<<<<< HEAD
                 </TouchableOpacity> */}
-=======
-                </TouchableOpacity>
->>>>>>> 4975e9f2 (commit)
               </View>
             )}
           </View>
@@ -371,11 +307,7 @@ export default function BillingOrderList() {
           </Text>
         </View>
       )}
-<<<<<<< HEAD
       
-=======
-
->>>>>>> 4975e9f2 (commit)
       {/* Orders List */}
       {loading ? (
         <View style={styles.loadingContainer}>
@@ -451,15 +383,11 @@ export default function BillingOrderList() {
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
-<<<<<<< HEAD
             <Text style={{ color: "#000", fontWeight: "600" }}>
               {pendingActionType?.toUpperCase() === "NEED_APPROVAL"
                 ? "Mark as Need Approval"
                 : "Mark as Billing Pending"}
             </Text>
-=======
-            <Text style={styles.modalTitle}>Mark as Pending</Text>
->>>>>>> 4975e9f2 (commit)
 
             <Text style={styles.modalSubtitle}>
               Please provide pending reason:

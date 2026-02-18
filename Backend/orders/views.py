@@ -1,16 +1,8 @@
-<<<<<<< HEAD
 from urllib import request
 from django.shortcuts import render
 import re
 from .serializers import OrderListByUserIdSerializer,OrdersLogSerializer,OrderStatusUpdateSerializer, DispatchLocationSerializer,BranchSerializer, PartyAddressSerializer,ProductSerializer,CreateOrderSerializer
 from .models import OrdersLog,Parties, Branches, DispatchLocation, UserPartyAssignment, PartyAddress,ProductDetails,Order,OrderItem,OrderStatus,log_order_action
-=======
-from django.shortcuts import render
-import re
-from django.shortcuts import render
-from .serializers import PartiesSerializer,OrderStatusUpdateSerializer, DispatchLocationSerializer,BranchSerializer, PartyAddressSerializer,ProductSerializer,CreateOrderSerializer
-from .models import Parties, Branches, DispatchLocation, UserPartyAssignment, PartyAddress,ProductDetails,Order,OrderItem,OrderStatus,log_order_action
->>>>>>> 4975e9f2 (commit)
 from rest_framework.generics import ListAPIView
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.views import APIView
@@ -18,7 +10,6 @@ from rest_framework.response import Response
 from rest_framework import status
 from datetime import datetime
 from functools import lru_cache
-<<<<<<< HEAD
 from rest_framework.permissions import IsAdminUser
 import calendar
 from django.db.models import Sum, Count
@@ -188,8 +179,6 @@ class AdminDashboardChartsView(APIView):
             'top_parties': top_parties_data,
             'category_sales': category_data,
         })
-=======
->>>>>>> 4975e9f2 (commit)
 
 def extract_type_from_name(item_name):
     """Extract size/type like '1 LTR', '500 ML', '5 KG' from item name"""
@@ -256,10 +245,12 @@ class PartyView(APIView):
 
         return Response(data)
 
+
 class DispatchLocationListView(ListAPIView):
     permission_classes = [AllowAny]
     serializer_class = DispatchLocationSerializer
     queryset = DispatchLocation.objects.all().order_by('name')
+
 
 class PartyAddressesView(APIView):
 
@@ -334,6 +325,7 @@ class PartyAddressesView(APIView):
             'ship_to': ship_data,
             'is_fallback': False
         })
+
 
 class ProductFiltersView(APIView):
     permission_classes = [AllowAny]
@@ -429,37 +421,20 @@ class ProductListView(APIView):
         return Response(serializer.data)
 
 class CreateOrderView(APIView):
-<<<<<<< HEAD
-    permission_classes = [IsAuthenticated]
-    
-    def post(self, request):
-        serializer = CreateOrderSerializer(data=request.data)
-
-        if not serializer.is_valid():
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-        data = serializer.validated_data
-        items = data.pop('items', [])
-
-        if not items:
-            return Response({'error': 'At least one item is required'}, status=status.HTTP_400_BAD_REQUEST)
-
-=======
     permission_classes = [AllowAny]
     
     def post(self, request):
         serializer = CreateOrderSerializer(data=request.data)
-        
+
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-        
+
         data = serializer.validated_data
         items = data.pop('items', [])
-        
+
         if not items:
             return Response({'error': 'At least one item is required'}, status=status.HTTP_400_BAD_REQUEST)
-            
->>>>>>> 4975e9f2 (commit)
+
         # Generate order number: ORD-YYYYMMDD-XXXX
         today = datetime.now().strftime('%Y%m%d')
         last_order = Order.objects.filter(
@@ -477,14 +452,10 @@ class CreateOrderView(APIView):
         # Calculate total
         total_amount = sum(float(item.get('total', 0)) for item in items)
 
-<<<<<<< HEAD
         user = request.user
         print("AUTH HEADER:", request.headers.get("Authorization"))
         print("USER:", request.user)
         print("AUTHENTICATED:", request.user.is_authenticated)
-=======
-        user = request.user if request.user.is_authenticated else None
->>>>>>> 4975e9f2 (commit)
 
         # Create order
         order = Order.objects.create(
@@ -501,7 +472,6 @@ class CreateOrderView(APIView):
             po_number=data.get('po_number', ''),
             total_amount=total_amount,
             status=get_status('Created'),
-<<<<<<< HEAD
             created_by=user.id,
             delivery_date=data.get('delivery_date', '')
         )
@@ -510,16 +480,6 @@ class CreateOrderView(APIView):
         needs_approval = False
         flagged_items = []
 
-=======
-            created_by=user.id if user else 2,
-            delivery_date=data.get('delivery_date','')
-        )
-        
-        # Create order items + price check
-        needs_approval = False
-        flagged_items = []
-        
->>>>>>> 4975e9f2 (commit)
         for item in items:
             OrderItem.objects.create(
                 order=order,
@@ -544,17 +504,10 @@ class CreateOrderView(APIView):
             if bp > mp:
                 needs_approval = True
                 flagged_items.append(f"{item.get('item_name')}: Basic ₹{bp} > Market ₹{mp}")
-<<<<<<< HEAD
 
         # Log: Order created
         log_order_action(order, 'Created', user=user)
 
-=======
-        
-        # Log: Order created
-        log_order_action(order, 'Created', user=user)
-        
->>>>>>> 4975e9f2 (commit)
         # Route based on price check
         if needs_approval:
             order.status = get_status('Rate_Approval')
@@ -601,7 +554,6 @@ class UpdateOrderStatusView(APIView):
         order = Order.objects.get(id=order_id)
 
         status_id = serializer.validated_data["status"]
-<<<<<<< HEAD
         reason = serializer.validated_data.get("reason", "")
 
         # ✅ Fetch status dynamically from table
@@ -626,26 +578,12 @@ class UpdateOrderStatusView(APIView):
             remarks=reason
         )
 
-=======
-        rejection_reason = serializer.validated_data.get("reason", "")
-
-        status_obj = OrderStatus.objects.get(id=status_id)
-
-        order.status = status_obj
-
-        if status_obj.name == "REJECTED":
-            order.reject_reason = rejection_reason
-
-        order.save()
-
->>>>>>> 4975e9f2 (commit)
         return Response({
             "message": "Order status updated successfully",
             "order_id": order.id,
             "status": status_obj.name
         })
 
-<<<<<<< HEAD
 class OrderLogsByOrderView(APIView):
     permission_classes = [AllowAny]
 
@@ -667,8 +605,6 @@ class OrdersByUserView(APIView):
 
         return Response(serializer.data)
     
-=======
->>>>>>> 4975e9f2 (commit)
 @lru_cache
 def get_status(name):
     return OrderStatus.objects.get(name=name)
@@ -754,10 +690,7 @@ class OrderListView(APIView):
         
         data = []
         for order in orders:
-<<<<<<< HEAD
             items_qs = OrderItem.objects.filter(order=order)
-=======
->>>>>>> 4975e9f2 (commit)
             items_count = OrderItem.objects.filter(order=order).count()
             data.append({
                 'id': order.id,
@@ -769,15 +702,11 @@ class OrderListView(APIView):
                 'status_display': order.status.name,
                 'items_count': items_count,
                 'created_by': order.created_by,
-<<<<<<< HEAD
                 'po_number': order.po_number,
                 'bill_to_address': order.bill_to_address,
                 'ship_to_address': order.ship_to_address,
                 'dispatch_from_id': order.dispatch_from_id,
                 'items': list(items_qs.values())
-=======
-                'created_at': order.created_at.strftime('%Y-%m-%d %H:%M'),
->>>>>>> 4975e9f2 (commit)
             })
         
         return Response(data)   

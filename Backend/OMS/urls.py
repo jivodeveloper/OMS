@@ -20,11 +20,6 @@ from django.urls import path,include
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/auth/', include('users.urls')),
-<<<<<<< HEAD
     path('api/orders/', include('orders.urls')),
     path('api/sap/', include('sap_sync.urls')),
-=======
-
-    path('api/orders/', include('orders.urls')),
->>>>>>> 4975e9f2 (commit)
 ]
