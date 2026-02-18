@@ -20,6 +20,26 @@ from django.shortcuts import get_object_or_404
 from rest_framework import permissions
 
 
+def _get_base_orders(user):
+    """Scope orders by user role:
+    - admin: all orders
+    - manager: only orders created by this user
+    - approver: orders pending approval (NEED_APPROVAL, RATE_APPROVAL)
+    - billing: orders in billing stage (BILLING, BILLING_PENDING)
+    """
+    role = getattr(user, 'role', None)
+    role_name = getattr(role, 'name', '').lower() if role else ''
+    if role_name == 'admin':
+        return Order.objects.all()
+    if role_name == 'manager':
+        return Order.objects.filter(created_by=user.id)
+    if role_name == 'approver':
+        return Order.objects.filter(status__code__in=['NEED_APPROVAL', 'RATE_APPROVAL'])
+    if role_name == 'billing':
+        return Order.objects.filter(status__code__in=['BILLING', 'BILLING_PENDING'])
+    return Order.objects.none()
+
+
 class AdminDashboardKPIView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -27,7 +47,7 @@ class AdminDashboardKPIView(APIView):
         today = timezone.now().date()
         current_month_start = today.replace(day=1)
 
-        all_orders = Order.objects.all()
+        all_orders = _get_base_orders(request.user)
 
         total_orders = all_orders.count()
         total_revenue = all_orders.aggregate(total=Sum('total_amount'))['total'] or 0
@@ -35,8 +55,8 @@ class AdminDashboardKPIView(APIView):
         this_month_orders = all_orders.filter(created_at__date__gte=current_month_start).count()
 
         status_counts = {}
-        for choice_value, choice_label in Order.STATUS_CHOICE:
-            status_counts[choice_value] = all_orders.filter(status=choice_value).count()
+        for os in OrderStatus.objects.all():
+            status_counts[os.name] = all_orders.filter(status=os).count()
 
         return Response({
             'total_orders': total_orders,
@@ -60,26 +80,27 @@ class AdminDashboardChartsView(APIView):
 
         # Date boundaries for donut charts: month=0 means year-to-date
         if month == 0:
-            range_start = datetime(year, 1, 1)
+            range_start = timezone.make_aware(datetime(year, 1, 1))
             if year == now.year:
-                range_end = datetime(now.year, now.month, now.day, 23, 59, 59)
+                range_end = timezone.make_aware(datetime(now.year, now.month, now.day, 23, 59, 59))
             else:
-                range_end = datetime(year, 12, 31, 23, 59, 59)
+                range_end = timezone.make_aware(datetime(year, 12, 31, 23, 59, 59))
         else:
-            range_start = datetime(year, month, 1)
+            range_start = timezone.make_aware(datetime(year, month, 1))
             last_day = calendar.monthrange(year, month)[1]
-            range_end = datetime(year, month, last_day, 23, 59, 59)
+            range_end = timezone.make_aware(datetime(year, month, last_day, 23, 59, 59))
 
-        filtered_orders = Order.objects.filter(
+        base_orders = _get_base_orders(request.user)
+        filtered_orders = base_orders.filter(
             created_at__gte=range_start,
             created_at__lte=range_end
         )
 
         # CHART 1: Monthly Sales Timeline (full line_year Jan-Dec)
-        year_start = datetime(line_year, 1, 1)
-        year_end = datetime(line_year, 12, 31, 23, 59, 59)
+        year_start = timezone.make_aware(datetime(line_year, 1, 1))
+        year_end = timezone.make_aware(datetime(line_year, 12, 31, 23, 59, 59))
         monthly_sales = (
-            Order.objects
+            base_orders
             .filter(created_at__gte=year_start, created_at__lte=year_end)
             .annotate(month=TruncMonth('created_at'))
             .values('month')
@@ -134,8 +155,8 @@ class AdminDashboardChartsView(APIView):
             .values_list('status', 'count')
         )
         status_data = [
-            {'status': choice_value, 'count': status_counts_map.get(choice_value, 0)}
-            for choice_value, _ in Order.STATUS_CHOICE
+            {'status': os.name, 'count': status_counts_map.get(os.id, 0)}
+            for os in OrderStatus.objects.all()
         ]
 
         # CHART 4: Top Parties by Revenue (selected period)

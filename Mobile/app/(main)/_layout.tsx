@@ -11,7 +11,7 @@ export default function MainLayout() {
   const userRole = user?.role?.toLowerCase() || "";
 
   const canSee: Record<string, string[]> = {
-    dashboard: ["admin", "manager", "approver"],
+    dashboard: ["admin", "manager", "approver", "billing"],
     "orders/create": ["manager"],
     "orders/orderlist": ["billing"],
     "users/create": ["admin"],

@@ -24,7 +24,7 @@ export const api = {
   }
 
   if (token) {
-    headers['Authorization'] = `Token ${token}`;
+    headers['Authorization'] = `Bearer ${token}`;
   }
 
   try {
@@ -33,7 +33,7 @@ export const api = {
 
     const response = await fetch(url, {
       method: 'GET',
-      // headers,
+      headers,
     });
 
     console.log('Status:', response.status);
