@@ -12,8 +12,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { Dropdown } from "react-native-element-dropdown";
 import { useAuth } from "@/src/context/AuthContext";
 import { COLORS, SPACING, RADIUS } from "@/src/constants/theme";
-import { api } from "@/src/services/api";
-import { storage } from "@/src/utils/storage";
+import { dashboardService, DashboardData } from "@/src/services/dashboard.service";
 import { DashboardChartsData } from "@/src/types/dashboard";
 import MonthPicker from "@/src/components/dashboard/MonthPicker";
 import SalesLineChart from "@/src/components/dashboard/SalesLineChart";
@@ -29,20 +28,6 @@ const YEAR_OPTIONS = Array.from({ length: currentYear - 2023 }, (_, i) => ({
   label: String(2024 + i),
   value: 2024 + i,
 }));
-
-interface DashboardData {
-  total_orders: number;
-  total_revenue: string;
-  today_orders: number;
-  this_month_orders: number;
-  status_counts: {
-    submitted: number;
-    pending_approval: number;
-    approved: number;
-    rejected: number;
-    sap_created: number;
-  };
-}
 
 export default function DashboardScreen() {
   const { user } = useAuth();
@@ -69,13 +54,7 @@ export default function DashboardScreen() {
 
   const fetchDashboard = async () => {
     try {
-      const token = await storage.getAccessToken();
-      const result = await api.get(
-        "/orders/dashboard/",
-        token || undefined,
-      );
-
-      console.log("Dashboard fetch result:", JSON.stringify(result));
+      const result: any = await dashboardService.getDashboard();
       if (result && !result.error && result.total_orders !== undefined) {
         setData(result);
       }
@@ -89,11 +68,7 @@ export default function DashboardScreen() {
   const fetchChartData = async (ly: number, dy: number, dm: number) => {
     setChartLoading(true);
     try {
-      const token = await storage.getAccessToken();
-      const result = await api.get(
-        `/orders/dashboard/charts/?line_year=${ly}&year=${dy}&month=${dm}`,
-        token || undefined,
-      );
+      const result: any = await dashboardService.getChartData(ly, dy, dm);
       if (result && !result.error && result.monthly_sales) {
         setChartData(result);
       }
