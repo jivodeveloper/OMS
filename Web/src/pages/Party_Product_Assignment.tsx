@@ -205,15 +205,6 @@ export default function Party_Product_Assignment() {
 
   return (
     <div className="pa-page app-page">
-      <div className="pa-header app-page-head">
-        <div>
-          {/* <span className="app-chip pa-chip">Product Mapping</span> */}
-          <h1 className="pa-title app-page-title">Party Product Assignment</h1>
-          {/* <p className="pa-subtitle app-page-subtitle">
-            Assign products and specific rates to one or multiple parties at once.
-          </p> */}
-        </div>
-      </div>
 
       {/* Party Selector Card */}
       <div
@@ -225,9 +216,12 @@ export default function Party_Product_Assignment() {
           marginBottom: "24px",
         }}
       >
-        {/* <h2 style={{ fontSize: "1.25rem", fontWeight: 600, color: "#0f172a", margin: "0 0 16px" }}>
-          Select Parties
-        </h2> */}
+        <div style={{ marginBottom: "24px" }}>
+          <h1 style={{ margin: "0 0 4px", fontSize: "24px", fontWeight: 800, color: "#0f172a", letterSpacing: "-0.02em" }}>
+            Party Product Assignment
+          </h1>
+          {/* <p style={{ margin: 0, fontSize: "13px", color: "#64748b" }}>Search &amp; select one or more parties to assign products.</p> */}
+        </div>
 
         <div ref={dropdownRef} style={{ position: "relative", maxWidth: "480px", zIndex: 10 }}>
           <label
@@ -247,10 +241,13 @@ export default function Party_Product_Assignment() {
               placeholder="Type name or code to search..."
               style={{
                 width: "100%",
-                padding: "10px 14px",
+                height: "var(--input-h, 40px)",
+                padding: "0 12px",
+                background: "rgba(248, 250, 252, 0.9)",
                 border: "1px solid #cbd5e1",
-                borderRadius: "8px",
-                fontSize: "0.95rem",
+                borderRadius: "var(--radius-sm, 8px)",
+                fontSize: "var(--font-ui, 13px)",
+              color: "#0f172a",
                 outline: "none",
                 boxSizing: "border-box",
               }}
@@ -273,7 +270,7 @@ export default function Party_Product_Assignment() {
                 marginTop: "4px",
                 background: "#fff",
                 border: "1px solid #e2e8f0",
-                borderRadius: "8px",
+                borderRadius: "var(--radius-md, 12px)",
                 boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
                 maxHeight: "250px",
                 overflowY: "auto",
@@ -414,7 +411,7 @@ export default function Party_Product_Assignment() {
             }}
           >
             <div>
-              <h2 style={{ fontSize: "1.25rem", fontWeight: 700, color: "#1d4ed8", margin: "0 0 4px" }}>
+          <h2 style={{ fontSize: "24px", fontWeight: 800, color: "#0f172a", margin: "0 0 4px", letterSpacing: "-0.02em" }}>
                 Multi-Party Assignment
               </h2>
               <p style={{ margin: 0, fontSize: "0.9rem", color: "#475569" }}>
@@ -483,7 +480,7 @@ export default function Party_Product_Assignment() {
             }}
           >
             <div>
-              <h2 style={{ fontSize: "1.5rem", fontWeight: 700, color: "#0f172a", margin: "0 0 4px" }}>
+          <h2 style={{ fontSize: "24px", fontWeight: 800, color: "#0f172a", margin: "0 0 4px", letterSpacing: "-0.02em" }}>
                 {selectedPartyDetails.card_name}
               </h2>
               <div style={{ display: "flex", gap: "12px", alignItems: "center" }}>
@@ -767,10 +764,15 @@ export default function Party_Product_Assignment() {
                 onChange={(e) => setModalSearch(e.target.value)}
                 style={{
                   width: "100%",
-                  padding: "10px 14px",
+                  height: "var(--input-h, 40px)",
+                  padding: "0 12px",
+                  background: "rgba(248, 250, 252, 0.9)",
                   border: "1px solid #cbd5e1",
-                  borderRadius: "8px",
+                  borderRadius: "var(--radius-sm, 8px)",
+                  fontSize: "var(--font-ui, 13px)",
+              color: "#0f172a",
                   outline: "none",
+                  boxSizing: "border-box",
                 }}
               />
             </div>
@@ -859,10 +861,13 @@ export default function Party_Product_Assignment() {
                                 }
                                 style={{
                                   width: "100%",
-                                  padding: "8px 10px",
+                                  height: "var(--input-h, 40px)",
+                                  padding: "0 12px",
+                                  background: "rgba(248, 250, 252, 0.9)",
                                   border: "1px solid #cbd5e1",
-                                  borderRadius: "6px",
-                                  fontSize: "0.85rem",
+                                  borderRadius: "var(--radius-sm, 8px)",
+                                  fontSize: "var(--font-ui, 13px)",
+                              color: "#0f172a",
                                   outline: "none",
                                   boxSizing: "border-box",
                                 }}

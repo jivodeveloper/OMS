@@ -13,7 +13,11 @@ margin-bottom: 16px;
 }
 
 .sl-title {
-margin: 0;
+  margin: 0 0 4px;
+  font-size: 24px;
+  font-weight: 800;
+  color: #0f172a;
+  letter-spacing: -0.02em;
 }
 
 /* ================= FORM ================= */
@@ -42,7 +46,7 @@ grid-template-columns: repeat(3, 1fr);
 gap: 12px;
 background: #fff;
 border: 1px solid #e2e8f0;
-border-radius: 8px;
+border-radius: var(--radius-md, 12px);
 padding: 18px;
 box-shadow: 0 1px 3px rgba(0,0,0,.05), 0 1px 2px rgba(0,0,0,.03);
 margin-bottom: 16px;
@@ -77,11 +81,12 @@ text-align: left;
 /* ================= INPUT WRAP ================= */
 .sl-input-wrap {
 border: 1px solid #d1d5db; 
-border-radius: 14px;
-padding: 5px 8px;
+border-radius: var(--radius-sm, 8px);
+padding: 0 12px;
+height: var(--input-h, 40px);
+display: flex; align-items: center;
 color: black;
 background: #fff;
-/* height: 49px; */
 }
 
 /* focus */
@@ -93,19 +98,21 @@ color: black;
 /* GLOBAL FIX */
 input,
 select {
-  height: 40px;        /* same height */
-   padding: 0 4px;     /*same padding */
+  height: var(--input-h, 40px);
+  padding: 0 12px;
   box-sizing: border-box;
-  font-size: 12px;
+  font-size: var(--font-ui, 13px);
 }
 
 /* ================= INPUT + SELECT ================= */
 .sl-input-wrap input,
 .sl-input-wrap select {
 width: 100%;
+height: 100%;
+padding: 0;
 border: none;
 outline: none;
-font-size: 13px;
+font-size: var(--font-ui, 13px);
 background: transparent;
 color: #111827;
 color-scheme: light;
@@ -126,16 +133,16 @@ z-index: 1300;
 
 .sl-party-trigger {
 width: 100%;
-min-height: 40px;
+height: var(--input-h, 40px);
 display: flex;
 align-items: center;
 justify-content: space-between;
-padding: 8px 12px;
+padding: 0 12px;
 border: 1px solid #d1d5db;
-border-radius: 6px;
+border-radius: var(--radius-sm, 8px);
 background: #fff;
 color: #111827;
-font-size: 13px;
+font-size: var(--font-ui, 13px);
 font-family: 'Inter', sans-serif;
 cursor: pointer;
 }
@@ -159,7 +166,7 @@ left: 0;
 right: 0;
 z-index: 1301;
 border: 1px solid #dbe4ee;
-border-radius: 10px;
+border-radius: var(--radius-md, 12px);
 background: #fff;
 box-shadow: 0 16px 30px rgba(15, 23, 42, 0.12);
 overflow: hidden;
@@ -172,12 +179,12 @@ border-bottom: 1px solid #eef2f7;
 
 .sl-party-search {
 width: 100%;
-height: 38px;
+height: var(--input-h, 40px);
 padding: 0 12px;
 border: 1px solid #d1d5db;
-border-radius: 8px;
+border-radius: var(--radius-sm, 8px);
 outline: none;
-font-size: 13px;
+font-size: var(--font-ui, 13px);
 font-family: 'Inter', sans-serif;
 }
 
@@ -234,7 +241,7 @@ color: #64748b;
 /* ================= TABLE ================= */
 .sl-table-wrap {
 margin-top: 10px;
-border-radius: 8px;
+border-radius: var(--radius-md, 12px);
 border: 1px solid #e2e8f0;
 background: #ffffff;
 overflow-x: auto;
@@ -293,9 +300,8 @@ color: #334155;
 .sl-table td select {
 width: 100%;
 border: 1px solid #d1d5db;
-border-radius: 4px;
-/* padding: 5px 5px; */
-font-size: 11px;
+border-radius: var(--radius-sm, 8px);
+font-size: var(--font-ui, 13px);
 background: #ffffff;
 color: black;
 color-scheme: light;
@@ -324,10 +330,10 @@ display: flex;
 align-items: center;
 justify-content: space-between;
 gap: 8px;
-min-height: 34px;
+height: var(--input-h, 40px);
 padding: 0 8px;
 border: 1px solid #dbe4ee;
-border-radius: 8px;
+border-radius: var(--radius-sm, 8px);
 background: #ffffff;
 }
 
@@ -348,11 +354,11 @@ gap: 4px;
 .sl-scheme-dropdown-field select,
 .sl-scheme-qty-field input {
 width: 100%;
-height: 34px;
+height: var(--input-h, 40px);
 border: 1px solid #d1d5db;
-border-radius: 7px;
+border-radius: var(--radius-sm, 8px);
 padding: 0 10px;
-font-size: 12px;
+font-size: var(--font-ui, 13px);
 background: #fff;
 color: #111827;
 }
@@ -409,18 +415,21 @@ transform: translateX(18px);
 
 /* ================= ADD ROW ================= */
 .sl-add-row {
-  display: block;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: var(--btn-h, 40px);
   width: fit-content;     /* button chhota rahe */
   margin-top: 10px;
   margin-bottom: 20px;
   margin-left: 0;         /* LEFT ALIGN */
-  padding: 6px 12px;
+  padding: 0 16px;
   background: #2563eb;
   color: #fff;
-  border-radius: 6px;
+  border-radius: var(--radius-sm, 8px);
   border: none;
   cursor: pointer;
-  font-size: 12px;
+  font-size: var(--font-ui, 13px);
   font-weight: 600;
 }
 
@@ -432,12 +441,16 @@ gap: 8px;
 }
 
 .sl-confirm-item-btn {
+display: inline-flex;
+align-items: center;
+justify-content: center;
+height: 36px;
 background: #0f766e;
 color: #ffffff;
 border: none;
-padding: 6px 10px;
-border-radius: 6px;
-font-size: 11px;
+padding: 0 14px;
+border-radius: var(--radius-sm, 8px);
+font-size: var(--font-ui, 13px);
 font-weight: 600;
 cursor: pointer;
 }
@@ -462,13 +475,13 @@ font-weight: 700;
 display: inline-flex;
 align-items: center;
 justify-content: center;
-width: 30px;
-height: 30px;
+width: 36px;
+height: 36px;
 background: #fee2e2;
 color: #dc2626;
 border: none;
 padding: 0;
-border-radius: 4px;
+border-radius: var(--radius-sm, 8px);
 cursor: pointer;
 }
 
@@ -487,12 +500,16 @@ flex-wrap: wrap;
 }
 
 .sl-btn-save {
+display: inline-flex;
+align-items: center;
+justify-content: center;
+height: var(--btn-h, 40px);
 background: #2563eb;
 color: #ffffff;
-padding: 9px 14px;
-border-radius: 6px;
+padding: 0 16px;
+border-radius: var(--radius-sm, 8px);
 border: none;
-font-size: 12px;
+font-size: var(--font-ui, 13px);
 font-weight: 600;
 cursor: pointer;
 }
@@ -503,11 +520,15 @@ cursor: not-allowed;
 }
 
 .sl-btn-clear {
+display: inline-flex;
+align-items: center;
+justify-content: center;
+height: var(--btn-h, 40px);
 border: 1px solid #ca1111;
-padding: 9px 14px;
+padding: 0 16px;
 background: #ca1111;
-border-radius: 6px;
-font-size: 12px;
+border-radius: var(--radius-sm, 8px);
+font-size: var(--font-ui, 13px);
 font-weight: 600;
 cursor: pointer;
 color: #fff;
@@ -527,7 +548,7 @@ z-index: 1200;
 .sl-modal {
 width: min(100%, 360px);
 background: #ffffff;
-border-radius: 14px;
+border-radius: var(--radius-md, 12px);
 padding: 20px;
 box-shadow: 0 24px 48px rgba(15, 23, 42, 0.2);
 border: 1px solid #e2e8f0;
@@ -554,10 +575,14 @@ gap: 10px;
 }
 
 .sl-modal-btn {
+display: inline-flex;
+align-items: center;
+justify-content: center;
+height: var(--btn-h, 40px);
 border: none;
-border-radius: 8px;
-padding: 9px 14px;
-font-size: 13px;
+border-radius: var(--radius-sm, 8px);
+padding: 0 16px;
+font-size: var(--font-ui, 13px);
 font-weight: 600;
 cursor: pointer;
 }

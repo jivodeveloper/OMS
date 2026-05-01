@@ -25,7 +25,7 @@ html, body { height: 100%; }
   max-width: 400px;
   padding: 2.5rem 2.2rem 2rem;
   background: #1e293b;
-  border-radius: 14px;
+  border-radius: var(--radius-md, 12px);
   box-shadow: 0 20px 60px rgba(0,0,0,.3);
   animation: fadeUp .5s ease;
   margin-right: 3rem;
@@ -48,7 +48,7 @@ html, body { height: 100%; }
   max-width: 400px;
   padding: 2.5rem 2.2rem 2rem;
   background: #1e293b;
-  border-radius: 14px;
+  border-radius: var(--radius-md, 12px);
   box-shadow: 0 20px 60px rgba(0,0,0,.3);
   animation: fadeUp .5s ease;
 }
@@ -84,9 +84,9 @@ html, body { height: 100%; }
   align-items: center;
   background: #0f172a;
   border: 1px solid #334155;
-  border-radius: 8px;
+  border-radius: var(--radius-sm, 8px);
   padding: 0 .85rem;
-  height: 46px;
+  height: var(--input-h, 40px);
   transition: border-color .2s, box-shadow .2s;
 }
 
@@ -101,7 +101,7 @@ html, body { height: 100%; }
   border: none;
   outline: none;
   color: #f1f5f9;
-  font-size: .95rem;
+  font-size: 15px;
   height: 100%;
 }
 
@@ -137,11 +137,11 @@ html, body { height: 100%; }
   background: #1d4ed8;
   color: #fff;
   border: none;
-  border-radius: 8px;
-  font-size: .95rem;
+  border-radius: var(--radius-sm, 8px);
+  font-size: var(--font-ui, 13px);
   font-weight: 600;
   cursor: pointer;
-  height: 46px;
+  height: var(--btn-h, 40px);
   display: flex;
   align-items: center;
   justify-content: center;

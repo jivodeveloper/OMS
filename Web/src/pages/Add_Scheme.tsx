@@ -88,10 +88,10 @@ export default function Add_Scheme() {
 
       <div className="asg-form-card app-card">
         <div className="asg-form-head">
-          <div className="asg-form-title">Scheme Details</div>
-          <div className="asg-form-subtitle">
+          <h1 className="asg-form-title">Add Scheme</h1>
+          {/* <p className="asg-form-subtitle">
             Fill in the scheme name, product item code and state.
-          </div>
+          </p> */}
         </div>
 
         <form className="asg-form" onSubmit={handleSubmit}>

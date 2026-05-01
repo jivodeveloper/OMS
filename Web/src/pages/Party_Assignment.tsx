@@ -123,12 +123,6 @@ const handleDel =  async (code: string) => {
 
   return (
     <div className="pa-page app-page">
-      <div className="pa-header app-page-head">
-        <div>
-          {/* <span className="app-chip pa-chip">User Mapping</span> */}
-          <h1 className="pa-title app-page-title">Party Assignment</h1>
-        </div>
-      </div>
 
       {!showParties && (
         <div 
@@ -141,14 +135,10 @@ const handleDel =  async (code: string) => {
             marginBottom: '24px' 
           }}
         >
-          {/* <div className="pa-card-head" style={{ marginBottom: '24px' }}>
-            <h2 style={{ fontSize: '1.25rem', fontWeight: 600, color: '#0f172a', margin: 0 }}>
-              Select User
-            </h2>
-            <p style={{ fontSize: '0.875rem', color: '#64748b', margin: '4px 0 0' }}>
-              Search and select a user to manage their assigned parties.
-            </p>
-          </div> */}
+          <div style={{ marginBottom: '24px' }}>
+            <h1 style={{ margin: '0 0 4px', fontSize: '24px', fontWeight: 800, color: '#0f172a', letterSpacing: '-0.02em' }}>Party Assignment</h1>
+            {/* <p style={{ margin: 0, fontSize: '13px', color: '#64748b' }}>Search and select a user to manage their assigned parties.</p> */}
+          </div>
 
           <div style={{ position: 'relative', maxWidth: '400px', zIndex: 10 }}>
             <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: 500, color: '#334155', marginBottom: '8px' }}>
@@ -160,10 +150,13 @@ const handleDel =  async (code: string) => {
                 placeholder="Type name to search..."
                 style={{ 
                   width: '100%', 
-                  padding: '10px 14px', 
+                  height: 'var(--input-h, 40px)',
+                  padding: '0 12px',
+                  background: 'rgba(248, 250, 252, 0.9)',
                   border: '1px solid #cbd5e1', 
-                  borderRadius: '8px', 
-                  fontSize: '0.95rem', 
+                  borderRadius: 'var(--radius-sm, 8px)', 
+                  fontSize: 'var(--font-ui, 13px)', 
+                  color: '#0f172a',
                   outline: 'none',
                   boxSizing: 'border-box'
                 }}
@@ -296,7 +289,7 @@ const handleDel =  async (code: string) => {
         <div style={{ background: '#fff', borderRadius: '12px', padding: '24px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px', flexWrap: 'wrap', gap: '16px' }}>
             <div>
-              <h2 style={{ fontSize: '1.25rem', fontWeight: 600, color: '#0f172a', margin: 0 }}>Assign Parties</h2>
+              <h2 style={{ margin: '0 0 4px', fontSize: '24px', fontWeight: 800, color: '#0f172a', letterSpacing: '-0.02em' }}>Assign Parties</h2>
               <p style={{ fontSize: '0.875rem', color: '#64748b', margin: '4px 0 0' }}>
                 Select multiple parties to map to <strong>{users.find((u) => u.id === selectedUser)?.name}</strong>
               </p>

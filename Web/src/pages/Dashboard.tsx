@@ -395,7 +395,6 @@ export default function Dashboard() {
     <div className="db-root">
       <div className="db-hero">
         <div className="db-hero-main">
-          <div className="db-hero-chip">{roleMeta.accent}</div>
           <div className="db-header">
             <div>
               <h1 className="db-title">{roleMeta.title}</h1>

@@ -34,9 +34,9 @@
   align-items: center;
   background: #fff;
   border: 1px solid #cbd5e1;
-  border-radius: 8px;
+  border-radius: var(--radius-sm, 8px);
   padding: 0 12px;
-  min-height: 42px;
+  height: var(--input-h, 40px);
   box-sizing: border-box;
 }
 
@@ -50,10 +50,9 @@
   width: 100%;
   border: none;
   outline: none;
-  font-size: 14px;
+  font-size: var(--font-ui, 13px);
   background: transparent;
   color: #1e293b;
-  padding: 10px 0;
 }
 
 .ad-search::placeholder {
@@ -74,7 +73,7 @@
   background: #ffffff;
   border: 1px solid #e5e7eb;
   border-left: 4px solid #2563eb;
-  border-radius: 8px;
+  border-radius: var(--radius-md, 12px);
   padding: 16px;
   transition: all 0.2s ease;
 }
@@ -163,12 +162,16 @@
 }
 
 .ad-pg-btn {
-  padding: 7px 14px;
-  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 36px;
+  padding: 0 14px;
+  font-size: var(--font-ui, 13px);
   font-weight: 600;
   font-family: 'Inter', sans-serif;
   border: 1px solid #e2e8f0;
-  border-radius: 6px;
+  border-radius: var(--radius-sm, 8px);
   background: #fff;
   color: #64748b;
   cursor: pointer;

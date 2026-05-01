@@ -247,37 +247,32 @@ export default function Order_Tracking() {
       </div>
 
       {!tracker && (
-        <div style={{ display: 'flex', gap: '10px', padding: '0 20px', marginBottom: '15px' }}>
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            style={{
-              padding: '8px 16px',
-              borderRadius: '6px',
-              border: '1px solid #cbd5e1',
-              backgroundColor: '#f8fafc',
-              color: '#0f172a',
-              cursor: 'pointer',
-              fontWeight: 500,
-              fontSize: '0.9rem',
-              outline: 'none',
-              minWidth: '180px'
-            }}
-          >
-            <option value="">All Orders</option>
-            {uniqueStatuses.map((status) => (
-              <option key={status} value={status}>
-                {status}
-              </option>
-            ))}
-          </select>
-        </div>
-      )}
-
-      {!tracker && (
         <div>
           <div className="tracker-list-head">
-            <h5>Select the order you want to track</h5>
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              style={{
+                height: 'var(--input-h, 40px)',
+                padding: '0 12px',
+                borderRadius: 'var(--radius-sm, 8px)',
+                border: '1px solid #cbd5e1',
+                backgroundColor: '#fff',
+                color: '#0f172a',
+                cursor: 'pointer',
+                fontWeight: 500,
+                fontSize: 'var(--font-ui, 13px)',
+                outline: 'none',
+                minWidth: '180px'
+              }}
+            >
+              <option value="">All Orders</option>
+              {uniqueStatuses.map((status) => (
+                <option key={status} value={status}>
+                  {status}
+                </option>
+              ))}
+            </select>
             {!loading && (
               <span className="tracker-count">Total: {filteredOrders.length}</span>
             )}

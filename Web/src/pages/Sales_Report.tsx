@@ -462,7 +462,7 @@ export default function Sales_Report() {
       {!showDetails && (
         <>
           <div className="dr-header">
-            <h1 className="dr-title">Sales Report</h1>
+            <h1 className="dr-title" style={{ margin: '0 0 4px', fontSize: '24px', fontWeight: 800, color: '#0f172a', letterSpacing: '-0.02em' }}>Sales Report</h1>
           </div>
 
           <div className="dr-filter-card">

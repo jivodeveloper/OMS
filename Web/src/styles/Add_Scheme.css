@@ -6,7 +6,7 @@
   min-width: 0;
   min-height: calc(100svh - 64px);
   padding: 10px clamp(12px, 2vw, 20px) 18px;
-  border-radius: 26px 0 0 0;
+  border-radius: 26px;
   background:
     radial-gradient(circle at top right, rgba(37, 99, 235, 0.1), transparent 24%),
     linear-gradient(180deg, #f4f7fb 0%, #edf2f8 100%);
@@ -26,6 +26,9 @@
 .asg-title {
   margin: 0;
   overflow-wrap: anywhere;
+  font-size: 28px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
 }
 
 .asg-subtitle {
@@ -41,7 +44,7 @@
   margin: 0 auto;
   background: rgba(255, 255, 255, 0.96);
   border: 1px solid #dbe4ee;
-  border-radius: 18px;
+  border-radius: var(--radius-md, 12px);
   box-shadow: 0 14px 32px rgba(15, 23, 42, 0.05), 0 4px 12px rgba(15, 23, 42, 0.03);
   box-sizing: border-box;
 }
@@ -51,15 +54,17 @@
 }
 
 .asg-form-title {
-  font-size: 16px;
+  margin: 0;
+  font-size: 24px;
   font-weight: 800;
   color: #0f172a;
+  letter-spacing: -0.02em;
   overflow-wrap: anywhere;
 }
 
 .asg-form-subtitle {
   margin-top: 4px;
-  font-size: 12px;
+  font-size: 13px;
   color: #64748b;
   line-height: 1.5;
   overflow-wrap: anywhere;
@@ -100,9 +105,11 @@
   width: 100%;
   min-width: 0;
   border: 1px solid #dbe4ee;
-  border-radius: 14px;
-  padding: 3px 8px;
+  border-radius: var(--radius-sm, 8px);
+  height: var(--input-h, 40px);
+  padding: 0 12px;
   background: rgba(248, 250, 252, 0.9);
+  display: flex; align-items: center;
   transition: border-color 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
 }
 
@@ -116,14 +123,14 @@
 .asg-input-wrap select {
   width: 100%;
   min-width: 0;
-  height: 40px;
-  padding: 0 4px;
+  height: 100%;
+  padding: 0;
   border: none;
   outline: none;
   background: transparent;
   color: #0f172a;
   font-family: 'Inter', sans-serif;
-  font-size: 13px;
+  font-size: var(--font-ui, 13px);
   box-sizing: border-box;
   color-scheme: light;
 }
@@ -146,15 +153,17 @@
 }
 
 .asg-submit {
+  display: inline-flex; align-items: center; justify-content: center;
   min-width: 140px;
-  min-height: 44px;
-  padding: 12px 18px;
+  height: var(--btn-h, 40px);
+  min-height: auto;
+  padding: 0 16px;
   border: none;
-  border-radius: 14px;
+  border-radius: var(--radius-sm, 8px);
   background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
   color: #ffffff;
   font-family: 'Inter', sans-serif;
-  font-size: 12px;
+  font-size: var(--font-ui, 13px);
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -185,7 +194,7 @@
   .asg-page {
     min-height: calc(100svh - 60px);
     padding: 10px 12px 16px;
-    border-radius: 18px 0 0 0;
+    border-radius: 18px;
   }
 
   .asg-header {

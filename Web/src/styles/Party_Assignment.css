@@ -9,8 +9,9 @@ color: #1e293b;
 
 /* Header */
 .pa-header {
-font-size: 24px;
-font-weight: 700;
+font-size: 28px;
+font-weight: 800;
+letter-spacing: -0.03em;
 margin-bottom: 24px;
 }
 
@@ -21,7 +22,7 @@ width: 100%;
 max-width: 520px;
 background: #ffffff;
 padding: 20px;
-border-radius: 12px;
+border-radius: var(--radius-md, 12px);
 box-shadow: 0 6px 20px rgba(0,0,0,0.05);
 display: flex;
 flex-direction: column;
@@ -30,11 +31,12 @@ gap: 14px;
 
 /* ================= INPUT ================= */
 .pa-select {
-height: 42px;
+height: var(--input-h, 40px);
+background: rgba(248, 250, 252, 0.9);
 padding: 0 12px;
 border: 1px solid #e2e8f0;
-border-radius: 8px;
-font-size: 14px;
+border-radius: var(--radius-sm, 8px);
+font-size: var(--font-ui, 13px);
 outline: none;
 transition: all 0.2s ease;
 }
@@ -52,7 +54,7 @@ left: 0;
 width: 100%;
 max-height: 280px;
 overflow-y: auto;
-border-radius: 10px;
+border-radius: var(--radius-md, 12px);
 background: #ffffff;
 border: 1px solid #e2e8f0;
 box-shadow: 0 10px 25px rgba(0,0,0,0.08);
@@ -78,7 +80,7 @@ padding: 4px;
 display: flex;
 gap: 12px;
 padding: 10px;
-border-radius: 8px;
+border-radius: var(--radius-sm, 8px);
 cursor: pointer;
 transition: 0.2s;
 }
@@ -149,7 +151,7 @@ background: #e2e8f0;
 margin-top: 20px;
 padding: 16px;
 background: #ffffff;
-border-radius: 12px;
+border-radius: var(--radius-md, 12px);
 box-shadow: 0 4px 15px rgba(0,0,0,0.04);
 max-width: 520px;
 }
@@ -162,7 +164,7 @@ margin-bottom: 10px;
 /* Assigned items */
 .pa-assigned-item {
 padding: 10px;
-border-radius: 8px;
+border-radius: var(--radius-sm, 8px);
 background: #f8fafc;
 border: 1px solid #e2e8f0;
 margin-bottom: 6px;

@@ -32,8 +32,9 @@
   align-items: center;
   background: #fff;
   border: 1px solid #e2e8f0;
-  border-radius: 6px;
-  padding: 6px 10px;
+  border-radius: var(--radius-sm, 8px);
+  height: var(--input-h, 40px);
+  padding: 0 12px;
   transition: all 0.2s ease;
 }
 
@@ -46,7 +47,7 @@
   width: 100%;
   border: none;
   outline: none;
-  font-size: 14px;
+  font-size: var(--font-ui, 13px);
   background: transparent;
 }
 
@@ -68,7 +69,7 @@
   background: #ffffff;
   border: 1px solid #e5e7eb;
   border-left: 4px solid #6366f1;
-  border-radius: 8px;
+  border-radius: var(--radius-md, 12px);
   padding: 16px;
   transition: all 0.2s ease;
 }
@@ -151,7 +152,7 @@
 /* States */
 
 .lg-pagination { display:flex; align-items:center; justify-content:flex-end; gap:4px; margin-top:16px; }
-.lg-pg-btn { padding:7px 14px; font-size:12px; font-weight:600; font-family:'Inter',sans-serif; border:1px solid #e2e8f0; border-radius:6px; background:#fff; color:#64748b; cursor:pointer; transition:all .15s; }
+.lg-pg-btn { display: inline-flex; align-items: center; justify-content: center; height: 36px; padding: 0 14px; font-size: var(--font-ui, 13px); font-weight: 600; font-family: 'Inter', sans-serif; border: 1px solid #e2e8f0; border-radius: var(--radius-sm, 8px); background: #fff; color: #64748b; cursor: pointer; transition: all .15s; }
 .lg-pg-btn:hover:not(:disabled) { background:#f8fafc; border-color:#cbd5e1; color:#1e293b; }
 .lg-pg-btn:disabled { opacity:.4; cursor:not-allowed; }
 .lg-pg-info { font-size:12px; font-weight:600; color:#1e293b; font-family:'Inter',sans-serif; padding:0 4px; }

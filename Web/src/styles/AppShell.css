@@ -9,7 +9,7 @@
   --app-accent: #2563eb;
   --app-accent-dark: #1d4ed8;
   --app-header: #1e293b;
-  --app-radius: 18px;
+  --app-radius: var(--radius-md, 12px);
   --app-shadow: 0 16px 36px rgba(15, 23, 42, 0.06), 0 4px 12px rgba(15, 23, 42, 0.03);
 }
 
@@ -33,11 +33,11 @@
 
 .app-page-title {
   margin: 0;
-  font-size: 28px;
+  font-size: 24px;
   font-weight: 800;
   color: var(--app-text);
   text-align: left;
-  letter-spacing: -0.03em;
+  letter-spacing: -0.02em;
 }
 
 .app-page-subtitle {

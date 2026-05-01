@@ -32,14 +32,6 @@ export default function Sap_sync() {
   return (
     <div className="sap-page app-page">
 
-      {/* ── HEADER ── */}
-      <div className="sap-header app-page-head">
-        <div>
-          <h1 className="sap-title app-page-title">SAP Data Sync</h1>
-          <p className="sap-subtitle app-page-subtitle"> </p>
-        </div>
-      </div>
-
       {/* ── TABS ── */}
       <div className="sap-tabs">
         {["Status", "Products", "Parties", "Addresses", "Branches", "Logs"].map((tab) => (
@@ -54,7 +46,7 @@ export default function Sap_sync() {
       </div>
 
       {/* ── CONTENT ── */}
-      <div className="sap-content">{renderContent()}</div>
+      <div className="sap-content" style={{ marginTop: "24px" }}>{renderContent()}</div>
     </div>
   );
 }

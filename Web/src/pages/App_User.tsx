@@ -333,44 +333,36 @@ export default function App_User() {
   return (
     <div className="au-page app-page">
       {/* ── PAGE HEADER ── */}
-      <div className="au-header app-page-head">
+      <div className="au-header app-page-head" style={{ marginBottom: '24px', alignItems: 'center' }}>
         <div>
-          <span className="app-chip au-chip">
-            {showForm ? (isEditMode ? "Update User" : "Create User") : "Access Control"}
-          </span>
           <h1 className="au-title app-page-title">
             {showForm ? (isEditMode ? "Update User" : "Add New User") : "App Users"}
           </h1>
-          <p className="au-subtitle app-page-subtitle">
-            {showForm
-              ? isEditMode
-                ? "Update application user details, role, territory mapping and company assignment."
-                : "Create application users with roles, territory mapping and company assignment."
-              : "Manage user access, review account status and keep operational roles aligned."}
+          <p className="au-subtitle app-page-subtitle" style={{ margin: '4px 0 0', fontSize: '13px', color: '#64748b' }}>
+            {showForm ? (isEditMode ? "Update application user details, role, territory mapping and company assignment." : "Create application users with roles, territory mapping and company assignment.") : "Manage user access, review account status and keep operational roles aligned."}
           </p>
         </div>
-        <button
-          className="au-toggle-btn"
-          onClick={() => {
+        <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+          {!showForm && (
+            <span className="au-table-count" style={{ margin: 0 }}>
+              Total: {users.length}
+            </span>
+          )}
+          <button
+            className="au-toggle-btn"
+            onClick={() => {
             setShowForm(!showForm);
             setShowUsers(showForm);
           }}
         >
           <span>{showForm ? "← Back to Users" : "+ Add User"}</span>
-
-        </button>
+          </button>
+        </div>
       </div>
 
       {/* ── USERS TABLE ── */}
       {showUsers && (
         <div className="au-table-card">
-          <div className="au-table-head">
-            <div>
-              <div className="au-table-title">User Directory</div>
-              <div className="au-table-subtitle">All registered application users</div>
-            </div>
-            <div className="au-table-count">{users.length} Users</div>
-          </div>
             {users.length > 0 ? (
               <div className="au-table-wrap">
                 <table className="au-table">
@@ -457,15 +449,15 @@ export default function App_User() {
       {/* ── ADD USER FORM ── */}
       {showForm && (
         <div className="au-form-card">
-          <div className="au-form-head">
-            <div className="au-form-title">
+          <div className="au-form-head" style={{ marginBottom: "24px" }}>
+            <h2 style={{ fontSize: "24px", fontWeight: 800, color: "#0f172a", margin: "0 0 4px", letterSpacing: "-0.02em" }}>
               {isEditMode ? "Update User Details" : "User Details"}
-            </div>
-            <div className="au-form-subtitle">
+            </h2>
+            {/* <p style={{ margin: 0, fontSize: "13px", color: "#64748b" }}>
               {isEditMode
                 ? "Update credentials, role and mapping information."
                 : "Fill in credentials, role and mapping information."}
-            </div>
+            </p> */}
           </div>
           <form onSubmit={handleSubmit}>
             <div className="au-form-grid">
