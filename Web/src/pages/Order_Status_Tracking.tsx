@@ -120,8 +120,10 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
 
   const paginatedOrders = filteredOrders.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
 
-  const isCompletedStatus = (order?: Order | null) =>
-    String(order?.status_display || "").toLowerCase().includes("completed");
+  const isCompletedStatus = (order?: Order | null) => {
+    const s = String(order?.status_display || "").toLowerCase();
+    return ["completed", "billing", "billed", "quotation", "approved", "accepted"].some(k => s.includes(k));
+  };
 
   const applyQuotationNumber = (order: Order, quotationNo?: string) =>
     quotationNo && quotationNo !== order.sap_doc_number
@@ -157,6 +159,11 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
   try {
     const data = await ordersService.getOrderDetails(orderId);
 
+    const qno = await resolveQuotationNumber(data);
+    if (qno) {
+      data.sap_doc_number = qno;
+    }
+
     setOrderDetails(data);
     setSelectedItems(data.items || []);
     setShowDetails(true);
@@ -177,7 +184,7 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
   );
   const grandTotal = subtotal + taxTotal;
   const hasQuotationNumber = Boolean(String(orderDetails?.sap_doc_number || "").trim());
-  const isCompletedOrder = (orderDetails?.status_display || "").toLowerCase().includes("completed");
+  const isCompletedOrder = isCompletedStatus(orderDetails);
 
   const downloadExcel = async (order: Order) => {
     const quotationNo = await resolveQuotationNumber(order);
@@ -335,6 +342,7 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
               <thead>
                 <tr>
                   <th>Order ID</th>
+              <th>Quotation No</th>
                   <th>Card Code</th>
                   <th>Card Name</th>
                   <th>Delivery Date</th>
@@ -348,6 +356,13 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
                   paginatedOrders.map((order) => (
                     <tr key={order.id}>
                       <td>{order.order_number}</td>
+                  <td>
+                    {String(order.sap_doc_number || "").trim() ? (
+                      <span className="ot-badge" style={{ background: "#f8fafc", color: "#475569", border: "1px solid #e2e8f0" }}>
+                        {order.sap_doc_number}
+                      </span>
+                    ) : "—"}
+                  </td>
                       <td>{order.card_code}</td>
                       <td>{order.card_name}</td>
                       <td>{order.delivery_date}</td>
@@ -370,7 +385,7 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
                   ))
                 ) : (
                   <tr>
-                    <td colSpan={7} className="ot-empty">No accepted or rejected orders found for this filter.</td>
+                <td colSpan={8} className="ot-empty">No accepted or rejected orders found for this filter.</td>
                   </tr>
                 )}
               </tbody>
@@ -424,6 +439,18 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
                     {orderDetails.status_display || "Unknown"}
                   </span>
                 </div>
+              </div>
+              <div className="ot-detail-field">
+                <span className="ot-detail-label">Party State</span>
+                <span className="ot-detail-value">{orderDetails.party_state || "—"}</span>
+              </div>
+              <div className="ot-detail-field">
+                <span className="ot-detail-label">Punched By</span>
+                <span className="ot-detail-value">{orderDetails.created_by_name || "—"}</span>
+              </div>
+              <div className="ot-detail-field">
+                <span className="ot-detail-label">Created Date</span>
+                <span className="ot-detail-value">{orderDetails.created_at ? new Date(orderDetails.created_at).toLocaleDateString("en-GB") : "—"}</span>
               </div>
               <div className="ot-detail-field">
                 <span className="ot-detail-label">Delivery Date</span>

@@ -671,7 +671,6 @@
 
 .dr-d-items-scroll {
   overflow: auto;
-  min-height: 380px;
   max-height: calc(100vh - 340px);
 }
 

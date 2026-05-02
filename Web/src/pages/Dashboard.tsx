@@ -125,6 +125,7 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [year, setYear] = useState(currentYear);
+  const [month, setMonth] = useState(0);
   const [topPartyView, setTopPartyView] = useState<TopPartyView>(5);
 
   const isUnauthorized = (result: PromiseSettledResult<unknown>) =>
@@ -132,8 +133,8 @@ export default function Dashboard() {
     (result.reason?.response?.status === 401 || result.reason?.status === 401);
 
   useEffect(() => {
-    void fetchData(year, true);
-  }, [year]);
+    void fetchData(year, month, true);
+  }, [year, month]);
 
   const hasVisibleData = (nextKpi: KPIData, nextCharts: ChartsData) => {
     if ((nextKpi.total_orders ?? 0) > 0) {
@@ -145,7 +146,7 @@ export default function Dashboard() {
     );
   };
 
-  const fetchData = async (selectedYear: number, allowFallback = false) => {
+  const fetchData = async (selectedYear: number, selectedMonth: number, allowFallback = false) => {
     setLoading(true);
     setError("");
 
@@ -153,7 +154,7 @@ export default function Dashboard() {
       const [profileRes, kpiRes, chartsRes] = await Promise.allSettled([
         getCurrentUser(),
         api.get(`/orders/dashboardW/?year=${selectedYear}`),
-        api.get(`/orders/dashboardW/charts/?line_year=${selectedYear}&year=${selectedYear}&month=0`),
+        api.get(`/orders/dashboardW/charts/?line_year=${selectedYear}&year=${selectedYear}&month=${selectedMonth}`),
       ]);
 
       if (isUnauthorized(profileRes) || isUnauthorized(kpiRes) || isUnauthorized(chartsRes)) {
@@ -174,7 +175,7 @@ export default function Dashboard() {
         const fallbackYear = currentYear - 1;
         const [fallbackKpiRes, fallbackChartsRes] = await Promise.allSettled([
           api.get(`/orders/dashboardW/?year=${fallbackYear}`),
-          api.get(`/orders/dashboardW/charts/?line_year=${fallbackYear}&year=${fallbackYear}&month=0`),
+          api.get(`/orders/dashboardW/charts/?line_year=${fallbackYear}&year=${fallbackYear}&month=${selectedMonth}`),
         ]);
 
         const fallbackKpi =
@@ -300,8 +301,8 @@ export default function Dashboard() {
       { icon: "🗓️", tone: "db-card--teal", label: "Today Orders", value: fmt(kpi?.today_orders ?? 0), sub: "Orders created today" },
     ],
     auditor: [
-      { icon: "📥", tone: "db-card--teal", label: "Received Orders", value: fmt(kpi?.total_orders ?? 0), sub: "Orders assigned for audit review" },
-      { icon: "🕒", tone: "db-card--blue", label: "Pending Review", value: fmt(outstandingOrders), sub: "Orders still awaiting decision" },
+      { icon: "📥", tone: "db-card--teal", label: "This Month Orders", value: fmt(kpi?.this_month_orders ?? 0), sub: "Orders assigned for audit review" },
+      { icon: "�", tone: "db-card--blue", label: "Pending Review", value: fmt(outstandingOrders), sub: "Orders still awaiting decision" },
       { icon: "✅", tone: "db-card--dark", label: "Accepted Orders", value: fmt(auditorAcceptedCount), sub: "Orders accepted by auditor" },
     ],
     manager: [
@@ -383,7 +384,7 @@ export default function Dashboard() {
         <div className="db-empty-state">
           <h2>Dashboard unavailable</h2>
           <p>{error}</p>
-          <button className="db-retry-btn" onClick={() => void fetchData(year, true)}>
+          <button className="db-retry-btn" onClick={() => void fetchData(year, month, true)}>
             Retry
           </button>
         </div>
@@ -475,17 +476,32 @@ export default function Dashboard() {
                     : "No party data available"}
                 </div>
               </div>
-              <div className="db-segmented-control" role="tablist" aria-label="Top parties view">
-                {TOP_PARTY_VIEW_OPTIONS.map((option) => (
-                  <button
-                    key={option.label}
-                    type="button"
-                    className={`db-segmented-btn${topPartyView === option.value ? " is-active" : ""}`}
-                    onClick={() => setTopPartyView(option.value)}
-                  >
-                    {option.label}
-                  </button>
-                ))}
+              <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                <select
+                  className="db-year-select"
+                  value={month}
+                  onChange={(e) => setMonth(Number(e.target.value))}
+                  style={{ height: "30px", fontSize: "13px", padding: "0 8px" }}
+                >
+                  <option value={0}>All Months</option>
+                  {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => (
+                    <option key={m} value={m}>
+                      {new Date(2000, m - 1).toLocaleString('default', { month: 'short' })}
+                    </option>
+                  ))}
+                </select>
+                <div className="db-segmented-control" role="tablist" aria-label="Top parties view">
+                  {TOP_PARTY_VIEW_OPTIONS.map((option) => (
+                    <button
+                      key={option.label}
+                      type="button"
+                      className={`db-segmented-btn${topPartyView === option.value ? " is-active" : ""}`}
+                      onClick={() => setTopPartyView(option.value)}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
             {topParties.length === 0 ? (
