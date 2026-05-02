@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import * as XLSX from "xlsx";
 import { saveAs } from "file-saver";
 import type { Order, OrderItem } from "../services/ordersService";
@@ -68,14 +68,11 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
   const [showDetails, setShowDetails] = useState(false);
   const [orderDetails, setOrderDetails] = useState<Order | null>(null);
   const [selectedItems, setSelectedItems] = useState<OrderItem[]>([]);
+  const fetchedQuotationIds = useRef<Set<number>>(new Set());
 
   const itemsPerPage = 10;
   const pageTitle = mode === "auditor" ? "Auditor Status Tracking" : "Billing Status Tracking";
-  const pageSubtitle =
-    mode === "auditor"
-      ? "Track orders reviewed and marked accepted or rejected by the auditor stage."
-      : "Track orders handled at billing stage and review accepted or rejected outcomes.";
-
+  
   useEffect(() => {
     void fetchOrders();
   }, [mode]);
@@ -154,6 +151,19 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
       return "";
     }
   };
+
+  useEffect(() => {
+    const fetchMissingQuotations = async () => {
+      const ordersToFetch = paginatedOrders.filter(
+        (o) => !String(o.sap_doc_number || "").trim() && isCompletedStatus(o) && !fetchedQuotationIds.current.has(o.id)
+      );
+      if (ordersToFetch.length === 0) return;
+
+      ordersToFetch.forEach((o) => fetchedQuotationIds.current.add(o.id));
+      await Promise.all(ordersToFetch.map((order) => resolveQuotationNumber(order)));
+    };
+    void fetchMissingQuotations();
+  }, [paginatedOrders]);
 
      const fetchOrderDetails = async (orderId: number) => {
   try {
@@ -342,7 +352,7 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
               <thead>
                 <tr>
                   <th>Order ID</th>
-              <th>Quotation No</th>
+              {/* <th>Quotation No</th> */}
                   <th>Card Code</th>
                   <th>Card Name</th>
                   <th>Delivery Date</th>
@@ -356,13 +366,13 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
                   paginatedOrders.map((order) => (
                     <tr key={order.id}>
                       <td>{order.order_number}</td>
-                  <td>
+                  {/* <td>
                     {String(order.sap_doc_number || "").trim() ? (
                       <span className="ot-badge" style={{ background: "#f8fafc", color: "#475569", border: "1px solid #e2e8f0" }}>
                         {order.sap_doc_number}
                       </span>
                     ) : "—"}
-                  </td>
+                  </td> */}
                       <td>{order.card_code}</td>
                       <td>{order.card_name}</td>
                       <td>{order.delivery_date}</td>
