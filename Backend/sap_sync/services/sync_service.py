@@ -1,9 +1,7 @@
 import logging
 import json
-import re
 import urllib3
 from datetime import date, datetime
-from django.db.models import Q
 from django.utils import timezone
 from ..models import Product, Party, PartyAddress, Branch, SyncLog
 from .connection import SAPConnection
@@ -11,11 +9,9 @@ import requests
 from django.conf import settings
 from ..models import SalesQuotationLog
 from orders.scheme_rules import (
-    get_party_state_code,
     get_party_product_scheme,
-    should_mirror_punjab_combo_scheme_qty,
 )
-from users.models import PartyProductAssignment, SchemeProduct
+from users.models import SchemeProduct
 
 logger = logging.getLogger(__name__)
 
@@ -30,199 +26,6 @@ def get_scheme_item_code_raw(scheme_id):
         .values_list('item_code', flat=True)
         .first()
     )
-
-
-def _state_code_candidates(state_code):
-    raw_state_code = str(state_code or "").strip()
-    if not raw_state_code:
-        return []
-
-    normalized = raw_state_code.upper()
-    candidates = [raw_state_code, normalized]
-    if normalized in {"PB", "PUNJAB"} or "PUNJAB" in normalized:
-        candidates.extend(["PB", "Punjab", "PUNJAB"])
-
-    return list(dict.fromkeys(candidate for candidate in candidates if candidate))
-
-
-def _filter_by_state_code(queryset, state_code):
-    state_filter = Q()
-    for candidate in _state_code_candidates(state_code):
-        state_filter |= Q(state_code__iexact=candidate)
-
-    if not state_filter:
-        return queryset.none()
-
-    return queryset.filter(state_filter)
-
-
-def _get_state_matched_scheme_ids(scheme_name, state_code):
-    if not scheme_name or not state_code:
-        return []
-
-    queryset = SchemeProduct.objects.filter(
-        scheme_name=scheme_name,
-        is_active=True,
-    )
-    queryset = _filter_by_state_code(queryset, state_code)
-
-    scheme_ids = []
-    seen = set()
-    for scheme_id in queryset.order_by("scheme_id").values_list("scheme_id", flat=True):
-        if not scheme_id or scheme_id in seen:
-            continue
-        seen.add(scheme_id)
-        scheme_ids.append(scheme_id)
-
-    return scheme_ids
-
-
-def get_scheme_item_codes_for_combo(scheme_id, state_code=None):
-    if not scheme_id:
-        return []
-
-    seed = (
-        SchemeProduct.objects
-        .filter(scheme_id=scheme_id)
-        .values("scheme_name", "state_code")
-        .first()
-    )
-    if not seed or not seed.get("scheme_name"):
-        item_code = get_scheme_item_code_raw(scheme_id)
-        return [item_code] if item_code else []
-
-    queryset = SchemeProduct.objects.filter(
-        scheme_name=seed["scheme_name"],
-        is_active=True,
-    )
-    preferred_state_code = state_code or seed.get("state_code")
-    if preferred_state_code:
-        state_queryset = _filter_by_state_code(queryset, preferred_state_code)
-        if state_queryset.exists():
-            queryset = state_queryset
-        elif seed.get("state_code"):
-            queryset = _filter_by_state_code(queryset, seed["state_code"])
-
-    item_codes = []
-    seen = set()
-    for item_code in queryset.order_by("scheme_id").values_list("item_code", flat=True):
-        if not item_code or item_code in seen:
-            continue
-        seen.add(item_code)
-        item_codes.append(item_code)
-
-    return item_codes
-
-
-def get_party_combo_item_codes(card_code, scheme_id, category=None, state_code=None):
-    if not card_code or not scheme_id:
-        return []
-
-    scheme_ids = [scheme_id]
-    if state_code:
-        seed = (
-            SchemeProduct.objects
-            .filter(scheme_id=scheme_id)
-            .values("scheme_name")
-            .first()
-        )
-        state_scheme_ids = _get_state_matched_scheme_ids(
-            seed.get("scheme_name") if seed else None,
-            state_code,
-        )
-        if state_scheme_ids:
-            scheme_ids = list(dict.fromkeys(state_scheme_ids + [scheme_id]))
-
-    queryset = PartyProductAssignment.objects.filter(
-        card_code=card_code,
-        scheme_id__in=scheme_ids,
-        is_active=True,
-    )
-    if category:
-        queryset = queryset.filter(category=category)
-
-    item_codes = []
-    seen = set()
-    for item_code in queryset.order_by("id").values_list("item_code", flat=True):
-        if not item_code or item_code in seen:
-            continue
-        seen.add(item_code)
-        item_codes.append(item_code)
-
-    return item_codes
-
-
-def _normalize_combo_component_name(value):
-    text = str(value or "").upper()
-    text = re.sub(r"\b\d+(?:\.\d+)?\s*PCS?\b", " ", text)
-    text = re.sub(r"\bPCS?\b", " ", text)
-    text = re.sub(r"\s+", " ", text)
-    return text.strip()
-
-
-def get_party_combo_component_item_codes(card_code, item_name, category=None, exclude_item_code=None):
-    if not card_code or not item_name or "+" not in str(item_name):
-        return []
-
-    components = [
-        _normalize_combo_component_name(part)
-        for part in str(item_name).split("+")
-        if _normalize_combo_component_name(part)
-    ]
-    if not components:
-        return []
-
-    exclude_normalized = str(exclude_item_code).strip().upper() if exclude_item_code else None
-
-    assignments = PartyProductAssignment.objects.filter(
-        card_code=card_code,
-        is_active=True,
-    )
-    if category:
-        assignments = assignments.filter(category=category)
-
-    item_codes = []
-    seen = set()
-    for assignment in assignments.order_by("item_code"):
-        code = str(assignment.item_code or "").strip()
-        if not code:
-            continue
-        # Explicitly skip the main combo item code
-        if exclude_normalized and code.upper() == exclude_normalized:
-            continue
-
-        product = Product.objects.filter(
-            item_code=assignment.item_code,
-            category=assignment.category,
-        ).first()
-        product_name = _normalize_combo_component_name(
-            getattr(product, "item_name", None)
-        )
-        logger.warning(
-            "COMBO_COMPONENT_DEBUG | code=%r product=%r product_name=%r",
-            code, getattr(product, "item_name", None), product_name,
-        )
-        if not product_name:
-            continue
-
-        # Skip products that are themselves combo items
-        if "+" in getattr(product, "item_name", "") or "+" in product_name:
-            continue
-
-        matched = [c for c in components if c and c in product_name]
-        unmatched = [c for c in components if c and c not in product_name]
-        logger.warning(
-            "COMBO_COMPONENT_DEBUG | code=%r matched=%r unmatched=%r",
-            code, matched, unmatched,
-        )
-        if matched and unmatched:
-            if code in seen:
-                continue
-            seen.add(code)
-            item_codes.append(code)
-
-    logger.warning("COMBO_COMPONENT_DEBUG | final item_codes=%r", item_codes)
-    return item_codes
 
 
 def print_sap_payload(label, payload):
@@ -242,8 +45,21 @@ def _to_float(value, default=0.0):
 
 def _get_sap_line_quantity(item):
     if isinstance(item, dict):
-        return _to_float(item.get("qty"), 0)
-    return _to_float(getattr(item, "qty", None), 0)
+        qty = _to_float(item.get("qty"), 0)
+        pcs = _to_float(item.get("pcs"), 0)
+        boxes = _to_float(item.get("boxes"), 0)
+    else:
+        qty = _to_float(getattr(item, "qty", None), 0)
+        pcs = _to_float(getattr(item, "pcs", None), 0)
+        boxes = _to_float(getattr(item, "boxes", None), 0)
+
+    if qty > 0:
+        return qty
+
+    # if pcs > 0 and boxes > 0 and abs((qty / pcs) - boxes) < 0.0001:
+    #     return qty / pcs
+
+    # return qty
 
 
 def _get_sap_unit_price(item):
@@ -256,23 +72,47 @@ def _get_sap_unit_price(item):
     return basic_price
 
 
-def get_party_item_unit_price(card_code, item_code, category=None, default=0.0):
-    if not card_code or not item_code:
-        return float(default)
+def _get_order_item_scheme_entries(item):
+    entries = []
+    related_schemes = getattr(item, "schemes", None)
 
-    queryset = PartyProductAssignment.objects.filter(
-        card_code=card_code,
-        item_code=item_code,
-        is_active=True,
-    )
-    if category:
-        queryset = queryset.filter(category=category)
+    if related_schemes is not None:
+        if hasattr(related_schemes, "all"):
+            related_schemes = related_schemes.all()
 
-    assignment = queryset.order_by("id").first()
-    if assignment:
-        return _to_float(getattr(assignment, "basic_rate", None), default)
+        for item_scheme in related_schemes or []:
+            scheme_obj = getattr(item_scheme, "scheme", None)
+            raw_scheme_id = (
+                getattr(item_scheme, "scheme_id", None)
+                or getattr(scheme_obj, "scheme_id", None)
+            )
+            scheme_qty = _to_float(getattr(item_scheme, "qty_scheme", None), 0)
+            if raw_scheme_id not in (None, "") and scheme_qty > 0:
+                entries.append(
+                    {
+                        "scheme": scheme_obj,
+                        "scheme_id": raw_scheme_id,
+                        "scheme_qty": scheme_qty,
+                    }
+                )
 
-    return float(default)
+    if entries:
+        return entries
+
+    scheme_obj = getattr(item, "scheme", None)
+    raw_scheme_id = item.__dict__.get("scheme_id") or getattr(scheme_obj, "scheme_id", None)
+    scheme_qty = _to_float(getattr(item, "qty_scheme", None), 0)
+
+    if raw_scheme_id not in (None, "") and scheme_qty > 0:
+        entries.append(
+            {
+                "scheme": scheme_obj,
+                "scheme_id": raw_scheme_id,
+                "scheme_qty": scheme_qty,
+            }
+        )
+
+    return entries
 
 
 class SyncService:
@@ -743,69 +583,30 @@ class SyncService:
             order_qty = _get_sap_line_quantity(item)
             item_unit_price = _get_sap_unit_price(item)
             card_code = getattr(order, "card_code", "")
-            party_state_code = None
             item_code = getattr(item, "item_code", "")
             category = getattr(item, "category", "")
-            scheme_obj = getattr(item, "scheme", None)
-            raw_scheme_id = item.__dict__.get("scheme_id") or getattr(scheme_obj, "scheme_id", None)
-            scheme_qty = float(getattr(item, "qty_scheme", 0) or 0)
-            should_mirror_combo_qty = should_mirror_punjab_combo_scheme_qty(
-                card_code,
-                item_name=getattr(item, "item_name", None),
-                scheme_name=getattr(scheme_obj, "scheme_name", None),
-            )
+            scheme_entries = _get_order_item_scheme_entries(item)
 
-            if raw_scheme_id in (None, "") and (scheme_qty > 0 or should_mirror_combo_qty):
-                scheme_obj = get_party_product_scheme(
-                    card_code=card_code,
-                    item_code=item_code,
-                    category=category,
-                )
-                raw_scheme_id = getattr(scheme_obj, "scheme_id", None)
-                should_mirror_combo_qty = should_mirror_punjab_combo_scheme_qty(
-                    card_code,
-                    item_name=getattr(item, "item_name", None),
-                    scheme_name=getattr(scheme_obj, "scheme_name", None),
-                )
+            if not scheme_entries:
+                scheme_obj = getattr(item, "scheme", None)
+                raw_scheme_id = item.__dict__.get("scheme_id") or getattr(scheme_obj, "scheme_id", None)
+                fallback_scheme_qty = _to_float(getattr(item, "qty_scheme", None), 0)
 
-            scheme_item_codes = []
-            combo_component_codes = []
-            if should_mirror_combo_qty:
-                party_state_code = get_party_state_code(card_code)
-                combo_component_codes = get_party_combo_component_item_codes(
-                    card_code,
-                    getattr(item, "item_name", ""),
-                    category,
-                    exclude_item_code=item_code,
-                )
-                logger.warning(
-                    "MAP_ORDER_DEBUG | item_code=%r combo_component_codes=%r",
-                    item_code, combo_component_codes,
-                )
-                if raw_scheme_id not in (None, ""):
-                    try:
-                        raw_scheme_id_int = int(raw_scheme_id)
-                        scheme_item_codes = get_scheme_item_codes_for_combo(
-                            raw_scheme_id_int,
-                            party_state_code,
-                        )
-                    except (SchemeProduct.DoesNotExist, TypeError, ValueError):
-                        logger.warning(
-                            "Skipping invalid scheme mapping for order item %s with raw scheme_id=%r",
-                            getattr(item, "id", None),
-                            raw_scheme_id,
-                        )
-                scheme_item_codes = list(dict.fromkeys(code for code in scheme_item_codes if code))
-            elif raw_scheme_id not in (None, ""):
-                try:
-                    raw_scheme_id_int = int(raw_scheme_id)
-                    scheme_item_code = get_scheme_item_code_raw(raw_scheme_id_int)
-                    scheme_item_codes = [scheme_item_code] if scheme_item_code else []
-                except (SchemeProduct.DoesNotExist, TypeError, ValueError):
-                    logger.warning(
-                        "Skipping invalid scheme mapping for order item %s with raw scheme_id=%r",
-                        getattr(item, "id", None),
-                        raw_scheme_id,
+                if raw_scheme_id in (None, "") and fallback_scheme_qty > 0:
+                    scheme_obj = get_party_product_scheme(
+                        card_code=card_code,
+                        item_code=item_code,
+                        category=category,
+                    )
+                    raw_scheme_id = getattr(scheme_obj, "scheme_id", None)
+
+                if raw_scheme_id not in (None, "") and fallback_scheme_qty > 0:
+                    scheme_entries.append(
+                        {
+                            "scheme": scheme_obj,
+                            "scheme_id": raw_scheme_id,
+                            "scheme_qty": fallback_scheme_qty,
+                        }
                     )
 
             # Line 1: always the ordered item at its price
@@ -818,52 +619,35 @@ class SyncService:
                 }
             )
 
-            if should_mirror_combo_qty:
-                scheme_qty = order_qty
+            for scheme_entry in scheme_entries:
+                raw_scheme_id = scheme_entry.get("scheme_id")
+                scheme_qty = _to_float(scheme_entry.get("scheme_qty"), 0)
+                scheme_item_codes = []
+                if raw_scheme_id not in (None, ""):
+                    try:
+                        raw_scheme_id_int = int(raw_scheme_id)
+                        scheme_item_code = get_scheme_item_code_raw(raw_scheme_id_int)
+                        scheme_item_codes = [scheme_item_code] if scheme_item_code else []
+                    except (SchemeProduct.DoesNotExist, TypeError, ValueError):
+                        logger.warning(
+                            "Skipping invalid scheme mapping for order item %s with raw scheme_id=%r",
+                            getattr(item, "id", None),
+                            raw_scheme_id,
+                        )
 
-            if should_mirror_combo_qty:
-                if combo_component_codes:
-                    # Explicit component assignments — add each at party price
-                    for comp_code in combo_component_codes:
+                if scheme_item_codes and scheme_qty > 0:
+                    for scheme_item_code in scheme_item_codes:
+                        if scheme_item_code == item_code:
+                            continue
+
                         document_lines.append(
                             {
-                                "ItemCode": comp_code,
-                                "Quantity": order_qty,
-                                "UnitPrice": get_party_item_unit_price(
-                                    card_code, comp_code, category, item_unit_price
-                                ),
+                                "ItemCode": scheme_item_code,
+                                "Quantity": scheme_qty,
+                                "UnitPrice": 0.0,
                                 "WarehouseCode": "GP-FG",
                             }
                         )
-                elif len(scheme_item_codes) == 1:
-                    # Single scheme item, no separate component found — use it as
-                    # the combo component proxy at party price (then also added free below)
-                    comp_code = scheme_item_codes[0]
-                    if comp_code != item_code:
-                        document_lines.append(
-                            {
-                                "ItemCode": comp_code,
-                                "Quantity": order_qty,
-                                "UnitPrice": get_party_item_unit_price(
-                                    card_code, comp_code, category, item_unit_price
-                                ),
-                                "WarehouseCode": "GP-FG",
-                            }
-                        )
-
-            if scheme_item_codes and scheme_qty > 0:
-                for scheme_item_code in scheme_item_codes:
-                    if scheme_item_code == item_code:
-                        continue
-
-                    document_lines.append(
-                        {
-                            "ItemCode": scheme_item_code,
-                            "Quantity": scheme_qty,
-                            "UnitPrice": 0.0,
-                            "WarehouseCode": "GP-FG",
-                        }
-                    )
 
 
         posting_date = timezone.localdate()

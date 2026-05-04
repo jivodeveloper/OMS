@@ -2,7 +2,7 @@ from urllib import request
 from django.shortcuts import render
 import re
 from .serializers import SchemeProductSerializer,OrderDetailSerializer, OrderListByUserIdSerializer,OrdersLogSerializer,OrderStatusUpdateSerializer, DispatchLocationSerializer,BranchSerializer, PartyAddressSerializer,ProductSerializer,CreateOrderSerializer,OrderItemSerializer, CreateSchemeSerializer,NotificationSerializer
-from .models import PartyProductAssignment,OrdersLog,Parties, Branches, DispatchLocation, UserPartyAssignment, PartyAddress,ProductDetails,Order,OrderItem,OrderStatus,log_order_action,Notification
+from .models import PartyProductAssignment,OrdersLog,Parties, Branches, DispatchLocation, UserPartyAssignment, PartyAddress,ProductDetails,Order,OrderItem,OrderItemScheme,OrderStatus,log_order_action,Notification
 from rest_framework.generics import ListAPIView
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.views import APIView
@@ -21,12 +21,7 @@ from rest_framework import permissions
 from sap_sync.models import Party as SapParty, PartyAddress as SapPartyAddress, Product as SapProduct
 from .models import Order, OrderStatus
 from .models import PartyProductAssignment
-from .scheme_rules import (
-    get_ordered_quantity,
-    get_party_product_scheme,
-    should_mirror_punjab_combo_scheme_qty,
-)
-from users.models import SchemeProduct, User
+from users.models import SchemeProduct, State, User
 
 BILLING_ACTIVE_CODES = ['BILLING', 'BILLING_PENDING']
 BILLING_RESOLVED_CODES = ['BILLING_REJECTED', 'COMPLETED']
@@ -42,41 +37,63 @@ def _get_rate_approval_reason(item, basic_price, market_price):
 
     return None
 
-def _resolve_order_item_scheme(card_code, item):
-    scheme_id = item.get('scheme_id') or item.get('scheme')
+def _resolve_scheme_by_id(scheme_id):
     if scheme_id:
         try:
             return SchemeProduct.objects.get(scheme_id=int(scheme_id))
         except (SchemeProduct.DoesNotExist, ValueError, TypeError):
             return None
-
-    assigned_scheme = get_party_product_scheme(
-        card_code=card_code,
-        item_code=item.get('item_code', ''),
-        category=item.get('category', ''),
-    )
-    if assigned_scheme and should_mirror_punjab_combo_scheme_qty(
-        card_code,
-        item_name=item.get('item_name'),
-        scheme_name=getattr(assigned_scheme, 'scheme_name', None),
-    ):
-        return assigned_scheme
-
     return None
 
-def _resolve_order_item_scheme_qty(card_code, item, scheme_obj, provided_scheme_qty):
-    if not scheme_obj:
-        return provided_scheme_qty
+def _extract_order_item_schemes(item, to_float):
+    raw_schemes = item.get('schemes')
+    if isinstance(raw_schemes, list):
+        extracted = []
+        for raw_scheme in raw_schemes:
+            if not isinstance(raw_scheme, dict):
+                continue
+            scheme_obj = _resolve_scheme_by_id(raw_scheme.get('scheme_id') or raw_scheme.get('scheme'))
+            scheme_qty = to_float(raw_scheme.get('scheme_qty', raw_scheme.get('qty_scheme', 0)))
+            if scheme_obj and scheme_qty > 0:
+                extracted.append((scheme_obj, scheme_qty))
+        return extracted
 
-    scheme_name = item.get('scheme_name') or getattr(scheme_obj, 'scheme_name', None)
-    if should_mirror_punjab_combo_scheme_qty(
-        card_code,
-        item_name=item.get('item_name'),
-        scheme_name=scheme_name,
-    ):
-        return get_ordered_quantity(item)
+    scheme_obj = _resolve_scheme_by_id(item.get('scheme_id') or item.get('scheme'))
+    scheme_qty = to_float(item.get('scheme_qty', item.get('qty_scheme', 0)))
+    return [(scheme_obj, scheme_qty)] if scheme_obj and scheme_qty > 0 else []
 
-    return provided_scheme_qty
+def _create_order_item(order, item, to_float, to_bool):
+    item_schemes = _extract_order_item_schemes(item, to_float)
+    first_scheme = item_schemes[0][0] if item_schemes else None
+    total_scheme_qty = sum(qty for _, qty in item_schemes)
+
+    order_item = OrderItem.objects.create(
+        order=order,
+        item_code=item.get('item_code', ''),
+        item_name=item.get('item_name', ''),
+        category=item.get('category', ''),
+        brand=item.get('brand', ''),
+        variety=item.get('variety', ''),
+        item_type=item.get('item_type', ''),
+        qty=to_float(item.get('qty', 0)),
+        pcs=to_float(item.get('pcs', 0)),
+        boxes=to_float(item.get('boxes', 0)),
+        ltrs=to_float(item.get('ltrs', 0)),
+        basic_price=to_float(item.get('basic_price', 0)),
+        market_price=to_float(item.get('market_price', 0)),
+        total=to_float(item.get('total', 0)),
+        tax_rate=to_float(item.get('tax_rate', 0)),
+        scheme=first_scheme,
+        qty_scheme=total_scheme_qty,
+        is_scheme_visible=to_bool(item.get('is_scheme_visible')) or bool(item_schemes),
+    )
+
+    OrderItemScheme.objects.bulk_create([
+        OrderItemScheme(order_item=order_item, scheme=scheme_obj, qty_scheme=scheme_qty)
+        for scheme_obj, scheme_qty in item_schemes
+    ])
+
+    return order_item
 
 def _get_base_orders(user):
     """Scope orders by user role:
@@ -833,34 +850,7 @@ class UpdateOrderView(APIView):
         flagged_items = []
 
         for item in items:
-            scheme_obj = _resolve_order_item_scheme(order.card_code, item)
-            scheme_qty = _resolve_order_item_scheme_qty(
-                order.card_code,
-                item,
-                scheme_obj,
-                _to_float(item.get('scheme_qty', 0)),
-            )
-
-            OrderItem.objects.create(
-                order=order,
-                item_code=item.get('item_code', ''),
-                item_name=item.get('item_name', ''),
-                category=item.get('category', ''),
-                brand=item.get('brand', ''),
-                variety=item.get('variety', ''),
-                item_type=item.get('item_type', ''),
-                qty=_to_float(item.get('qty', 0)),
-                pcs=_to_float(item.get('pcs', 0)),
-                boxes=_to_float(item.get('boxes', 0)),
-                ltrs=_to_float(item.get('ltrs', 0)),
-                basic_price=_to_float(item.get('basic_price', 0)),
-                market_price=_to_float(item.get('market_price', 0)),
-                total=_to_float(item.get('total', 0)),
-                tax_rate=_to_float(item.get('tax_rate', 0)),
-                scheme=scheme_obj,
-                qty_scheme=scheme_qty,
-                is_scheme_visible=_to_bool(item.get('is_scheme_visible')) or bool(scheme_obj and scheme_qty > 0),
-            )
+            _create_order_item(order, item, _to_float, _to_bool)
 
             bp = _to_float(item.get('basic_price', 0))
             mp = _to_float(item.get('market_price', 0))
@@ -898,7 +888,7 @@ class UpdateOrderView(APIView):
         }, status=status.HTTP_200_OK)
 
 class CreateOrderView(APIView):
-    permission_classes = [AllowAny]
+    permission_classes = [IsAuthenticated]
     
     def post(self, request):
         def _to_float(value, default=0.0):
@@ -949,33 +939,7 @@ class CreateOrderView(APIView):
             needs_approval = False
             flagged_items = []
             for item in items:
-                scheme_obj = _resolve_order_item_scheme(order.card_code, item)
-                scheme_qty = _resolve_order_item_scheme_qty(
-                    order.card_code,
-                    item,
-                    scheme_obj,
-                    _to_float(item.get('scheme_qty', 0)),
-                )
-                OrderItem.objects.create(
-                    order=order,
-                    item_code=item.get('item_code', ''),
-                    item_name=item.get('item_name', ''),
-                    category=item.get('category', ''),
-                    brand=item.get('brand', ''),
-                    variety=item.get('variety', ''),
-                    item_type=item.get('item_type', ''),
-                    qty=_to_float(item.get('qty', 0)),
-                    pcs=_to_float(item.get('pcs', 0)),
-                    boxes=_to_float(item.get('boxes', 0)),
-                    ltrs=_to_float(item.get('ltrs', 0)),
-                    basic_price=_to_float(item.get('basic_price', 0)),
-                    market_price=_to_float(item.get('market_price', 0)),
-                    total=_to_float(item.get('total', 0)),
-                    tax_rate=_to_float(item.get('tax_rate', 0)),
-                    scheme=scheme_obj,
-                    qty_scheme=scheme_qty,
-                    is_scheme_visible=_to_bool(item.get('is_scheme_visible')) or bool(scheme_obj and scheme_qty > 0),
-                )
+                _create_order_item(order, item, _to_float, _to_bool)
                 bp = _to_float(item.get('basic_price', 0))
                 mp = _to_float(item.get('market_price', 0))
                 rate_approval_reason = _get_rate_approval_reason(item, bp, mp)
@@ -1057,34 +1021,7 @@ class CreateOrderView(APIView):
         flagged_items = []
 
         for item in items:
-            scheme_obj = _resolve_order_item_scheme(order.card_code, item)
-            scheme_qty = _resolve_order_item_scheme_qty(
-                order.card_code,
-                item,
-                scheme_obj,
-                _to_float(item.get('scheme_qty', 0)),
-            )
-
-            OrderItem.objects.create(
-                order=order,
-                item_code=item.get('item_code', ''),
-                item_name=item.get('item_name', ''),
-                category=item.get('category', ''),
-                brand=item.get('brand', ''),
-                variety=item.get('variety', ''),
-                item_type=item.get('item_type', ''),
-                qty=_to_float(item.get('qty', 0)),
-                pcs=_to_float(item.get('pcs', 0)),
-                boxes=_to_float(item.get('boxes', 0)),
-                ltrs=_to_float(item.get('ltrs', 0)),
-                basic_price=_to_float(item.get('basic_price', 0)),
-                market_price=_to_float(item.get('market_price', 0)),
-                total=_to_float(item.get('total', 0)),
-                tax_rate=_to_float(item.get('tax_rate', 0)),
-                scheme=scheme_obj,
-                qty_scheme=scheme_qty,
-                is_scheme_visible=_to_bool(item.get('is_scheme_visible')) or bool(scheme_obj and scheme_qty > 0),
-            )
+            _create_order_item(order, item, _to_float, _to_bool)
 
             bp = _to_float(item.get('basic_price', 0))
             mp = _to_float(item.get('market_price', 0))
@@ -1128,14 +1065,23 @@ class SchemeListView(APIView):
 
     def get(self, request):
         from users.models import SchemeProduct
-        state_code = request.query_params.get('state_code')
         queryset = SchemeProduct.objects.filter(is_active=True)
+        state_code = (request.query_params.get('state_code') or '').strip()
 
         if state_code:
-            filtered_queryset = queryset.filter(state_code=state_code)
-            print(f"Filtering schemes for state_code={state_code}, found {filtered_queryset} schemes")
-            queryset = filtered_queryset 
-            print(f"After filtering, using {queryset} schemes for response")
+            state_match = State.objects.filter(
+                Q(code__iexact=state_code) | Q(name__iexact=state_code),
+                is_active=True,
+            ).values('code', 'name').first()
+            state_values = {state_code}
+            if state_match:
+                state_values.update(
+                    value for value in (state_match.get('code'), state_match.get('name')) if value
+                )
+            state_filter = Q()
+            for value in state_values:
+                state_filter |= Q(state_code__iexact=value)
+            queryset = queryset.filter(state_filter)
 
         schemes = queryset.order_by('scheme_name', 'scheme_id','state_code').values('scheme_id', 'scheme_name','state_code').distinct()
         return Response(list(schemes))
@@ -1153,7 +1099,6 @@ class SchemeProductView(APIView):
     def get(self, request):
         queryset = SchemeProduct.objects.select_related('state').filter(is_active=True)
 
-        state_code = request.query_params.get('state_code')
         product_id = request.query_params.get('product_id')
         item_code = request.query_params.get('item_code')
         scheme_id = request.query_params.get('scheme_id')
@@ -1163,8 +1108,6 @@ class SchemeProductView(APIView):
             queryset = queryset.filter(scheme_id=scheme_id)
         if scheme_name:
             queryset = queryset.filter(scheme_name=scheme_name)
-        if state_code:
-            queryset = queryset.filter(state__state_code=state_code)
         if product_id:
             product = SapProduct.objects.filter(id=product_id).only('item_code').first()
             queryset = queryset.filter(item_code=product.item_code) if product else queryset.none()

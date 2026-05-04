@@ -1,44 +1,47 @@
 import { useEffect, useState } from "react";
 import type { ChangeEvent, FormEvent } from "react";
-import { userService } from "../services/userService";
 import { ordersService } from "../services/ordersService";
+import { userService } from "../services/userService";
 import "../styles/Add_Scheme.css";
 
 type StateOption = {
-  id?: number;
-  name?: string;
-  code?: string;
-  state_name?: string;
-  state_code?: string;
+  id: number;
+  name: string;
+  code: string;
 };
 
 export default function Add_Scheme() {
-  const [states, setStates] = useState<StateOption[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [states, setStates] = useState<StateOption[]>([]);
+  const [isLoadingStates, setIsLoadingStates] = useState(false);
   const [formData, setFormData] = useState({
     scheme_name: "",
     item_code: "",
     state_code: "",
   });
 
-  useEffect(() => {
-    fetchStates();
-  }, []);
-
-  const fetchStates = async () => {
-    try {
-      const data = await userService.getState();
-      setStates(Array.isArray(data) ? data : []);
-    } catch (error) {
-      console.error("Failed to fetch states:", error);
-    }
-  };
-
   const payload = {
     scheme_name: formData.scheme_name,
     item_code: formData.item_code,
     state_code: formData.state_code,
   };
+
+  useEffect(() => {
+    const fetchStates = async () => {
+      setIsLoadingStates(true);
+      try {
+        const data = await userService.getState();
+        setStates(Array.isArray(data) ? data : []);
+      } catch (error) {
+        console.error("Error fetching states:", error);
+        setStates([]);
+      } finally {
+        setIsLoadingStates(false);
+      }
+    };
+
+    void fetchStates();
+  }, []);
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -114,6 +117,31 @@ export default function Add_Scheme() {
             </div>
 
             <div className="asg-field">
+              <label className="asg-label" htmlFor="state_code">
+                State
+              </label>
+              <div className="asg-input-wrap">
+                <select
+                  id="state_code"
+                  name="state_code"
+                  value={formData.state_code}
+                  onChange={handleChange}
+                  required
+                  disabled={isLoadingStates}
+                >
+                  <option value="">
+                    {isLoadingStates ? "Loading states..." : "Select state"}
+                  </option>
+                  {states.map((state) => (
+                    <option key={state.id} value={state.code}>
+                      {state.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="asg-field">
               <label className="asg-label" htmlFor="item_code">
                 Item Code
               </label>
@@ -130,32 +158,6 @@ export default function Add_Scheme() {
               </div>
             </div>
 
-            <div className="asg-field">
-              <label className="asg-label" htmlFor="state_code">
-                Scheme State
-              </label>
-              <div className="asg-input-wrap">
-                <select
-                  id="state_code"
-                  name="state_code"
-                  value={formData.state_code}
-                  onChange={handleChange}
-                  required
-                >
-                  <option value="">Select State</option>
-                  {states.map((state) => {
-                    const stateCode = state.state_code || state.code || "";
-                    const stateName = state.state_name || state.name || stateCode;
-
-                    return (
-                      <option key={state.id || stateCode} value={stateCode}>
-                        {stateName}
-                      </option>
-                    );
-                  })}
-                </select>
-              </div>
-            </div>
           </div>
 
           <div className="asg-actions">

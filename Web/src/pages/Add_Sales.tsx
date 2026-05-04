@@ -17,6 +17,12 @@ type SalesRow = RowType & {
   confirmed: boolean;
   // schemeLtrs?: string;
   schemeItemCode?: string;
+  schemes: SalesRowScheme[];
+};
+
+type SalesRowScheme = {
+  scheme: string;
+  schemeQty: string;
 };
 
 const createEmptyRow = (): SalesRow => ({
@@ -38,6 +44,7 @@ const createEmptyRow = (): SalesRow => ({
   tax: "",
   amount: "",
   confirmed: false,
+  schemes: [],
 });
 
 // const getUniqueSchemes = (schemes: SchemeProduct[]) => {
@@ -241,6 +248,11 @@ export default function Add_Sales() {
   const valueToString = (value: string | number | null | undefined) =>
     value === null || value === undefined || value === "" ? "" : String(value);
 
+  const getPartyStateCode = (cardCode: string) => {
+    const selectedParty = parties.find((party) => party.value === cardCode);
+    return selectedParty?.state ? String(selectedParty.state) : "";
+  };
+
   const mergeOrderItemsIntoPartyProducts = (
     sourceProducts: PartyProduct[],
     order: Order,
@@ -284,8 +296,15 @@ export default function Add_Sales() {
             scheme?: number | string | null;
             is_scheme_visible?: boolean;
           };
-          const schemeId = item.scheme_id ?? itemWithExtras.scheme;
+          const itemSchemes = Array.isArray(item.schemes) && item.schemes.length > 0
+            ? item.schemes.map((scheme) => ({
+                scheme: scheme.scheme_id ? String(scheme.scheme_id) : "",
+                schemeQty: valueToString(scheme.scheme_qty ?? scheme.qty_scheme),
+              }))
+            : [];
+          const schemeId = itemSchemes[0]?.scheme || item.scheme_id || itemWithExtras.scheme;
           const isSchemeVisible = Boolean(
+            itemSchemes.length ||
             schemeId ||
             item.scheme_name ||
             item.scheme_qty ||
@@ -300,7 +319,12 @@ export default function Add_Sales() {
             item: item.item_name || "",
             isScheme: isSchemeVisible,
             scheme: schemeId ? String(schemeId) : "",
-            schemeQty: isSchemeVisible ? valueToString(item.scheme_qty) : "",
+            schemeQty: isSchemeVisible ? valueToString(itemSchemes[0]?.schemeQty || item.scheme_qty) : "",
+            schemes: itemSchemes.length
+              ? itemSchemes
+              : isSchemeVisible && schemeId
+                ? [{ scheme: String(schemeId), schemeQty: valueToString(item.scheme_qty) }]
+                : [],
             // schemeLtrs: isSchemeVisible && schemeLtrs > 0 ? String(schemeLtrs) : "",
             pcs: valueToString(item.pcs),
             qty: valueToString(item.qty),
@@ -389,14 +413,15 @@ export default function Add_Sales() {
           Deliverydate: isDuplicateMode ? "" : order.delivery_date || "",
           company: order.company ? String(order.company) : "",
         });
+        const orderStateCode = order.party_state || "";
+        setStateCode(orderStateCode || null);
 
         const mappedRows = mapOrderToRows(order);
         setRows(mappedRows);
 
         const hasSchemeRows = mappedRows.some((row) => row.isScheme);
-        if (hasSchemeRows) {
-          const schemes = await ordersService.getSchemeProducts("");
-          console.log("Fetched schemes for edit order:", schemes);
+        if (hasSchemeRows && orderStateCode) {
+          const schemes = await ordersService.getSchemeProducts(orderStateCode);
           if (isCancelled) return;
 
           // const uniqueSchemes = getUniqueSchemes(schemes);
@@ -437,7 +462,6 @@ export default function Add_Sales() {
 
     try {
       const schemes = await ordersService.getSchemeProducts(stateCode);
-      console.log("Fetched schemes for row:", schemes);
 
       setSchemeOptions((prev) => ({
         ...prev,
@@ -523,11 +547,23 @@ export default function Add_Sales() {
         market_price: Number(row.marketPrice),
         tax_rate: Number(row.tax),
         total: Number(row.amount || 0),
-        scheme_id: row.isScheme && row.scheme ? Number(row.scheme) : undefined,
-        scheme_qty: row.isScheme ? Number(row.schemeQty || 0) : 0,
+        scheme_id: row.isScheme && row.schemes[0]?.scheme ? Number(row.schemes[0].scheme) : undefined,
+        scheme_qty: row.isScheme
+          ? row.schemes.reduce((sum, scheme) => sum + Number(scheme.schemeQty || 0), 0)
+          : 0,
+        schemes: row.isScheme
+          ? row.schemes
+              .filter((scheme) => scheme.scheme && Number(scheme.schemeQty || 0) > 0)
+              .map((scheme) => ({
+                scheme_id: Number(scheme.scheme),
+                scheme_qty: Number(scheme.schemeQty || 0),
+              }))
+          : [],
         // scheme_ltrs: row.isScheme ? Number(row.schemeLtrs || 0) : 0,
         is_scheme: row.isScheme,
-        total_ltrs: Number(row.ltrs) + Number(row.schemeQty || 0),
+        total_ltrs:
+          Number(row.ltrs) +
+          (row.isScheme ? row.schemes.reduce((sum, scheme) => sum + Number(scheme.schemeQty || 0), 0) : 0),
       })),
     };
 
@@ -606,16 +642,79 @@ export default function Add_Sales() {
     setRows((prev) =>
       prev.map((row, rowIndex) => {
         if (rowIndex === index) {
+          const schemes = isScheme
+            ? row.schemes.length
+              ? row.schemes
+              : [{ scheme: row.scheme, schemeQty: row.schemeQty }]
+            : [];
           return {
             ...row,
             confirmed: false,
             isScheme: isScheme,
-            scheme: isScheme ? row.scheme : "",
-            schemeQty: "",
+            scheme: schemes[0]?.scheme || "",
+            schemeQty: schemes[0]?.schemeQty || "",
+            schemes,
             // schemeLtrs: "",
           };
         }
         return row;
+      }),
+    );
+    void fetchSchemesForRow(index, isScheme);
+  };
+
+  const handleAddScheme = (index: number) => {
+    setRows((prev) =>
+      prev.map((row, rowIndex) =>
+        rowIndex === index
+          ? {
+              ...row,
+              confirmed: false,
+              isScheme: true,
+              schemes: [...row.schemes, { scheme: "", schemeQty: "" }],
+            }
+          : row,
+      ),
+    );
+    void fetchSchemesForRow(index, true);
+  };
+
+  const handleSchemeChange = (
+    rowIndex: number,
+    schemeIndex: number,
+    field: keyof SalesRowScheme,
+    value: string,
+  ) => {
+    setRows((prev) =>
+      prev.map((row, currentRowIndex) => {
+        if (currentRowIndex !== rowIndex) return row;
+        const schemes = row.schemes.map((scheme, currentSchemeIndex) =>
+          currentSchemeIndex === schemeIndex ? { ...scheme, [field]: value } : scheme,
+        );
+        return {
+          ...row,
+          confirmed: false,
+          scheme: schemes[0]?.scheme || "",
+          schemeQty: schemes[0]?.schemeQty || "",
+          schemes,
+        };
+      }),
+    );
+  };
+
+  const handleRemoveScheme = (rowIndex: number, schemeIndex: number) => {
+    setRows((prev) =>
+      prev.map((row, currentRowIndex) => {
+        if (currentRowIndex !== rowIndex) return row;
+        const schemes = row.schemes.filter((_, currentSchemeIndex) => currentSchemeIndex !== schemeIndex);
+        return {
+          ...row,
+          confirmed: false,
+          isScheme: schemes.length > 0,
+          scheme: schemes[0]?.scheme || "",
+          schemeQty: schemes[0]?.schemeQty || "",
+          schemes,
+        };
       }),
     );
   };
@@ -643,6 +742,7 @@ export default function Add_Sales() {
       row.isScheme = false;
       row.scheme = "";
       row.schemeQty = "";
+      row.schemes = [];
       // row.schemeLtrs = "";
 
       const partyProduct =
@@ -682,6 +782,7 @@ export default function Add_Sales() {
       row.isScheme = false;
       row.scheme = "";
       row.schemeQty = "";
+      row.schemes = [];
       // row.schemeLtrs = "";
       row.pcs = "";
       row.qty = "";
@@ -787,6 +888,7 @@ export default function Add_Sales() {
   };
 
   const handlePartySelect = (value: string) => {
+    const nextStateCode = getPartyStateCode(value);
     setEditOrderFallback(emptyEditOrderFallback);
     setFormData((prev) => ({
       ...prev,
@@ -806,16 +908,10 @@ export default function Add_Sales() {
     setPartyProducts([]);
     setRows([createEmptyRow()]);
     setSchemeOptions({});
+    setStateCode(nextStateCode || null);
     fetchPartyAddresses(value);
     fetchPartyCategories(value);
 
-    const selectedParty = parties.find((p) => p.value === value);
-    console.log("Selected party on select:", selectedParty);
-    if (selectedParty && selectedParty.state) {
-      setStateCode(selectedParty.state);
-    } else {
-      setStateCode(null);
-    }
   };
 
   const handleChange = (e: React.ChangeEvent<any>) => {
@@ -856,7 +952,9 @@ export default function Add_Sales() {
     row.type &&
     row.item &&
     Number(row.qty) > 0 &&
-    Number(row.amount) > 0;
+    Number(row.amount) > 0 &&
+    (!row.isScheme ||
+      row.schemes.every((scheme) => scheme.scheme && Number(scheme.schemeQty || 0) > 0));
 
   const handleConfirmRow = (index: number) => {
     const row = rows[index];
@@ -1468,64 +1566,188 @@ export default function Add_Sales() {
                   {row.item && (
                     <tr key={`scheme-${index}`} className="sl-scheme-row-wrap">
                       <td colSpan={14}>
-                        <div className="sl-scheme-row">
-                          <div className="sl-scheme-toggle-compact">
-                            <span className="sl-scheme-toggle-label">
-                              Scheme
-                            </span>
-                            <label className="sl-switch">
-                              <input
-                                type="checkbox"
-                                checked={row.isScheme}
-                                onChange={(e) =>
-                                  handleRowSchemeToggle(index, e.target.checked)
-                                }
-                                disabled={row.confirmed && !isEditMode}
-                              />
-                              <span className="sl-switch-slider" />
-                            </label>
+                        <div
+                          className={`sl-scheme-panel${
+                            row.isScheme ? " is-active" : ""
+                          }`}
+                        >
+                          <div className="sl-scheme-panel-head">
+                            <div>
+                              <div className="sl-scheme-eyebrow">
+                                Optional promotion
+                              </div>
+                              <div className="sl-scheme-title">
+                                Add scheme to this item
+                              </div>
+                            </div>
+                            <div className="sl-scheme-toggle-compact">
+                              <span className="sl-scheme-toggle-label">
+                                {row.isScheme ? "Enabled" : "Disabled"}
+                              </span>
+                              <label className="sl-switch">
+                                <input
+                                  type="checkbox"
+                                  checked={row.isScheme}
+                                  onChange={(e) =>
+                                    handleRowSchemeToggle(
+                                      index,
+                                      e.target.checked
+                                    )
+                                  }
+                                  disabled={row.confirmed && !isEditMode}
+                                />
+                                <span className="sl-switch-slider" />
+                              </label>
+                            </div>
                           </div>
 
-                          <div className="sl-scheme-dropdown-field">
-                            <label className="sl-scheme-field-label">
-                              Scheme
-                            </label>
-                            <select
-                              value={row.scheme}
-                              name="scheme"
-                              onChange={(e) => handleRowChange(index, e)}
-                              disabled={
-                                (row.confirmed && !isEditMode) ||
-                                !row.isScheme ||
-                                !(schemeOptions[index] || []).length
-                              }
-                            >
-                              <option value="">Select Scheme...</option>
-                              {(schemeOptions[index] || []).map((scheme) => (
-                                <option
-                                  key={scheme.scheme_id}
-                                  value={scheme.scheme_id}
+                          <div className="sl-scheme-panel-body">
+                            <div className="sl-scheme-dropdown-field">
+                              <div className="sl-scheme-table-head">
+                                <span>Scheme</span>
+                                <span>Qty</span>
+                                <span>Action</span>
+                              </div>
+                              {(row.schemes.length
+                                ? row.schemes
+                                : [{ scheme: "", schemeQty: "" }]
+                              ).map((schemeRow, schemeIndex) => (
+                                <div
+                                  className="sl-scheme-table-row"
+                                  key={`${index}-${schemeIndex}`}
                                 >
-                                  {scheme.scheme_name}
-                                </option>
+                                  <select
+                                    value={schemeRow.scheme}
+                                    onChange={(e) =>
+                                      handleSchemeChange(
+                                        index,
+                                        schemeIndex,
+                                        "scheme",
+                                        e.target.value
+                                      )
+                                    }
+                                    disabled={
+                                      (row.confirmed && !isEditMode) ||
+                                      !row.isScheme ||
+                                      !(schemeOptions[index] || []).length
+                                    }
+                                  >
+                                    <option value="">
+                                      {row.isScheme
+                                        ? "Select Scheme..."
+                                        : "Enable scheme first"}
+                                    </option>
+                                    {(schemeOptions[index] || []).map(
+                                      (scheme) => (
+                                        <option
+                                          key={scheme.scheme_id}
+                                          value={scheme.scheme_id}
+                                        >
+                                          {scheme.scheme_name}
+                                        </option>
+                                      )
+                                    )}
+                                  </select>
+                                  <input
+                                    type="text"
+                                    value={schemeRow.schemeQty}
+                                    placeholder="0"
+                                    onChange={(e) =>
+                                      handleSchemeChange(
+                                        index,
+                                        schemeIndex,
+                                        "schemeQty",
+                                        e.target.value
+                                      )
+                                    }
+                                    disabled={
+                                      (row.confirmed && !isEditMode) ||
+                                      !row.isScheme
+                                    }
+                                  />
+                                  <button
+                                    type="button"
+                                    className="sl-remove-scheme-btn"
+                                    onClick={() =>
+                                      handleRemoveScheme(index, schemeIndex)
+                                    }
+                                    disabled={
+                                      (row.confirmed && !isEditMode) ||
+                                      !row.isScheme
+                                    }
+                                    aria-label="Remove scheme"
+                                    title="Remove scheme"
+                                  >
+                                    <svg
+                                      viewBox="0 0 24 24"
+                                      fill="none"
+                                      stroke="currentColor"
+                                      strokeWidth="2"
+                                    >
+                                      <path
+                                        strokeLinecap="round"
+                                        d="M5 12h14"
+                                      />
+                                    </svg>
+                                  </button>
+                                </div>
                               ))}
-                            </select>
+                              <button
+                                type="button"
+                                className="sl-add-scheme-btn"
+                                onClick={() => handleAddScheme(index)}
+                                disabled={
+                                  (row.confirmed && !isEditMode) ||
+                                  !row.isScheme
+                                }
+                              >
+                                <svg
+                                  viewBox="0 0 24 24"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="2"
+                                >
+                                  <path
+                                    strokeLinecap="round"
+                                    d="M12 5v14M5 12h14"
+                                  />
+                                </svg>
+                                Add Scheme
+                              </button>
+                            </div>
+
+                            <div className="sl-scheme-total-card">
+                              <span className="sl-scheme-field-label">
+                                Total Ltrs
+                              </span>
+                              <input
+                                type="text"
+                                name="totalLtrs"
+                                value={
+                                  row.isScheme && row.schemes.length
+                                    ? (
+                                        Number(row.ltrs) +
+                                        row.schemes.reduce(
+                                          (sum, scheme) =>
+                                            sum + Number(scheme.schemeQty || 0),
+                                          0
+                                        )
+                                      ).toFixed(2)
+                                    : Number(row.ltrs).toFixed(2)
+                                }
+                                readOnly
+                              />
+                              <small>
+                                Base ltrs plus selected scheme quantity
+                              </small>
+                            </div>
                           </div>
 
-                          <div className="sl-scheme-qty-field">
-                            <label className="sl-scheme-field-label">
-                              Scheme Qty
-                            </label>
-                            <input
-                              type="text"
-                              name="schemeQty"
-                              value={row.schemeQty}
-                              onChange={(e) => handleRowChange(index, e)}
-                              disabled={
-                                (row.confirmed && !isEditMode) || !row.isScheme
-                              }
-                            />
-                          </div>
+                          {!row.isScheme && (
+                            <div className="sl-scheme-muted-note">
+                              Turn on scheme to select an offer for this item.
+                            </div>
+                          )}
 
                           {/* <div className="sl-scheme-qty-field">
                             <label className="sl-scheme-field-label">Scheme Ltrs</label>
@@ -1537,23 +1759,6 @@ export default function Add_Sales() {
                             />
                           </div> */}
 
-                          <div className="sl-scheme-qty-field">
-                            <label className="sl-scheme-field-label">
-                              Total Ltrs
-                            </label>
-                            <input
-                              type="text"
-                              name="totalLtrs"
-                              value={
-                                row.isScheme && row.schemeQty
-                                  ? (
-                                      Number(row.ltrs) + Number(row.schemeQty)
-                                    ).toFixed(2)
-                                  : Number(row.ltrs).toFixed(2)
-                              }
-                              readOnly
-                            />
-                          </div>
                         </div>
                       </td>
                     </tr>

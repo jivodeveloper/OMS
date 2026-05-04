@@ -1,7 +1,7 @@
-import { useState, useEffect } from "react";
+﻿import { useState, useEffect } from "react";
 import * as XLSX from "xlsx";
 import { saveAs } from "file-saver";
-import { ordersService } from "../services/ordersService";
+import { getOrderItemSchemeNames, getOrderItemSchemes, getOrderItemSchemeQtyText, getOrderItemTotalLtrs, ordersService } from "../services/ordersService";
 import type { Order, OrderItem } from "../services/ordersService";
 import "../styles/Billing_Order.css";
 import { useNavigate, useLocation } from "react-router-dom";
@@ -87,14 +87,14 @@ export default function Billing_orders() {
   }
 };
 
-  // Step 1 – open confirm modal
+  // Step 1 â€“ open confirm modal
   const initiateApprove = (order: Order) => {
     setPendingOrderId(order.id);
     setPendingOrderNum(order.order_number);
     setShowConfirmModal(true);
   };
 
-  // Step 2 – user confirmed: show loader → call API → show success
+  // Step 2 â€“ user confirmed: show loader â†’ call API â†’ show success
   const confirmApprove = async () => {
     if (!pendingOrderId) return;
     setShowConfirmModal(false);
@@ -105,7 +105,7 @@ export default function Billing_orders() {
       });
       if (salesResponse.data) {
         const sapData = salesResponse.data.data ?? salesResponse.data;
-        const quotationNumber = sapData.DocNum ?? sapData.doc_num ?? sapData.DocEntry ?? "—";
+        const quotationNumber = sapData.DocNum ?? sapData.doc_num ?? sapData.DocEntry ?? "â€”";
         await ordersService.UpdateStatus(pendingOrderId, 9);
         setQuotationResult({ number: String(quotationNumber), order_id: pendingOrderNum });
         setShowSuccess(true);
@@ -189,13 +189,13 @@ export default function Billing_orders() {
         "Ship To": order.ship_to_address,
         "Item Code": item.item_code,
         "Item Name": item.item_name,
-        "Scheme": item.scheme_name || "",
-        "Scheme Qty": item.scheme_qty || "",
+        "Scheme": getOrderItemSchemeNames(item),
+        "Scheme Qty": getOrderItemSchemeQtyText(item),
         // "Scheme Ltrs": (item as any).scheme_ltrs || "",
         "Qty": item.qty,
         "Boxes": item.boxes,
         "Liters": item.ltrs,
-        "Total Ltrs": (item as any).total_ltrs || (Number(item.ltrs || 0) + Number((item as any).scheme_qty || 0)).toFixed(2),
+        "Total Ltrs": getOrderItemTotalLtrs(item).toFixed(2),
         "Total Amount": item.total,
       }));
     } else {
@@ -229,7 +229,7 @@ export default function Billing_orders() {
   return (
     <div className="bo-page">
 
-      {/* ── LIST VIEW ── */}
+      {/* â”€â”€ LIST VIEW â”€â”€ */}
       {!showDetails && (
         <>
           <div className="bo-toolbar">
@@ -269,7 +269,7 @@ export default function Billing_orders() {
                       <td>{order.order_number}</td>
                       <td>{order.card_code}</td>
                       <td>{order.card_name}</td>
-                      <td>{order.created_at ? new Date(order.created_at).toLocaleDateString("en-GB") : "—"}</td>
+                      <td>{order.created_at ? new Date(order.created_at).toLocaleDateString("en-GB") : "â€”"}</td>
                       <td>{order.delivery_date}</td>
                       {/* <td>
                         <span className={`bo-badge bo-badge-${(order.status_display || "").toLowerCase().replace(/\s+/g, "-")}`}>
@@ -357,15 +357,15 @@ export default function Billing_orders() {
 
           {filteredOrders.length > itemsPerPage && (
             <div className="bo-pagination">
-              <button className="bo-pg-btn" disabled={currentPage === 1} onClick={() => setCurrentPage((p) => p - 1)}>← Prev</button>
+              <button className="bo-pg-btn" disabled={currentPage === 1} onClick={() => setCurrentPage((p) => p - 1)}>â† Prev</button>
               <span className="bo-pg-info">{currentPage} / {Math.ceil(filteredOrders.length / itemsPerPage)}</span>
-              <button className="bo-pg-btn" disabled={currentPage === Math.ceil(filteredOrders.length / itemsPerPage)} onClick={() => setCurrentPage((p) => p + 1)}>Next →</button>
+              <button className="bo-pg-btn" disabled={currentPage === Math.ceil(filteredOrders.length / itemsPerPage)} onClick={() => setCurrentPage((p) => p + 1)}>Next â†’</button>
             </div>
           )}
         </>
       )}
 
-      {/* ── DETAIL VIEW ── */}
+      {/* â”€â”€ DETAIL VIEW â”€â”€ */}
       {showDetails && orderDetails && (
         <div className="bo-detail">
           <div className="bo-d-nav">
@@ -389,20 +389,20 @@ export default function Billing_orders() {
                 </div>
                 <div className="ao-d-info-field">
                 <span className="ao-d-hf-label">Party State</span>
-                <span className="ao-d-hf-value">{orderDetails.party_state || "—"}</span>
+                <span className="ao-d-hf-value">{orderDetails.party_state || "â€”"}</span>
               </div>
               </div>
                <div className="bo-d-info-field">
                 <span className="bo-d-hf-label">Created By</span>
-                <span className="bo-d-hf-value">{orderDetails.created_by_name || "—"}</span>
+                <span className="bo-d-hf-value">{orderDetails.created_by_name || "â€”"}</span>
               </div>
               <div className="bo-d-info-field">
                 <span className="bo-d-hf-label">Created Date</span>
-                <span className="bo-d-hf-value">{orderDetails.created_at ? new Date(orderDetails.created_at).toLocaleDateString("en-GB") : "—"}</span>
+                <span className="bo-d-hf-value">{orderDetails.created_at ? new Date(orderDetails.created_at).toLocaleDateString("en-GB") : "â€”"}</span>
               </div>
               <div className="bo-d-info-field">
                 <span className="bo-d-hf-label">Delivery Date</span>
-                <span className="bo-d-hf-value">{orderDetails.delivery_date || "—"}</span>
+                <span className="bo-d-hf-value">{orderDetails.delivery_date || "â€”"}</span>
               </div>
               <div className="bo-d-info-field">
                 <span className="bo-d-hf-label">Party Name</span>
@@ -414,11 +414,11 @@ export default function Billing_orders() {
               </div>
               <div className="bo-d-info-field">
                 <span className="bo-d-hf-label">Bill To</span>
-                <span className="bo-d-hf-value">{orderDetails.bill_to_address || "—"}</span>
+                <span className="bo-d-hf-value">{orderDetails.bill_to_address || "â€”"}</span>
               </div>
               <div className="bo-d-info-field">
                 <span className="bo-d-hf-label">Ship To</span>
-                <span className="bo-d-hf-value">{orderDetails.ship_to_address || "—"}</span>
+                <span className="bo-d-hf-value">{orderDetails.ship_to_address || "â€”"}</span>
               </div>
             </div>
           </div>
@@ -443,14 +443,13 @@ export default function Billing_orders() {
                       <td><span className="bo-d-item-code">{item.item_code}</span></td>
                       <td style={{ fontWeight: 500, color: '#0f172a', minWidth: '250px' }}>{item.item_name}</td>
                       <td>{item.category}</td>
-                      <td>{item.scheme_name || "—"}</td>
-                      <td style={{ textAlign: 'center' }}>{item.scheme_name ? (item.scheme_qty || 0) : "—"}</td>
+                      <td colSpan={2}>{getOrderItemSchemes(item).length > 0 ? getOrderItemSchemes(item).map((scheme, schemeIndex) => <div key={`${item.item_code}-scheme-${schemeIndex}`}>{scheme.name || "—"} ({scheme.qty || 0})</div>) : "—"}</td>
                       <td style={{ textAlign: 'center' }}>{item.qty}</td>
                       <td style={{ textAlign: 'center' }}>{item.pcs}</td>
                       <td style={{ textAlign: 'center' }}>{Number(item.boxes).toFixed(2)}</td>
                       <td style={{ textAlign: 'center' }}>{item.ltrs}</td>
-                      {/* <td style={{textAlign:'center'}}>{item.scheme_name ? ((item as any).scheme_ltrs || 0) : "—"}</td> */}
-                      <td style={{ textAlign: 'center' }}>{(item as any).total_ltrs || (Number(item.ltrs || 0) + Number((item as any).scheme_qty || 0)).toFixed(2)}</td>
+                      {/* <td style={{textAlign:'center'}}>{item.scheme_name ? ((item as any).scheme_ltrs || 0) : "â€”"}</td> */}
+                      <td style={{ textAlign: 'center' }}>{getOrderItemTotalLtrs(item).toFixed(2)}</td>
                       <td style={{ textAlign: 'right' }}>{Number(item.basic_price).toFixed(2)}</td>
                       <td style={{ textAlign: 'right' }}>{Number(item.market_price).toFixed(2)}</td>
                       <td style={{ textAlign: 'center' }}>{Number(item.tax_rate).toFixed(2)}</td>
@@ -463,7 +462,7 @@ export default function Billing_orders() {
           </div>
 
           <div className="bo-d-summary">
-            <div className="bo-d-sum-row"><span className="bo-d-sum-label">Total Ltrs</span><span className="bo-d-sum-val">{selectedItems.reduce((s, i) => s + (Number((i as any).total_ltrs) || (Number(i.ltrs || 0) + Number((i as any).scheme_ltrs || 0))), 0).toFixed(2)}</span></div>
+            <div className="bo-d-sum-row"><span className="bo-d-sum-label">Total Ltrs</span><span className="bo-d-sum-val">{selectedItems.reduce((s, i) => s + getOrderItemTotalLtrs(i), 0).toFixed(2)}</span></div>
             <div className="bo-d-sum-row"><span className="bo-d-sum-label">Subtotal</span><span className="bo-d-sum-val">{selectedItems.reduce((s, i) => s + Number(i.total || 0), 0).toFixed(2)}</span></div>
             <div className="bo-d-sum-row"><span className="bo-d-sum-label">Tax</span><span className="bo-d-sum-val">{selectedItems.reduce((s, i) => s + (Number(i.total || 0) * Number(i.tax_rate || 0) / 100), 0).toFixed(2)}</span></div>
             <div className="bo-d-sum-row bo-d-sum-grand"><span className="bo-d-sum-label">Grand Total</span><span className="bo-d-sum-val">{(selectedItems.reduce((s, i) => s + Number(i.total || 0), 0) + selectedItems.reduce((s, i) => s + (Number(i.total || 0) * Number(i.tax_rate || 0) / 100), 0)).toFixed(2)}</span></div>
@@ -471,7 +470,7 @@ export default function Billing_orders() {
         </div>
       )}
 
-      {/* ── CONFIRM MODAL ── */}
+      {/* â”€â”€ CONFIRM MODAL â”€â”€ */}
       {showConfirmModal && (
         <div className="bo-modal-overlay">
           <div className="bo-modal">
@@ -485,7 +484,7 @@ export default function Billing_orders() {
         </div>
       )}
 
-      {/* ── LOADING OVERLAY ── */}
+      {/* â”€â”€ LOADING OVERLAY â”€â”€ */}
       {isCreating && (
         <div className="bo-modal-overlay">
           <div className="bo-modal bo-modal-loading">
@@ -495,11 +494,10 @@ export default function Billing_orders() {
         </div>
       )}
 
-      {/* ── SUCCESS MODAL ── */}
+      {/* â”€â”€ SUCCESS MODAL â”€â”€ */}
       {showSuccess && quotationResult && (
         <div className="bo-modal-overlay">
           <div className="bo-modal bo-modal-success">
-            <div className="bo-success-icon">✓</div>
             <div className="bo-modal-title">Sales Quotation Created!</div>
             <div className="bo-success-info">
               <div className="bo-success-row">
@@ -516,7 +514,7 @@ export default function Billing_orders() {
         </div>
       )}
 
-      {/* ── REJECT MODAL ── */}
+      {/* â”€â”€ REJECT MODAL â”€â”€ */}
       {showRejectModal && (
         <div className="bo-modal-overlay">
           <div className="bo-modal">
@@ -551,3 +549,5 @@ export default function Billing_orders() {
     </div>
   );
 }
+
+

@@ -4,7 +4,7 @@ import { saveAs } from "file-saver";
 import type { Order, OrderItem } from "../services/ordersService";
 import { sapService } from "../services/sapService";
 import { loadManagerOrders } from "../utils/orderHistory";
-import { ordersService } from "../services/ordersService";
+import { getOrderItemSchemes, getOrderItemTotalLtrs, ordersService } from "../services/ordersService";
 import "../styles/Order_Status_Tracking.css";
 import {
   HiEye,HiArrowDownTray
@@ -184,7 +184,7 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
 
   const totalLtrs = selectedItems.reduce(
     (sum, item) =>
-      sum + (Number((item as any).total_ltrs) || (Number(item.ltrs || 0) + Number((item as any).scheme_ltrs || 0))),
+      sum + getOrderItemTotalLtrs(item),
     0,
   );
   const subtotal = selectedItems.reduce((sum, item) => sum + Number(item.total || 0), 0);
@@ -202,7 +202,9 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
     let excelData: object[] = [];
 
     if (exportOrder.items && exportOrder.items.length > 0) {
-      excelData = exportOrder.items.map((item: OrderItem) => ({
+      excelData = exportOrder.items.flatMap((item: OrderItem) => {
+        const schemes = getOrderItemSchemes(item);
+        const baseRow = {
         "Order Number": exportOrder.order_number,
         "Card Code": exportOrder.card_code,
         "Card Name": exportOrder.card_name,
@@ -213,15 +215,16 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
         "Ship To": exportOrder.ship_to_address,
         "Item Code": item.item_code,
         "Item Name": item.item_name,
-        Scheme: item.scheme_name || "",
-        "Scheme Qty": item.scheme_qty || "",
-        
         Qty: item.qty,
         Boxes: item.boxes,
         Liters: item.ltrs,
-        "Total Ltrs": (item as any).total_ltrs || (Number(item.ltrs || 0) + Number((item as any).scheme_qty || 0)).toFixed(2),
+        "Total Ltrs": getOrderItemTotalLtrs(item).toFixed(2),
         "Total Amount": item.total,
-      }));
+        };
+        return schemes.length
+          ? schemes.map((scheme) => ({ ...baseRow, Scheme: scheme.name, "Scheme Qty": scheme.qty }))
+          : [{ ...baseRow, Scheme: "", "Scheme Qty": "" }];
+      });
     } else {
       excelData.push({
         "Order Number": exportOrder.order_number,
@@ -526,14 +529,28 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
                         <td>{item.item_code}</td>
                         <td style={{ minWidth: '250px' }}>{item.item_name}</td>
                         <td>{item.category}</td>
-                        <td>{item.scheme_name || "—"}</td>
-                        <td>{item.scheme_name ? item.scheme_qty || 0 : "—"}</td>
+                        <td colSpan={2}>
+                          {getOrderItemSchemes(item).length > 0 ? (
+                            <table className="ot-scheme-mini-table">
+                              <tbody>
+                                {getOrderItemSchemes(item).map((scheme, schemeIndex) => (
+                                  <tr key={`${item.item_code}-${schemeIndex}`}>
+                                    <td>{scheme.name || "—"}</td>
+                                    <td>{scheme.qty || 0}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          ) : (
+                            "—"
+                          )}
+                        </td>
                         <td>{item.qty}</td>
                         <td>{item.pcs}</td>
                         <td>{Number(item.boxes).toFixed(2)}</td>
                         <td>{item.ltrs}</td>
                         {/* <td>{item.scheme_name ? (item as any).scheme_ltrs || 0 : "—"}</td> */}
-                        <td>{(item as any).total_ltrs || (Number(item.ltrs || 0) + Number((item as any).scheme_qty || 0)).toFixed(2)}</td>
+                        <td>{getOrderItemTotalLtrs(item).toFixed(2)}</td>
                         <td>{Number(item.total).toFixed(2)}</td>
                       </tr>
                     ))
@@ -570,3 +587,4 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
     </div>
   );
 }
+

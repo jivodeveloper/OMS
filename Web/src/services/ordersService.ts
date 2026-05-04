@@ -30,6 +30,7 @@ export interface SchemeProduct {
   item_code: string;
   item_name: string;
   state?: number;
+  state_code?: string;
   state_name?: string;
   sal_factor2: string | number;
   sal_pack_unit: string | null;
@@ -54,6 +55,15 @@ export interface RowType {
   amount: string;
 };
 
+export interface OrderItemScheme {
+  id?: number;
+  scheme_id: number;
+  scheme_name?: string | null;
+  scheme_item_code?: string | null;
+  scheme_qty?: number | string;
+  qty_scheme?: number | string;
+}
+
 export interface OrderItem {
   item_code: string;
   item_name: string;
@@ -76,6 +86,7 @@ export interface OrderItem {
   tax_rate: number;
   total: number;
   scheme_id?: number;
+  schemes?: OrderItemScheme[];
   total_ltrs: number;
 }
 
@@ -141,11 +152,66 @@ export interface OrderLog {
   created_at: string;
 }
 
+export type ItemSchemeDisplay = {
+  name: string;
+  qty: string | number;
+};
+
 const toNumber = (value: string | number | null | undefined) =>
   typeof value === "number" ? value : Number(value || 0);
 
+export const getOrderItemSchemes = (item: OrderItem): ItemSchemeDisplay[] => {
+  const schemes = Array.isArray(item.schemes) ? item.schemes : [];
+
+  if (schemes.length > 0) {
+    return schemes.map((scheme) => ({
+      name: scheme.scheme_name || scheme.scheme_item_code || "",
+      qty: scheme.scheme_qty ?? scheme.qty_scheme ?? 0,
+    }));
+  }
+
+  return item.scheme_name
+    ? [{ name: item.scheme_name, qty: item.scheme_qty ?? item.qty_scheme ?? 0 }]
+    : [];
+};
+
+export const getOrderItemSchemeNames = (item: OrderItem) =>
+  getOrderItemSchemes(item)
+    .map((scheme) => scheme.name)
+    .filter(Boolean)
+    .join(", ");
+
+export const getOrderItemSchemeQtyText = (item: OrderItem) =>
+  getOrderItemSchemes(item)
+    .map((scheme) => scheme.qty)
+    .join(", ");
+
+export const getOrderItemTotalLtrs = (item: OrderItem) => {
+  const totalLtrs = Number(item.total_ltrs);
+
+  if (Number.isFinite(totalLtrs) && totalLtrs > 0) {
+    return totalLtrs;
+  }
+
+  const schemeQty = getOrderItemSchemes(item).reduce(
+    (sum, scheme) => sum + toNumber(scheme.qty),
+    0,
+  );
+
+  return Number(item.ltrs || 0) + schemeQty;
+};
+
 const normalizeOrderItem = (item: OrderItem): OrderItem => {
-  const schemeQty = item.scheme_qty ?? item.qty_scheme ?? 0;
+  const schemes = Array.isArray(item.schemes)
+    ? item.schemes.map((scheme) => ({
+        ...scheme,
+        scheme_qty: scheme.scheme_qty ?? scheme.qty_scheme ?? 0,
+      }))
+    : [];
+  const schemeQty =
+    schemes.length > 0
+      ? schemes.reduce((sum, scheme) => sum + toNumber(scheme.scheme_qty ?? scheme.qty_scheme), 0)
+      : item.scheme_qty ?? item.qty_scheme ?? 0;
   // const schemeLtrs =
   //   item.scheme_ltrs ??
   //   ((item as any).total_ltrs !== undefined
@@ -155,6 +221,7 @@ const normalizeOrderItem = (item: OrderItem): OrderItem => {
 
   return {
     ...item,
+    schemes,
     scheme_qty: schemeQty,
     // scheme_ltrs: schemeLtrs,
     total_ltrs: totalLtrs,
@@ -197,9 +264,9 @@ export const ordersService = {
   },
 
   getSchemeProducts: async (state_code?: string) => {
-    const response = await api.get(`/orders/schemes/?state_code=${state_code}`);
-    console.log("state code", state_code);
-    console.log("Fetched schemes from API:", response.data);
+    const response = await api.get("/orders/schemes/", {
+      params: state_code ? { state_code } : undefined,
+    });
     return response.data || [];
   },
 
@@ -218,6 +285,12 @@ export const ordersService = {
         total: Number(item.total),
         scheme_id: item.scheme_id ? Number(item.scheme_id) : undefined,
         scheme_qty: item.scheme_qty ? Number(item.scheme_qty) : 0,
+        schemes: Array.isArray(item.schemes)
+          ? item.schemes.map((scheme) => ({
+              scheme_id: Number(scheme.scheme_id),
+              scheme_qty: Number(scheme.scheme_qty ?? scheme.qty_scheme ?? 0),
+            }))
+          : undefined,
         total_ltrs: item.total_ltrs,
       })),
     };
@@ -272,7 +345,7 @@ export const ordersService = {
  createScheme: async (data: {
   scheme_name: string;
   item_code: string;
-  state_code: string;
+  state_code?: string;
 }) => {
   const response = await api.post("/orders/create-scheme/", data, {
     headers: {

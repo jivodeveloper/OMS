@@ -165,6 +165,22 @@ class OrderItem(models.Model):
 
     class Meta:
         db_table = 'order_items'
+
+
+class OrderItemScheme(models.Model):
+    order_item = models.ForeignKey(OrderItem, related_name='schemes', on_delete=models.CASCADE)
+    scheme = models.ForeignKey(
+        'users.SchemeProduct',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        db_column='scheme_id',
+        related_name='order_item_schemes',
+    )
+    qty_scheme = models.DecimalField(max_digits=10, decimal_places=2, default=0, null=True, blank=True)
+
+    class Meta:
+        db_table = 'order_item_schemes'
     
 class OrdersLog(models.Model):
     order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name='logs')

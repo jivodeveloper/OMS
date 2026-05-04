@@ -1,9 +1,9 @@
-import { useState, useEffect, useRef  } from "react";
+﻿import { useState, useEffect, useRef  } from "react";
 import { userService } from "../services/userService";
 import type { User } from "../services/userService";
 import type { Order, OrderItem } from "../services/ordersService";
 import { loadManagerOrders } from "../utils/orderHistory";
-import { ordersService } from "../services/ordersService";
+import { getOrderItemSchemeNames, getOrderItemSchemes, getOrderItemSchemeQtyText, getOrderItemTotalLtrs, ordersService } from "../services/ordersService";
 import * as XLSX from "xlsx";
 import { saveAs } from "file-saver";
 import "../styles/Report.css";
@@ -293,13 +293,13 @@ export default function Sales_Report() {
           Status: order.status_display,
           "Item Code": item.item_code,
           "Item Name": item.item_name,
-          Scheme: item.scheme_name || "",
-          "Scheme Qty": item.scheme_qty || "",
+          Scheme: getOrderItemSchemeNames(item),
+          "Scheme Qty": getOrderItemSchemeQtyText(item),
           // "Scheme Ltrs": (item as any).scheme_ltrs || "",
           Qty: item.qty,
           Boxes: item.boxes,
           Liters: item.ltrs,
-          "Total Ltrs": (item as any).total_ltrs || (Number(item.ltrs || 0) + Number((item as any).scheme_qty || 0)).toFixed(2),
+          "Total Ltrs": getOrderItemTotalLtrs(item).toFixed(2),
           "Tax Rate": item.tax_rate,
           "Total Amount": item.total,
           "Grand Total": (
@@ -375,13 +375,13 @@ export default function Sales_Report() {
             Status: order.status_display,
             "Item Code": item.item_code,
             "Item Name": item.item_name,
-            Scheme: item.scheme_name || "",
-            "Scheme Qty": item.scheme_qty || "",
+            Scheme: getOrderItemSchemeNames(item),
+            "Scheme Qty": getOrderItemSchemeQtyText(item),
             // "Scheme Ltrs": (item as any).scheme_ltrs || "",
             Qty: item.qty,
             Boxes: item.boxes,
             Liters: item.ltrs,
-            "Total Ltrs": (item as any).total_ltrs || (Number(item.ltrs || 0) + Number((item as any).scheme_qty || 0)).toFixed(2),
+            "Total Ltrs": getOrderItemTotalLtrs(item).toFixed(2),
             "Tax Rate": item.tax_rate,
             "Total Amount": item.total,
             "Grand Total": (
@@ -458,7 +458,7 @@ export default function Sales_Report() {
 
   return (
     <div className="dr-page">
-      {/* ── LIST VIEW ── */}
+      {/* â”€â”€ LIST VIEW â”€â”€ */}
       {!showDetails && (
         <>
           <div className="dr-header">
@@ -792,7 +792,7 @@ export default function Sales_Report() {
                     disabled={currentPage === 1}
                     onClick={() => setCurrentPage((page) => page - 1)}
                   >
-                    ← Prev
+                    â† Prev
                   </button>
                   <span className="dr-pg-info">
                     {currentPage} / {totalPages}
@@ -802,7 +802,7 @@ export default function Sales_Report() {
                     disabled={currentPage === totalPages}
                     onClick={() => setCurrentPage((page) => page + 1)}
                   >
-                    Next →
+                    Next â†’
                   </button>
                 </div>
               )}
@@ -811,7 +811,7 @@ export default function Sales_Report() {
         </>
       )}
 
-      {/* ── DETAIL VIEW ── */}
+      {/* â”€â”€ DETAIL VIEW â”€â”€ */}
       {showDetails && orderDetails && (
         <div className="dr-detail">
           <div className="dr-d-nav">
@@ -862,7 +862,7 @@ export default function Sales_Report() {
               <div className="dr-d-info-field">
                 <span className="dr-d-hf-label">Delivery Date</span>
                 <span className="dr-d-hf-value">
-                  {orderDetails.delivery_date || "—"}
+                  {orderDetails.delivery_date || "â€”"}
                 </span>
               </div>
               <div className="dr-d-info-field">
@@ -876,13 +876,13 @@ export default function Sales_Report() {
               <div className="dr-d-info-field">
                 <span className="dr-d-hf-label">Bill To</span>
                 <span className="dr-d-hf-value">
-                  {orderDetails.bill_to_address || "—"}
+                  {orderDetails.bill_to_address || "â€”"}
                 </span>
               </div>
               <div className="dr-d-info-field">
                 <span className="dr-d-hf-label">Ship To</span>
                 <span className="dr-d-hf-value">
-                  {orderDetails.ship_to_address || "—"}
+                  {orderDetails.ship_to_address || "â€”"}
                 </span>
               </div>
             </div>
@@ -933,16 +933,15 @@ export default function Sales_Report() {
                         </td>
                         <td>{item.category}</td>
                         <td>{item.variety}</td>
-                        <td>{item.scheme_name || "—"}</td>
-                        <td style={{ textAlign: "center" }}>{item.scheme_name ? (item.scheme_qty || 0) : "—"}</td>
+                        <td colSpan={2}>{getOrderItemSchemes(item).length > 0 ? getOrderItemSchemes(item).map((scheme, schemeIndex) => <div key={`${item.item_code}-scheme-${schemeIndex}`}>{scheme.name || "—"} ({scheme.qty || 0})</div>) : "—"}</td>
                         <td style={{ textAlign: "center" }}>{item.qty}</td>
                         <td style={{ textAlign: "center" }}>{item.pcs}</td>
                         <td style={{ textAlign: "center" }}>
                           {Number(item.boxes).toFixed(2)}
                         </td>
                         <td style={{ textAlign: "center" }}>{item.ltrs}</td>
-                          {/* <td style={{ textAlign: "center" }}>{item.scheme_name ? ((item as any).scheme_ltrs || 0) : "—"}</td> */}
-                        <td style={{ textAlign: "center" }}>{(item as any).total_ltrs || (Number(item.ltrs || 0) + Number((item as any).scheme_qty || 0)).toFixed(2)}</td>
+                          {/* <td style={{ textAlign: "center" }}>{item.scheme_name ? ((item as any).scheme_ltrs || 0) : "â€”"}</td> */}
+                        <td style={{ textAlign: "center" }}>{getOrderItemTotalLtrs(item).toFixed(2)}</td>
                         <td style={{ textAlign: "right" }}>
                           {Number(item.basic_price).toFixed(2)}
                         </td>
@@ -978,7 +977,7 @@ export default function Sales_Report() {
           <div className="dr-d-summary">
             <div className="dr-d-sum-row">
               <span className="dr-d-sum-label">Total Ltrs</span>
-              <span className="dr-d-sum-val">{selectedItems.reduce((s, i) => s + (Number((i as any).total_ltrs) || (Number(i.ltrs || 0) + Number((i as any).scheme_ltrs || 0))), 0).toFixed(2)}</span>
+              <span className="dr-d-sum-val">{selectedItems.reduce((s, i) => s + getOrderItemTotalLtrs(i), 0).toFixed(2)}</span>
             </div>
             <div className="dr-d-sum-row">
               <span className="dr-d-sum-label">Subtotal</span>
@@ -1021,3 +1020,6 @@ export default function Sales_Report() {
     </div>
   );
 }
+
+
+
