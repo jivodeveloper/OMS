@@ -523,26 +523,27 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
                 </thead>
                 <tbody>
                   {selectedItems.length > 0 ? (
-                    selectedItems.map((item, index) => (
+                    selectedItems.map((item, index) => {
+                      const schemes = getOrderItemSchemes(item);
+
+                      return (
                       <tr key={`${item.item_code}-${index}`}>
                         <td>{index + 1}</td>
                         <td>{item.item_code}</td>
                         <td style={{ minWidth: '250px' }}>{item.item_name}</td>
                         <td>{item.category}</td>
                         <td colSpan={2}>
-                          {getOrderItemSchemes(item).length > 0 ? (
-                            <table className="ot-scheme-mini-table">
-                              <tbody>
-                                {getOrderItemSchemes(item).map((scheme, schemeIndex) => (
-                                  <tr key={`${item.item_code}-${schemeIndex}`}>
-                                    <td>{scheme.name || "—"}</td>
-                                    <td>{scheme.qty || 0}</td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
+                          {schemes.length > 0 ? (
+                            <div className="order-scheme-stack" aria-label="Applied schemes">
+                              {schemes.map((scheme, schemeIndex) => (
+                                <div className="order-scheme-chip" key={`${item.item_code}-scheme-${schemeIndex}`}>
+                                  <span className="order-scheme-name">{scheme.name || "-"}</span>
+                                  <span className="order-scheme-qty">Qty {scheme.qty || 0}</span>
+                                </div>
+                              ))}
+                            </div>
                           ) : (
-                            "—"
+                            <span className="order-scheme-empty">No scheme</span>
                           )}
                         </td>
                         <td>{item.qty}</td>
@@ -553,7 +554,8 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
                         <td>{getOrderItemTotalLtrs(item).toFixed(2)}</td>
                         <td>{Number(item.total).toFixed(2)}</td>
                       </tr>
-                    ))
+                      );
+                    })
                   ) : (
                     <tr>
                       <td colSpan={11} className="ot-empty">No items found.</td>

@@ -505,7 +505,7 @@ export default function Daily_Report() {
                       <td><span className="dr-d-item-code">{item.item_code}</span></td>
                       <td style={{fontWeight:500,color:'#0f172a', minWidth: '250px'}}>{item.item_name}</td>
                       <td>{item.category}</td>
-                      <td colSpan={2}>{getOrderItemSchemes(item).length > 0 ? getOrderItemSchemes(item).map((scheme, schemeIndex) => <div key={`${item.item_code}-scheme-${schemeIndex}`}>{scheme.name || "—"} ({scheme.qty || 0})</div>) : "—"}</td>
+                      <td colSpan={2}>{getOrderItemSchemes(item).length > 0 ? <div className="order-scheme-stack" aria-label="Applied schemes">{getOrderItemSchemes(item).map((scheme, schemeIndex) => <div className="order-scheme-chip" key={`${item.item_code}-scheme-${schemeIndex}`}><span className="order-scheme-name">{scheme.name || "-"}</span><span className="order-scheme-qty">Qty {scheme.qty || 0}</span></div>)}</div> : <span className="order-scheme-empty">No scheme</span>}</td>
                       <td style={{textAlign:'center'}}>{item.qty}</td>
                       <td style={{textAlign:'center'}}>{item.pcs}</td>
                       <td style={{textAlign:'center'}}>{Number(item.boxes).toFixed(2)}</td>

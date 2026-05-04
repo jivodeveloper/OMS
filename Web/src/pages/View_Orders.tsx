@@ -488,15 +488,19 @@ export default function View_Orders() {
                       <td><span className="vo-d-item-code">{item.item_code}</span></td>
                       <td style={{fontWeight:500,color:'#0f172a', minWidth: '250px'}}>{item.item_name}</td>
                       <td>{item.category}</td>
-                      <td>
-                        {schemes.length > 0 ? schemes.map((scheme, schemeIndex) => (
-                          <div key={`${item.item_code}-scheme-${schemeIndex}`}>{scheme.name || "—"}</div>
-                        )) : "—"}
-                      </td>
-                      <td style={{textAlign:'center'}}>
-                        {schemes.length > 0 ? schemes.map((scheme, schemeIndex) => (
-                          <div key={`${item.item_code}-scheme-qty-${schemeIndex}`}>{scheme.qty || 0}</div>
-                        )) : "—"}
+                      <td colSpan={2}>
+                        {schemes.length > 0 ? (
+                          <div className="order-scheme-stack" aria-label="Applied schemes">
+                            {schemes.map((scheme, schemeIndex) => (
+                              <div className="order-scheme-chip" key={`${item.item_code}-scheme-${schemeIndex}`}>
+                                <span className="order-scheme-name">{scheme.name || "-"}</span>
+                                <span className="order-scheme-qty">Qty {scheme.qty || 0}</span>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <span className="order-scheme-empty">No scheme</span>
+                        )}
                       </td>
                       <td style={{textAlign:'center'}}>{item.qty}</td>
                       <td style={{textAlign:'center'}}>{item.pcs}</td>

@@ -205,28 +205,6 @@
   background: #f8fafc;
 }
 
-.ot-scheme-mini-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 12px;
-}
-
-.ot-scheme-mini-table td {
-  padding: 5px 8px;
-  border-bottom: 1px solid #e2e8f0;
-  text-align: left;
-}
-
-.ot-scheme-mini-table td:last-child {
-  width: 80px;
-  text-align: center;
-  font-weight: 700;
-}
-
-.ot-scheme-mini-table tr:last-child td {
-  border-bottom: none;
-}
-
 .ot-badge {
   display: inline-flex;
   align-items: center;

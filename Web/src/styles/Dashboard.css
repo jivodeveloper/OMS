@@ -305,6 +305,13 @@
   z-index: 1;
 }
 
+.db-card-icon svg {
+  width: 24px;
+  height: 24px;
+  color: #1e40af;
+  stroke-width: 1.9;
+}
+
 .db-card-label {
   font-size: 10px;
   font-weight: 700;

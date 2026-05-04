@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import type { ReactNode } from "react";
+import { HiOutlineClipboardDocumentList } from "react-icons/hi2";
 import {
   Area,
   AreaChart,
@@ -302,7 +304,7 @@ export default function Dashboard() {
     ],
     auditor: [
       { icon: "📥", tone: "db-card--teal", label: "This Month Orders", value: fmt(kpi?.this_month_orders ?? 0), sub: "Orders assigned for audit review" },
-      { icon: "�", tone: "db-card--blue", label: "Pending Review", value: fmt(outstandingOrders), sub: "Orders still awaiting decision" },
+      { icon: <HiOutlineClipboardDocumentList aria-hidden="true" />, tone: "db-card--blue", label: "Pending Review", value: fmt(outstandingOrders), sub: "Orders still awaiting decision" },
       { icon: "✅", tone: "db-card--dark", label: "Accepted Orders", value: fmt(auditorAcceptedCount), sub: "Orders accepted by auditor" },
     ],
     manager: [
@@ -315,7 +317,7 @@ export default function Dashboard() {
       { icon: "📌", tone: "db-card--teal", label: "Handled Orders", value: fmt(billingHandledCount), sub: "Orders completed or rejected by billing" },
       { icon: "🗓️", tone: "db-card--blue", label: "Today Orders", value: fmt(kpi?.today_orders ?? 0), sub: "Billing orders updated today" },
     ],
-  } satisfies Record<SupportedRole, { icon: string; tone: string; label: string; value: string; sub: string }[]>;
+  } satisfies Record<SupportedRole, { icon: ReactNode; tone: string; label: string; value: string; sub: string }[]>;
 
   const chartCopy = {
     admin: {
