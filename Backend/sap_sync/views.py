@@ -180,8 +180,8 @@ class PartyListView(ListAPIView):
     serializer_class = PartyListSerializer
 
     def get_queryset(self):
-        # Return all parties; filtering is handled on the client or via query params
-        queryset = Party.objects.all()
+        # ✅ Only OIL category
+        queryset = Party.objects.filter(category__iexact='OIL')
 
         search = self.request.query_params.get('search', None)
         if search:
@@ -203,6 +203,7 @@ class PartyListView(ListAPIView):
             queryset = queryset.filter(card_type=card_type)
 
         return queryset
+
 class PartyDetailView(RetrieveAPIView):
     """Get single party with addresses"""
     permission_classes = [AllowAny]

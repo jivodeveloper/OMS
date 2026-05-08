@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Parties,DispatchLocation,ProductDetails,OrderItem,OrderItemScheme,Branches,OrdersLog,Order,Notification
+from .models import Parties,DispatchLocation,ProductDetails,OrderItem,Branches,OrdersLog,Order,Notification
 from users.models import SchemeProduct, State
 from sap_sync.models import PartyAddress as SapPartyAddress
 from sap_sync.models import Product as SapProduct
@@ -157,41 +157,11 @@ class OrdersLogSerializer(serializers.ModelSerializer):
             "created_at",
         ]
 
-
-class OrderItemSchemeSerializer(serializers.ModelSerializer):
-    scheme_id = serializers.IntegerField(read_only=True, allow_null=True)
-    scheme_name = serializers.SerializerMethodField()
-    scheme_item_code = serializers.SerializerMethodField()
-    scheme_qty = serializers.DecimalField(source='qty_scheme', max_digits=10, decimal_places=2, read_only=True)
-
-    def get_scheme_name(self, obj):
-        raw_scheme_id = getattr(obj, 'scheme_id', None)
-        if not raw_scheme_id:
-            return None
-        return (
-            SchemeProduct.objects
-            .filter(scheme_id=raw_scheme_id)
-            .values_list('scheme_name', flat=True)
-            .first()
-        )
-
-    def get_scheme_item_code(self, obj):
-        raw_scheme_id = getattr(obj, 'scheme_id', None)
-        if not raw_scheme_id:
-            return None
-        return get_scheme_item_code_raw(raw_scheme_id)
-
-    class Meta:
-        model = OrderItemScheme
-        fields = ['id', 'scheme_id', 'scheme_name', 'scheme_item_code', 'scheme_qty', 'qty_scheme']
-
-
 class OrderItemSerializer(serializers.ModelSerializer):
     scheme_id = serializers.IntegerField(read_only=True, allow_null=True)
     scheme_name = serializers.SerializerMethodField()
     scheme_item_code = serializers.SerializerMethodField()
     is_scheme_visible = serializers.SerializerMethodField()
-    schemes = OrderItemSchemeSerializer(many=True, read_only=True)
 
     def get_scheme_name(self, obj):
         raw_scheme_id = getattr(obj, 'scheme_id', None)
@@ -213,8 +183,7 @@ class OrderItemSerializer(serializers.ModelSerializer):
     def get_is_scheme_visible(self, obj):
         raw_scheme_id = getattr(obj, 'scheme_id', None)
         scheme_qty = getattr(obj, 'qty_scheme', 0) or 0
-        has_multiple_schemes = obj.schemes.exists() if getattr(obj, 'pk', None) else False
-        return bool(getattr(obj, 'is_scheme_visible', False) or (raw_scheme_id and scheme_qty > 0) or has_multiple_schemes)
+        return bool(getattr(obj, 'is_scheme_visible', False) or (raw_scheme_id and scheme_qty > 0))
 
     class Meta:
         model = OrderItem
@@ -259,7 +228,6 @@ class CreateSchemeSerializer(serializers.ModelSerializer):
     class Meta:
         model = SchemeProduct
         fields = ["scheme_name", "item_code", "state_code"]
-        extra_kwargs = {"state_code": {"required": False, "allow_blank": True, "allow_null": True}}
 
 class NotificationSerializer(serializers.ModelSerializer):
     order_id = serializers.IntegerField(source='order.id', read_only=True)

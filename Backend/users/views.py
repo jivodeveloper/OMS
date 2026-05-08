@@ -1,14 +1,12 @@
-
 from rest_framework import status
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework_simplejwt.tokens import RefreshToken
-from .serializers import LoginSerializer, UpdateUserSerializer, UserSerializer,StateSerializer, CompanySerializer,MainGroupSerializer,CreateUserSerializer, CategorySerializer
+from .serializers import LoginSerializer, UpdateUserSerializer, UserSerializer,StateSerializer, CompanySerializer,MainGroupSerializer,CreateUserSerializer
 from rest_framework.generics import ListAPIView
 from .models import State, Company, MainGroup,UserRole,User, UserPartyAssignment,PartyProductAssignment
 from sap_sync.models import Party, Product
-from orders.models import Categories
 from decimal import Decimal
 
 class PartyUsersView(APIView):
@@ -191,66 +189,6 @@ class AssignProductToPartyView(APIView):
                 'basic_rate': float(obj.basic_rate)
             }
         })
-class BulkAssignPartyToProductView(APIView):
-    """
-    Assign multiple products to multiple parties
-    """
-    permission_classes = [IsAuthenticated]
-
-    def post(self, request):
-        card_codes = request.data.get('card_codes', [])
-        products = request.data.get('products', [])
-
-        if not card_codes:
-            return Response({'success': False, 'message': 'card_codes is required'}, status=status.HTTP_400_BAD_REQUEST)
-
-        if not products:
-            return Response({'success': False, 'message': 'products is required'}, status=status.HTTP_400_BAD_REQUEST)
-
-        added = 0
-        updated = 0
-        errors = []
-
-        for card_code in card_codes:
-            for prod in products:
-                item_code = prod.get('item_code')
-                category = prod.get('category')
-                basic_rate = prod.get('basic_rate', 0)
-
-                if not item_code or not category:
-                    errors.append(f"{card_code}: Missing item_code/category")
-                    continue
-
-                # Validate product exists
-                if not Product.objects.filter(item_code=item_code, category=category).exists():
-                    errors.append(f"{card_code}: {item_code}|{category} not found")
-                    continue
-
-                obj, created = PartyProductAssignment.objects.update_or_create(
-                    card_code=card_code,
-                    item_code=item_code,
-                    category=category,
-                    defaults={
-                        'basic_rate': Decimal(str(basic_rate)),
-                        'is_active': True,
-                        'assigned_by': request.user
-                    }
-                )
-
-                if created:
-                    added += 1
-                else:
-                    updated += 1
-
-        return Response({
-            'success': True,
-            'message': f'Added: {added}, Updated: {updated}',
-            'data': {
-                'added': added,
-                'updated': updated,
-                'errors': errors
-            }
-        }, status=status.HTTP_200_OK)
 
 class BulkAssignProductsToPartyView(APIView):
     """
@@ -484,12 +422,6 @@ class MainGroupListView(ListAPIView):
     permission_classes = [AllowAny]
     serializer_class = MainGroupSerializer
     queryset = MainGroup.objects.filter(is_active=True).order_by('name')
-    
-class CategoryListView(ListAPIView):
-    """Get all categories"""
-    permission_classes = [AllowAny]
-    serializer_class = CategorySerializer
-    queryset = Categories.objects.all().order_by('category')
 
 #Creating User
 class CreateUserView(APIView):
@@ -516,8 +448,8 @@ class CreateUserView(APIView):
 
 
 class UserDetailView(APIView):
-    permission_classes = [AllowAny] 
-    
+    permission_classes = [AllowAny] # Tusi IsAuthenticated bhi rakh sakde ho
+
     def get(self, request, user_id):
         try:
             user = User.objects.get(pk=user_id)
@@ -558,15 +490,106 @@ class UserDetailView(APIView):
             'errors': serializer.errors
         }, status=status.HTTP_400_BAD_REQUEST)
     
-class DeleteUserView(APIView):
+class UserDetailView(APIView):
+    permission_classes = [AllowAny] # Tusi IsAuthenticated bhi rakh sakde ho
 
-    permission_classes = [AllowAny]
-
-    def post(self, request, user_id):
+    def get(self, request, user_id):
         try:
             user = User.objects.get(pk=user_id)
-            user.is_active = False
-            user.save()
-            return Response({'success': True, 'message': 'User removed successfully'}, status=status.HTTP_200_OK)
+            serializer = UserSerializer(user)
+            return Response({
+                'success': True,
+                'data': serializer.data
+            }, status=status.HTTP_200_OK)
         except User.DoesNotExist:
-            return Response({'success': False, 'message': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
+            return Response({
+                'success': False,
+                'message': 'User not found'
+            }, status=status.HTTP_404_NOT_FOUND)
+
+    def put(self, request, user_id):
+        try:
+            user = User.objects.get(pk=user_id)
+        except User.DoesNotExist:
+            return Response({
+                'success': False,
+                'message': 'User not found'
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        serializer = UpdateUserSerializer(user, data=request.data, partial=True)
+        if serializer.is_valid():
+            updated_user = serializer.save()
+            return Response({
+                'success': True,
+                'message': 'User updated successfully',
+                'data': UserSerializer(updated_user).data
+            }, status=status.HTTP_200_OK)
+
+        return Response({
+            'success': False,
+            'message': 'Failed to update user',
+            'errors': serializer.errors
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
+
+class BulkAssignPartyToProductView(APIView):
+    """
+    Assign multiple products to multiple parties
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        card_codes = request.data.get('card_codes', [])
+        products = request.data.get('products', [])
+
+        if not card_codes:
+            return Response({'success': False, 'message': 'card_codes is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if not products:
+            return Response({'success': False, 'message': 'products is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        added = 0
+        updated = 0
+        errors = []
+
+        for card_code in card_codes:
+            for prod in products:
+                item_code = prod.get('item_code')
+                category = prod.get('category')
+                basic_rate = prod.get('basic_rate', 0)
+
+                if not item_code or not category:
+                    errors.append(f"{card_code}: Missing item_code/category")
+                    continue
+
+                # Validate product exists
+                if not Product.objects.filter(item_code=item_code, category=category).exists():
+                    errors.append(f"{card_code}: {item_code}|{category} not found")
+                    continue
+
+                obj, created = PartyProductAssignment.objects.update_or_create(
+                    card_code=card_code,
+                    item_code=item_code,
+                    category=category,
+                    defaults={
+                        'basic_rate': Decimal(str(basic_rate)),
+                        'is_active': True,
+                        'assigned_by': request.user
+                    }
+                )
+
+                if created:
+                    added += 1
+                else:
+                    updated += 1
+
+        return Response({
+            'success': True,
+            'message': f'Added: {added}, Updated: {updated}',
+            'data': {
+                'added': added,
+                'updated': updated,
+                'errors': errors
+            }
+        }, status=status.HTTP_200_OK)
+

@@ -1,5 +1,5 @@
 from django.urls import path
-from .views import DeleteUserView,LoginView,PartyUsersView,AssignPartiesView, ProfileView,StateListView, UserDetailView,UserPartiesView,UpdateProductRateView,RemoveProductFromPartyView,RemovePartyAssignmentView,PartyProductsView,AssignProductToPartyView,BulkAssignProductsToPartyView,UserListForAssignmentView,CompanyListView,MainGroupListView,CreateUserView,RoleListView,BulkAssignPartyToProductView,CategoryListView
+from .views import LoginView,PartyUsersView,AssignPartiesView, ProfileView,StateListView, UserDetailView,UserPartiesView,UpdateProductRateView,RemoveProductFromPartyView,RemovePartyAssignmentView,PartyProductsView,AssignProductToPartyView,BulkAssignProductsToPartyView,UserListForAssignmentView,CompanyListView,MainGroupListView,CreateUserView,RoleListView,BulkAssignPartyToProductView
 from django.views.decorators.csrf import csrf_exempt
 
 
@@ -31,7 +31,5 @@ urlpatterns = [
 
 
  path('users/<int:user_id>/', UserDetailView.as_view(), name='user-detail'),
-  path('bulk-party/assign-products/', BulkAssignPartyToProductView.as_view()),
-
-   path('categories/', CategoryListView.as_view(), name='categories'),
+  path('bulk-party/assign-products/', BulkAssignPartyToProductView.as_view())
 ]
