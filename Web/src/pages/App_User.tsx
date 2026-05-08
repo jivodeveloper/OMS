@@ -183,57 +183,49 @@ export default function App_User() {
   const getCreateUserErrorMessage = (source: any) => {
     const responseData = source?.response?.data || source;
     const errorBag = responseData?.errors || {};
-    const usernameError = errorBag?.username?.[0] || responseData?.username?.[0];
-    const emailError = errorBag?.email?.[0] || responseData?.email?.[0];
-    const nonFieldError =
-      errorBag?.non_field_errors?.[0] || responseData?.non_field_errors?.[0];
-    const rawMessage =
-      responseData?.message ||
-      responseData?.error ||
-      responseData?.detail ||
-      usernameError ||
-      emailError ||
-      nonFieldError ||
-      "";
 
-    const isDuplicateFieldError = (value: unknown) => {
-      const message = String(value || "").toLowerCase();
-      return (
-        message.includes("already exists") ||
-        message.includes("already exist") ||
-        message.includes("duplicate") ||
-        message.includes("already taken")
-      );
-    };
+    const errorsToScan = Object.keys(errorBag).length > 0 ? errorBag : responseData;
 
-    const usernameDuplicate = isDuplicateFieldError(usernameError);
-    const emailDuplicate = isDuplicateFieldError(emailError);
+    if (errorsToScan && typeof errorsToScan === "object" && !Array.isArray(errorsToScan)) {
+      const usernameError = errorsToScan.username?.[0] || (typeof errorsToScan.username === "string" ? errorsToScan.username : null);
+      const emailError = errorsToScan.email?.[0] || (typeof errorsToScan.email === "string" ? errorsToScan.email : null);
+      const passwordError = errorsToScan.password?.[0] || (typeof errorsToScan.password === "string" ? errorsToScan.password : null);
+      const nonFieldError = errorsToScan.non_field_errors?.[0];
 
-    if (usernameDuplicate && emailDuplicate) {
-      return "Username and email already exist.";
+      const isDuplicate = (val: any) => {
+        const msg = String(val || "").toLowerCase();
+        return msg.includes("already exist") || msg.includes("duplicate") || msg.includes("already taken");
+      };
+
+      if (isDuplicate(usernameError) && isDuplicate(emailError)) {
+        return "Username and email already exist.";
+      }
+      if (isDuplicate(usernameError)) return "Username already exists.";
+      if (isDuplicate(emailError)) return "Email already exists.";
+
+      if (passwordError) return `Password: ${passwordError}`;
+      if (usernameError) return `Username: ${usernameError}`;
+      if (emailError) return `Email: ${emailError}`;
+      if (nonFieldError) return String(nonFieldError);
+
+      // Dynamically extract any other field error (e.g., phone, name)
+      for (const [key, value] of Object.entries(errorsToScan)) {
+        if (key !== "message" && key !== "error" && key !== "detail" && key !== "success") {
+          if (Array.isArray(value) && value.length > 0 && typeof value[0] === "string") {
+            const fieldName = key.charAt(0).toUpperCase() + key.slice(1);
+            return `${fieldName}: ${value[0]}`;
+          }
+        }
+      }
     }
 
-    if (usernameDuplicate) {
-      return "Username already exists.";
-    }
+    if (typeof responseData?.message === "string" && responseData.message) return responseData.message;
+    if (typeof responseData?.error === "string" && responseData.error) return responseData.error;
+    if (typeof responseData?.detail === "string" && responseData.detail) return responseData.detail;
 
-    if (emailDuplicate) {
-      return "Email already exists.";
-    }
-
-    if (usernameError) {
-      return String(usernameError);
-    }
-
-    if (emailError) {
-      return String(emailError);
-    }
-
-    if (nonFieldError) {
-      return String(nonFieldError);
-    }
-
-    return rawMessage || "Something went wrong while creating the user.";
+    return typeof responseData === "string" && responseData.trim() !== ""
+      ? responseData
+      : "Something went wrong while creating the user.";
   };
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {

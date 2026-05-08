@@ -18,6 +18,7 @@ import "./styles/UIConsistency.css";
 import Party_Assignment from "./pages/Party_Assignment";
 import Party_Product_Assignment from "./pages/Party_Product_Assignment";
 import Add_Scheme from "./pages/Add_Scheme";
+import NewInvoice from "./pages/NewInvoice";
 
 function App() {
   return (
@@ -144,6 +145,14 @@ function App() {
           element={
             <Sidebar>
               <Party_Product_Assignment />
+            </Sidebar>}
+        />
+
+        <Route
+          path="/NewInvoice"
+          element={
+            <Sidebar>
+              <NewInvoice />
             </Sidebar>}
         />
 

@@ -116,7 +116,21 @@ def _get_base_orders(user):
             Q(logs__action__name__icontains='auditor')
         ).distinct()
     if role_name == 'approver':
-        return Order.objects.filter(status__code__in=['NEED_APPROVAL', 'RATE_APPROVAL'])
+        handled_order_ids = (
+            OrdersLog.objects
+            .filter(performed_by=user)
+            .filter(
+                Q(action__code__in=['APPROVED', 'REJECTED']) |
+                Q(action__name__icontains='approve') |
+                Q(action__name__icontains='reject')
+            )
+            .values_list('order_id', flat=True)
+            .distinct()
+        )
+        return Order.objects.filter(
+            Q(status__code__in=['NEED_APPROVAL', 'RATE_APPROVAL']) |
+            Q(id__in=handled_order_ids)
+        ).distinct()
     if role_name == 'billing':
         handled_order_ids = (
             OrdersLog.objects
@@ -195,6 +209,24 @@ class WDashboardKPIView(APIView):
                 Q(logs__action__name__icontains='billing')
             ).distinct().count()
             pending_review_orders = year_orders.filter(status__code='AUDITOR_APPROVAL').distinct().count()
+
+        if role_name == 'approver':
+            approver_handled_orders = year_orders.filter(
+                logs__performed_by=request.user,
+            ).distinct()
+
+            accepted_orders = approver_handled_orders.filter(
+                Q(logs__action__name__icontains='approve') |
+                Q(logs__action__code='APPROVED')
+            ).distinct().count()
+
+            rejected_orders = approver_handled_orders.filter(
+                Q(status__code__in=['REJECTED', 'BILLING_REJECTED']) |
+                Q(logs__action__code__in=['REJECTED', 'BILLING_REJECTED']) |
+                Q(logs__action__name__icontains='reject')
+            ).distinct().count()
+
+            pending_review_orders = year_orders.filter(status__code__in=['NEED_APPROVAL', 'RATE_APPROVAL']).distinct().count()
 
         status_counts = {}
         for os in OrderStatus.objects.all():

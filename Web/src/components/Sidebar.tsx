@@ -265,6 +265,7 @@ export default function Sidebar({ children }: SidebarProps) {
               {salesOpen && (
                 <ul className="dropdown-list">
                   <li><Link to="/Add_Sales" onClick={closeSidebar}>Add Sales</Link></li>
+               
                   <li><Link to="/View_Orders" onClick={closeSidebar}>View Orders</Link></li>
                 </ul>
               )}
@@ -290,6 +291,8 @@ export default function Sidebar({ children }: SidebarProps) {
               <li className={location.pathname === "/Billing_status_tracking" ? "active" : ""}>
                 <Link to="/Billing_status_tracking" onClick={closeSidebar}>Status Tracking</Link>
               </li>
+
+              <li><Link to="/NewInvoice" onClick={closeSidebar}>New A/R Invoice</Link></li>
             </>
           )}
 

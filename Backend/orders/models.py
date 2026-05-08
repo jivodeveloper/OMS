@@ -217,3 +217,9 @@ class Notification(models.Model):
         ordering = ['-created_at']
     def __str__(self):
          return f"Notification for {self.user.username}: {self.message}"
+
+class Categories(models.Model):
+    category= models.CharField(max_length=255)
+
+    class Meta:
+        db_table = 'categories'

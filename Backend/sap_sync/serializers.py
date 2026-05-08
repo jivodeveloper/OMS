@@ -41,7 +41,7 @@ class PartyListSerializer(serializers.ModelSerializer):
         model = Party
         fields = [
             'id', 'card_code', 'card_name', 'state',
-            'main_group', 'card_type', 'category', 'synced_at'
+            'main_group', 'card_type', 'category','chain', 'synced_at'
         ]
 
 
