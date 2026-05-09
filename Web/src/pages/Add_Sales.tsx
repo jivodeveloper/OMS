@@ -131,6 +131,7 @@ export default function Add_Sales() {
     billAddress: "",
     shipAddress: "",
     Deliverydate: "",
+    poNumber: "",
     company: "",
   });
 
@@ -411,6 +412,7 @@ export default function Add_Sales() {
           billAddress: order.bill_to_id ? String(order.bill_to_id) : "",
           shipAddress: order.ship_to_id ? String(order.ship_to_id) : "",
           Deliverydate: isDuplicateMode ? "" : order.delivery_date || "",
+          poNumber: isDuplicateMode ? "" : order.po_number || "",
           company: order.company ? String(order.company) : "",
         });
         const orderStateCode = order.party_state || "";
@@ -516,6 +518,7 @@ export default function Add_Sales() {
         "",
 
       delivery_date: formData.Deliverydate,
+      po_number: formData.poNumber.trim(),
       company: Number(formData.company),
 
       total_amount: totalAmount,
@@ -623,6 +626,7 @@ export default function Add_Sales() {
       billAddress: "",
       shipAddress: "",
       Deliverydate: "",
+      poNumber: "",
       company: "",
     });
 
@@ -719,6 +723,47 @@ export default function Add_Sales() {
     );
   };
 
+  const getRowProduct = (row: SalesRow) =>
+    partyProducts.find(
+      (p) =>
+        p.item_name === row.item &&
+        p.category === row.category &&
+        (p.brand || "") === (row.brand || "") &&
+        (p.variety || "") === (row.variety || ""),
+    ) ||
+    partyProducts.find(
+      (p) => p.item_name === row.item && p.category === row.category,
+    ) ||
+    partyProducts.find((p) => p.item_name === row.item) ||
+    products.find((p) => p.item_name === row.item);
+
+  const recalculateRowTotals = (row: SalesRow, source: "boxes" | "qty" | "price") => {
+    const product = getRowProduct(row);
+    if (!product) return row;
+
+    const factor = Number(product.sal_factor2) || 1;
+    const packUnit = Number(product.sal_pack_unit) || 0;
+    let qty = Number(row.qty) || 0;
+
+    if (source === "boxes") {
+      qty = (Number(row.boxes) || 0) * factor;
+      row.qty = qty > 0 ? String(qty) : "";
+    }
+
+    if (source === "qty") {
+      row.boxes = qty > 0 && factor > 0 ? String(qty / factor) : "";
+    }
+
+    row.ltrs = qty > 0 ? String(packUnit * qty) : "";
+
+    const basic = Number(row.basicPrice) || 0;
+    const market = Number(row.marketPrice) || 0;
+    const price = market > 0 ? market : basic;
+    row.amount = qty > 0 && price > 0 ? (price * qty).toFixed(2) : "";
+
+    return row;
+  };
+
   const handleRowChange = (
     index: number,
     e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>,
@@ -797,7 +842,7 @@ export default function Add_Sales() {
 
     //  CALCULATIONS
     //  (boxes → qty)
-    if (name === "boxes" || name === "marketPrice") {
+    if (name === "boxes") {
       const boxes = Number(row.boxes) || 0;
 
       const product =
@@ -822,7 +867,7 @@ export default function Add_Sales() {
         row.amount = (price * qty).toFixed(2);
       }
     }
-    if (name === "boxes" || name === "marketPrice" || name === "scheme") {
+    if (name === "boxes" || name === "scheme") {
       const boxes = Number(row.boxes) || 0;
 
       const product =
@@ -869,6 +914,15 @@ export default function Add_Sales() {
       // }
       // }
     }
+
+    if (name === "qty") {
+      row = recalculateRowTotals(row, "qty");
+    }
+
+    if (name === "marketPrice") {
+      row = recalculateRowTotals(row, "price");
+    }
+
     updatedRows[index] = row;
     setRows(updatedRows);
   };
@@ -952,7 +1006,6 @@ export default function Add_Sales() {
     row.type &&
     row.item &&
     Number(row.qty) > 0 &&
-    Number(row.amount) > 0 &&
     (!row.isScheme ||
       row.schemes.every((scheme) => scheme.scheme && Number(scheme.schemeQty || 0) > 0));
 
@@ -967,6 +1020,14 @@ export default function Add_Sales() {
     setRows((prev) =>
       prev.map((item, rowIndex) =>
         rowIndex === index ? { ...item, confirmed: true } : item,
+      ),
+    );
+  };
+
+  const handleEditRow = (index: number) => {
+    setRows((prev) =>
+      prev.map((item, rowIndex) =>
+        rowIndex === index ? { ...item, confirmed: false } : item,
       ),
     );
   };
@@ -1296,6 +1357,7 @@ export default function Add_Sales() {
               <div className="sl-focus-line" />
             </div>
           </div>
+
         </div>
 
         <div className="sl-table-wrap">
@@ -1478,7 +1540,14 @@ export default function Add_Sales() {
                     </td>
 
                     <td>
-                      <input type="number" value={row.qty} readOnly />
+                      <input
+                        type="number"
+                        name="qty"
+                        value={row.qty}
+                        onChange={(e) => handleRowChange(index, e)}
+                        disabled={row.confirmed && !isEditMode}
+                        required
+                      />
                     </td>
 
                     <td>
@@ -1521,9 +1590,18 @@ export default function Add_Sales() {
                           Confirm
                         </button>
                       ) : (
-                        <span className="sl-row-confirmed-badge">
-                          Confirmed
-                        </span>
+                        <>
+                          <span className="sl-row-confirmed-badge">
+                            Confirmed
+                          </span>
+                          <button
+                            type="button"
+                            className="sl-edit-item-btn"
+                            onClick={() => handleEditRow(index)}
+                          >
+                            Edit
+                          </button>
+                        </>
                       )}
                       <button
                         type="button"
@@ -1776,6 +1854,23 @@ export default function Add_Sales() {
 
         <div className="sl-section-label">Summary</div>
         <div className="sl-grid sl-summary-grid">
+          <div className="sl-field">
+            <label className="sl-label" htmlFor="poNumber">
+              PO Number
+            </label>
+            <div className="sl-input-wrap">
+              <input
+                type="text"
+                id="poNumber"
+                name="poNumber"
+                value={formData.poNumber}
+                onChange={handleChange}
+                placeholder="Enter PO number"
+              />
+              <div className="sl-focus-line" />
+            </div>
+          </div>
+
           <div className="sl-field">
             <label className="sl-label">Company</label>
             <div className="sl-input-wrap">

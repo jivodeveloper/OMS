@@ -470,6 +470,10 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
                 <span className="ot-detail-value">{orderDetails.delivery_date || "—"}</span>
               </div>
               <div className="ot-detail-field">
+                <span className="ot-detail-label">PO Number</span>
+                <span className="ot-detail-value">{orderDetails.po_number || "—"}</span>
+              </div>
+              <div className="ot-detail-field">
                 <span className="ot-detail-label">Party Name</span>
                 <span className="ot-detail-value">{orderDetails.card_name || "—"}</span>
               </div>

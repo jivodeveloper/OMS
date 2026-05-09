@@ -102,6 +102,7 @@ export interface CreateOrder {
   dispatch_from_name: string;
 
   delivery_date: string;
+  po_number?: string;
   company: number;
 
   total_amount: number;

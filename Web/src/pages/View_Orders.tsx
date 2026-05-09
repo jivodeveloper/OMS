@@ -445,6 +445,10 @@ export default function View_Orders() {
                 <span className="vo-d-hf-value">{orderDetails.delivery_date || "—"}</span>
               </div>
               <div className="vo-d-info-field">
+                <span className="vo-d-hf-label">PO Number</span>
+                <span className="vo-d-hf-value">{orderDetails.po_number || "—"}</span>
+              </div>
+              <div className="vo-d-info-field">
                 <span className="vo-d-hf-label">Party Name</span>
                 <span className="vo-d-hf-value">{orderDetails.card_name}</span>
               </div>

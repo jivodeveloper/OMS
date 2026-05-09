@@ -299,6 +299,10 @@ export default function Auditor_orders() {
                 <span className="ao-d-hf-value">{orderDetails.delivery_date || "â€”"}</span>
               </div>
               <div className="ao-d-info-field">
+                <span className="ao-d-hf-label">PO Number</span>
+                <span className="ao-d-hf-value">{orderDetails.po_number || "â€”"}</span>
+              </div>
+              <div className="ao-d-info-field">
                 <span className="ao-d-hf-label">Party Name</span>
                 <span className="ao-d-hf-value">{orderDetails.card_name}</span>
               </div>

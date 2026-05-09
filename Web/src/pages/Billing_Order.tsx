@@ -405,6 +405,10 @@ export default function Billing_orders() {
                 <span className="bo-d-hf-value">{orderDetails.delivery_date || "â€”"}</span>
               </div>
               <div className="bo-d-info-field">
+                <span className="bo-d-hf-label">PO Number</span>
+                <span className="bo-d-hf-value">{orderDetails.po_number || "â€”"}</span>
+              </div>
+              <div className="bo-d-info-field">
                 <span className="bo-d-hf-label">Party Name</span>
                 <span className="bo-d-hf-value">{orderDetails.card_name}</span>
               </div>

@@ -872,6 +872,10 @@ export default function Sales_Report() {
                 </span>
               </div>
               <div className="dr-d-info-field">
+                <span className="dr-d-hf-label">PO Number</span>
+                <span className="dr-d-hf-value">{orderDetails.po_number || "â€”"}</span>
+              </div>
+              <div className="dr-d-info-field">
                 <span className="dr-d-hf-label">Party Name</span>
                 <span className="dr-d-hf-value">{orderDetails.card_name}</span>
               </div>
