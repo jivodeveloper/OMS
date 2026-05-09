@@ -247,9 +247,9 @@ export default function Auditor_orders() {
 
           {filteredOrders.length > itemsPerPage && (
             <div className="ao-pagination">
-              <button className="ao-pg-btn" disabled={currentPage === 1} onClick={() => setCurrentPage((p) => p - 1)}>â† Prev</button>
+              <button className="ao-pg-btn" disabled={currentPage === 1} onClick={() => setCurrentPage((p) => p - 1)}>Prev</button>
               <span className="ao-pg-info">{currentPage} / {Math.ceil(filteredOrders.length / itemsPerPage)}</span>
-              <button className="ao-pg-btn" disabled={currentPage === Math.ceil(filteredOrders.length / itemsPerPage)} onClick={() => setCurrentPage((p) => p + 1)}>Next â†’</button>
+              <button className="ao-pg-btn" disabled={currentPage === Math.ceil(filteredOrders.length / itemsPerPage)} onClick={() => setCurrentPage((p) => p + 1)}>Next</button>
             </div>
           )}
         </>

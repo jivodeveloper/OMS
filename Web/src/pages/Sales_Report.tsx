@@ -39,6 +39,7 @@ export default function Sales_Report() {
   const [selectedGroups, setSelectedGroups] = useState<number[]>([]);
   const [mgDropdownOpen, setMgDropdownOpen] = useState(false);
   const [orders, setOrders] = useState<Order[]>([]);
+  const [isOrdersLoading, setIsOrdersLoading] = useState(true);
     // const [selectedUser] = useState<string>("");
   const [showDetails, setShowDetails] = useState(false);
   const [orderDetails, setOrderDetails] = useState<Order | null>(null);
@@ -54,11 +55,14 @@ export default function Sales_Report() {
   const varietyRef = useRef<HTMLDivElement>(null);
 
   const fetchOrders = async () => {
+    setIsOrdersLoading(true);
     try {
       const data = await loadManagerOrders();
       setOrders(data);
     } catch (error) {
       console.error("Failed to fetch orders:", error);
+    } finally {
+      setIsOrdersLoading(false);
     }
   };
 
@@ -734,7 +738,9 @@ export default function Sales_Report() {
                 </div>
               </div>
 
-              {filteredOrders.length > 0 ? (
+              {isOrdersLoading ? (
+                <div className="dr-empty" style={{ padding: "40px", textAlign: "center", color: "#64748b", background: "#f8fafc", borderRadius: "8px", border: "1px dashed #cbd5e1", margin: "20px 0" }}>Loading orders...</div>
+              ) : filteredOrders.length > 0 ? (
                 <div className="dr-table-wrap">
                   <table className="dr-table">
                     <thead>
@@ -792,7 +798,7 @@ export default function Sales_Report() {
                     disabled={currentPage === 1}
                     onClick={() => setCurrentPage((page) => page - 1)}
                   >
-                    â† Prev
+                    Prev
                   </button>
                   <span className="dr-pg-info">
                     {currentPage} / {totalPages}
@@ -802,7 +808,7 @@ export default function Sales_Report() {
                     disabled={currentPage === totalPages}
                     onClick={() => setCurrentPage((page) => page + 1)}
                   >
-                    Next â†’
+                    Next
                   </button>
                 </div>
               )}

@@ -69,14 +69,28 @@ class PartyProductAssignment(models.Model):
     def __str__(self):
         return f"{self.card_code} - {self.item_code} ({self.category}) - ₹{self.basic_rate}"
    
+   
 class UserPartyAssignment(models.Model):
     """Maps users to parties using card_code"""
+    CATEGORY_CHOICES = [
+        ('OIL', 'Oil'),
+        ('BEVERAGES', 'Beverages'),
+        ('MART', 'Mart'),
+    ]
+
     user = models.ForeignKey(
         'users.User',
         on_delete=models.CASCADE,
         related_name='party_assignments'
     )
     card_code = models.CharField(max_length=50, db_index=True)
+    category = models.CharField(
+        max_length=20,
+        choices=CATEGORY_CHOICES,
+        db_index=True,
+        null=True,
+        blank=True,
+    )
     assigned_at = models.DateTimeField(auto_now_add=True)
     assigned_by = models.ForeignKey(
         'users.User',
@@ -89,11 +103,11 @@ class UserPartyAssignment(models.Model):
 
     class Meta:
         db_table = 'user_party_assignments'
-        unique_together = ['user', 'card_code']
+        unique_together = ['user', 'card_code', 'category']
         ordering = ['-assigned_at']
 
     def __str__(self):
-        return f"{self.user.username} - {self.card_code}"
+        return f"{self.user.username} - {self.card_code} ({self.category or '-'})"
 
 class Company(models.Model):
     name = models.CharField(max_length= 100,unique = True)
@@ -199,6 +213,14 @@ class User(AbstractUser):
     
     state = models.ForeignKey(
         'State',
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name='users'
+    )
+    
+    category = models.ForeignKey(
+        'orders.Categories',
         on_delete=models.PROTECT,
         null=True,
         blank=True,

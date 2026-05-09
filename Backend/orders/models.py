@@ -132,7 +132,6 @@ class Order(models.Model):
 
     def __str__(self):
         return self.order_number
-
 class OrderItem(models.Model):
     order = models.ForeignKey(Order, related_name='items', on_delete=models.CASCADE)
     item_code = models.CharField(max_length=50)
@@ -166,6 +165,7 @@ class OrderItem(models.Model):
     class Meta:
         db_table = 'order_items'
     
+
 class OrdersLog(models.Model):
     order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name='logs')
     action = models.ForeignKey(OrderStatus, on_delete=models.SET_NULL, null=True)
@@ -187,17 +187,32 @@ def log_order_action(order, action_name, user=None, remarks=''):
         )
     except OrderStatus.DoesNotExist:
         pass
-
-
-class Notification(models.Model):
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notifications')
-    order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name='notifications')
-    message = models.TextField()
-    is_read = models.BooleanField(default=False)
+class Template(models.Model):
+    temp_id = models.AutoField(primary_key=True)
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='saved_templates')
+    order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name='template_instances')
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        db_table = 'notifications'
-        ordering = ['-created_at']
-    def __str__(self):
-         return f"Notification for {self.user.username}: {self.message}"
+        db_table = 'order_template'
+        unique_together = ('user', 'order') 
+class OrderItemScheme(models.Model):
+    order_item = models.ForeignKey(OrderItem, related_name='schemes', on_delete=models.CASCADE)
+    scheme = models.ForeignKey(
+        'users.SchemeProduct',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        db_column='scheme_id',
+        related_name='order_item_schemes',
+    )
+    qty_scheme = models.DecimalField(max_digits=10, decimal_places=2, default=0, null=True, blank=True)
+
+    class Meta:
+        db_table = 'order_item_schemes'
+class Categories(models.Model):
+    category= models.CharField(max_length=255)
+
+    class Meta:
+        db_table = 'categories'
+

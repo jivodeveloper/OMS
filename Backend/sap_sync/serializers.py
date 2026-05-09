@@ -1,7 +1,6 @@
 from rest_framework import serializers
 from .models import Product, Party, PartyAddress, Branch, SyncLog, SyncSchedule
 
-
 class ProductSerializer(serializers.ModelSerializer):
     class Meta:
         model = Product
@@ -12,7 +11,6 @@ class ProductSerializer(serializers.ModelSerializer):
         ]
 
 
-# ✅ MOVE THIS BEFORE PartySerializer
 class PartyAddressSerializer(serializers.ModelSerializer):
     class Meta:
         model = PartyAddress

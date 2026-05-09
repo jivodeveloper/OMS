@@ -2,6 +2,7 @@ from rest_framework import serializers
 from django.db.utils import ProgrammingError
 from django.contrib.auth import authenticate
 from .models import User, Company, MainGroup, State, UserRole, SchemeProduct, UserState
+from orders.models import Categories
 
 class SchemeProductSerializer(serializers.ModelSerializer):
     class Meta:
@@ -28,12 +29,18 @@ class StateSerializer(serializers.ModelSerializer):
         model = State
         fields = ['id', 'name', 'code']
  
+class CategorySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Categories
+        fields = ['id', 'category']
+
 class UserSerializer(serializers.ModelSerializer):
     company = serializers.SerializerMethodField()
     main_group = serializers.SerializerMethodField()
     main_groups = serializers.SerializerMethodField()
     state = serializers.SerializerMethodField()
     states = serializers.SerializerMethodField()
+    category = serializers.SerializerMethodField()
     role = serializers.CharField(source='role.name', read_only=True)
     role_display = serializers.CharField(source='role.display_name', default= None, read_only=True)
     is_active = serializers.BooleanField(read_only=True)
@@ -42,7 +49,7 @@ class UserSerializer(serializers.ModelSerializer):
         model = User
         fields = [
             'id', 'name', 'username', 'email', 'phone',
-            'role','role_display', 'company', 'main_group','main_groups', 'state', 'states', 'is_active', 'password'
+            'role','role_display', 'company', 'main_group','main_groups', 'state', 'states', 'category', 'is_active', 'password'
         ]
 
     def get_company(self, obj):
@@ -93,6 +100,11 @@ class UserSerializer(serializers.ModelSerializer):
             return [StateSerializer(obj.state).data]
 
         return []
+        
+    def get_category(self, obj):
+        if not obj.category:
+            return None
+        return CategorySerializer(obj.category).data
 
 class LoginSerializer(serializers.Serializer):
     username = serializers.CharField()
@@ -124,6 +136,7 @@ class CreateUserSerializer(serializers.Serializer):
     state = serializers.PrimaryKeyRelatedField(queryset=State.objects.all(), required=False, allow_null=True)
     main_groups = serializers.PrimaryKeyRelatedField(queryset=MainGroup.objects.all(), required=False, allow_null=True, many=True)
     states = serializers.PrimaryKeyRelatedField(queryset=State.objects.all(), required=False, allow_null=True, many=True)
+    category = serializers.PrimaryKeyRelatedField(queryset=Categories.objects.all(), required=False, allow_null=True)
 
 
 
@@ -177,6 +190,7 @@ class UpdateUserSerializer(serializers.Serializer):
     state = serializers.PrimaryKeyRelatedField(queryset=State.objects.all(), required=False, allow_null=True)
     main_groups = serializers.PrimaryKeyRelatedField(queryset=MainGroup.objects.all(), required=False, many=True)
     states = serializers.PrimaryKeyRelatedField(queryset=State.objects.all(), required=False, many=True)
+    category = serializers.PrimaryKeyRelatedField(queryset=Categories.objects.all(), required=False, allow_null=True)
 
     def update(self, instance, validated_data):
         main_groups = validated_data.pop('main_groups', None)
@@ -201,7 +215,7 @@ class UpdateUserSerializer(serializers.Serializer):
 
         instance.phone = validated_data.get('phone', instance.phone)
        
-        for field in ['role', 'company', 'main_group', 'state', 'is_active']:
+        for field in ['role', 'company', 'main_group', 'state', 'category', 'is_active']:
             if field in validated_data:
                 setattr(instance, field, validated_data.get(field))
 

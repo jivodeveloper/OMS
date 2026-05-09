@@ -15,8 +15,58 @@ interface PartyProduct {
   basic_rate: number;
 }
 
+type SearchableParty = Party & {
+  CardCode?: string | number | null;
+  CardName?: string | null;
+};
+
+const asText = (value: unknown) => String(value ?? "").trim();
+const normalizeSearch = (value: unknown) => asText(value).toLowerCase();
+
+const getPartyCode = (party: SearchableParty) => asText(party.card_code || party.CardCode);
+const getPartyName = (party: SearchableParty) => asText(party.card_name || party.CardName);
+const getPartyCategory = (party: SearchableParty) => asText(party.category);
+const normalizeCategory = (value: unknown) => asText(value).toUpperCase();
+const getPartySelectionKey = (party: SearchableParty) =>
+  `${getPartyCode(party)}||${normalizeCategory(getPartyCategory(party))}`;
+const getPartyKey = (party: SearchableParty) =>
+  [getPartyCode(party), asText(party.category), asText(party.id)].filter(Boolean).join("-");
+
+const getSelectionFromKey = (key: string) => {
+  const [cardCode, category = ""] = key.split("||");
+  return {
+    card_code: cardCode,
+    category: category || null,
+  };
+};
+
+const getPartyMetaLine = (party: SearchableParty) =>
+  [getPartyCode(party), party.state, getPartyCategory(party)].filter(Boolean).join(" | ");
+
+const mergeParties = (partyList: Party[]) => {
+  const seen = new Set<string>();
+
+  return partyList.filter((party) => {
+    const key = getPartyKey(party);
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+};
+
+const getPartyList = (data: unknown): Party[] => {
+  if (Array.isArray(data)) return data as Party[];
+  if (data && typeof data === "object") {
+    const response = data as { data?: unknown; results?: unknown };
+    if (Array.isArray(response.data)) return response.data as Party[];
+    if (Array.isArray(response.results)) return response.results as Party[];
+  }
+  return [];
+};
+
 export default function Party_Product_Assignment() {
   const [parties, setParties] = useState<Party[]>([]);
+  const [allParties, setAllParties] = useState<Party[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [selectedParties, setSelectedParties] = useState<string[]>([]);
   const [partySearch, setPartySearch] = useState("");
@@ -31,6 +81,7 @@ export default function Party_Product_Assignment() {
   const [isSaving, setIsSaving] = useState(false);
 
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const partySearchRequestRef = useRef(0);
 
   useEffect(() => {
     fetchParties();
@@ -38,8 +89,17 @@ export default function Party_Product_Assignment() {
   }, []);
 
   useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      fetchParties(partySearch);
+    }, 250);
+
+    return () => window.clearTimeout(timeout);
+  }, [partySearch]);
+
+  useEffect(() => {
     if (selectedParties.length === 1) {
-      fetchPartyProducts(selectedParties[0]);
+      const selectedParty = getSelectionFromKey(selectedParties[0]);
+      fetchPartyProducts(selectedParty.card_code, selectedParty.category);
     } else {
       setAssignedProducts([]);
     }
@@ -55,12 +115,28 @@ export default function Party_Product_Assignment() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  const fetchParties = async () => {
+  const fetchParties = async (search = "") => {
+    const requestId = ++partySearchRequestRef.current;
     try {
-      const data = await sapService.getParties();
-      setParties(data);
+      const searchValue = search.trim();
+      const response = searchValue
+        ? await api.get("/sap/parties/", { params: { search: searchValue } })
+        : { data: await sapService.getParties() };
+      const partyList = getPartyList(response.data);
+
+      if (requestId !== partySearchRequestRef.current) return;
+
+      if (!searchValue) {
+        setAllParties(partyList);
+      }
+
+      setParties((prev) => mergeParties(searchValue ? [...allParties, ...partyList, ...prev] : partyList));
     } catch (error) {
       console.error("Error fetching parties:", error);
+      if (requestId === partySearchRequestRef.current && !search.trim()) {
+        setParties([]);
+        setAllParties([]);
+      }
     }
   };
 
@@ -73,9 +149,9 @@ export default function Party_Product_Assignment() {
     }
   };
 
-  const fetchPartyProducts = async (card_code: string) => {
+  const fetchPartyProducts = async (card_code: string, category?: string | null) => {
     try {
-      const res = await userService.getPartyProducts(card_code);
+      const res = await userService.getPartyProducts(card_code, category);
       setAssignedProducts(res.data?.products || res.products || []);
     } catch (error) {
       console.error("Error fetching party products:", error);
@@ -87,9 +163,10 @@ export default function Party_Product_Assignment() {
     if (selectedParties.length !== 1) return;
     if (!window.confirm(`Are you sure you want to remove ${product.item_name}?`)) return;
     try {
-      await userService.removePartyProduct(selectedParties[0], product.item_code, product.category);
+      const selectedParty = getSelectionFromKey(selectedParties[0]);
+      await userService.removePartyProduct(selectedParty.card_code, product.item_code, product.category);
       alert("Product removed successfully");
-      fetchPartyProducts(selectedParties[0]);
+      fetchPartyProducts(selectedParty.card_code, selectedParty.category);
     } catch (error) {
       console.error("Error removing product:", error);
     }
@@ -105,18 +182,18 @@ export default function Party_Product_Assignment() {
         basic_rate: Number(newProductRates[`${p.item_code}-${p.category}`]) || 0,
       }));
 
-      await Promise.all(
-        selectedParties.map((cardCode) =>
-          api.post("/auth/party-product/bulk-add/", {
-            card_code: cardCode,
-            products: payload,
-          })
-        )
-      );
+      const partySelections = selectedParties.map(getSelectionFromKey);
+      const cardCodes = [...new Set(partySelections.map((party) => party.card_code))];
+
+      await api.post("/auth/bulk-party/assign-products/", {
+        card_codes: cardCodes,
+        party_selections: partySelections,
+        products: payload,
+      });
 
       const label = selectedParties.length > 1
         ? `${selectedParties.length} parties`
-        : parties.find((p) => p.card_code === selectedParties[0])?.card_name || selectedParties[0];
+        : getPartyName(partyOptions.find((p) => getPartySelectionKey(p) === selectedParties[0]) || ({} as SearchableParty)) || getSelectionFromKey(selectedParties[0]).card_code;
       alert(`Products assigned to ${label} successfully`);
 
       setShowAddModal(false);
@@ -124,7 +201,10 @@ export default function Party_Product_Assignment() {
       setNewProductRates({});
       setModalSearch("");
 
-      if (selectedParties.length === 1) fetchPartyProducts(selectedParties[0]);
+      if (selectedParties.length === 1) {
+        const selectedParty = getSelectionFromKey(selectedParties[0]);
+        fetchPartyProducts(selectedParty.card_code, selectedParty.category);
+      }
     } catch (error) {
       console.error("Error assigning products:", error);
       alert("Failed to assign products");
@@ -135,6 +215,7 @@ export default function Party_Product_Assignment() {
 
   const handleEditRate = async (product: PartyProduct) => {
     if (selectedParties.length !== 1) return;
+    const selectedParty = getSelectionFromKey(selectedParties[0]);
     const newRate = prompt(`Enter new basic rate for ${product.item_name}:`, product.basic_rate.toString());
     if (newRate === null) return;
     const parsedRate = parseFloat(newRate);
@@ -143,7 +224,7 @@ export default function Party_Product_Assignment() {
       return;
     }
     try {
-      await userService.editRate(selectedParties[0], product.item_code, product.category, parsedRate);
+      await userService.editRate(selectedParty.card_code, product.item_code, product.category, parsedRate);
       alert("Rate updated successfully");
       setAssignedProducts((prev) =>
         prev.map((p) =>
@@ -158,26 +239,40 @@ export default function Party_Product_Assignment() {
     }
   };
 
-  const toggleParty = (card_code: string) => {
+  const toggleParty = (partyKey: string) => {
     setSelectedParties((prev) =>
-      prev.includes(card_code) ? prev.filter((p) => p !== card_code) : [...prev, card_code]
+      prev.includes(partyKey) ? prev.filter((p) => p !== partyKey) : [...prev, partyKey]
     );
   };
 
-  const removeSelectedParty = (card_code: string) => {
-    setSelectedParties((prev) => prev.filter((p) => p !== card_code));
+  const removeSelectedParty = (partyKey: string) => {
+    setSelectedParties((prev) => prev.filter((p) => p !== partyKey));
   };
 
-  const filteredParties = parties.filter(
-    (p) =>
-      p.card_code?.toLowerCase().includes(partySearch.toLowerCase()) ||
-      p.card_name?.toLowerCase().includes(partySearch.toLowerCase())
-  );
+  const partyOptions = mergeParties([...allParties, ...parties]);
+  const searchTerm = normalizeSearch(partySearch);
+  const filteredParties = partyOptions.filter((p) => {
+    if (!searchTerm) return true;
+
+    return [
+      getPartyCode(p),
+      getPartyName(p),
+      p.state,
+      p.main_group,
+      p.category,
+    ].some((value) => normalizeSearch(value).includes(searchTerm));
+  });
 
   const isSingleParty = selectedParties.length === 1;
   const selectedPartyDetails = isSingleParty
-    ? parties.find((p) => p.card_code === selectedParties[0])
+    ? partyOptions.find((p) => getPartySelectionKey(p) === selectedParties[0])
     : null;
+  const selectedPartyCategories = new Set(
+    selectedParties
+      .map((partyKey) => getSelectionFromKey(partyKey).category)
+      .filter(Boolean)
+      .map(normalizeCategory)
+  );
 
   const displayProducts = assignedProducts.filter((p) =>
     categoryFilter === "ALL" ? true : p.category === categoryFilter
@@ -189,7 +284,9 @@ export default function Party_Product_Assignment() {
   const martCount = assignedProducts.filter((p) => p.category === "MART").length;
 
   const availableProducts = products.filter(
-    (p) => !assignedProducts.some((ap) => ap.item_code === p.item_code && ap.category === p.category)
+    (p) =>
+      (selectedPartyCategories.size === 0 || selectedPartyCategories.has(normalizeCategory(p.category))) &&
+      !assignedProducts.some((ap) => ap.item_code === p.item_code && ap.category === p.category)
   );
 
   const filteredAvailable = availableProducts.filter(
@@ -201,7 +298,7 @@ export default function Party_Product_Assignment() {
   const modalTitle =
     selectedParties.length > 1
       ? `Add Products to ${selectedParties.length} Parties`
-      : `Add Products to ${selectedPartyDetails?.card_name || ""}`;
+      : `Add Products to ${selectedPartyDetails ? `${getPartyName(selectedPartyDetails)} (${getPartyCategory(selectedPartyDetails)})` : ""}`;
 
   return (
     <div className="pa-page app-page">
@@ -278,10 +375,12 @@ export default function Party_Product_Assignment() {
             >
               {filteredParties.length > 0 ? (
                 filteredParties.map((party) => {
-                  const isChecked = selectedParties.includes(party.card_code);
+                  const partyName = getPartyName(party);
+                  const partyKey = getPartySelectionKey(party);
+                  const isChecked = selectedParties.includes(partyKey);
                   return (
                     <div
-                      key={party.card_code}
+                      key={getPartyKey(party)}
                       style={{
                         padding: "10px 14px",
                         cursor: "pointer",
@@ -297,7 +396,7 @@ export default function Party_Product_Assignment() {
                       onMouseLeave={(e) => {
                         e.currentTarget.style.backgroundColor = isChecked ? "#eff6ff" : "transparent";
                       }}
-                      onClick={() => toggleParty(party.card_code)}
+                      onClick={() => toggleParty(partyKey)}
                     >
                       <input
                         type="checkbox"
@@ -312,9 +411,10 @@ export default function Party_Product_Assignment() {
                         }}
                       />
                       <div>
-                        <div style={{ fontWeight: 500, color: "#0f172a" }}>{party.card_name}</div>
-                        <div style={{ fontSize: "0.75rem", color: "#64748b" }}>{party.card_code}</div>
-                        <div style={{ fontSize: "0.75rem", color: "#64748b" }}>{party.state}</div>
+                        <div style={{ fontWeight: 500, color: "#0f172a" }}>{partyName || "Unnamed party"}</div>
+                        <div style={{ fontSize: "0.75rem", color: "#64748b", fontFamily: "monospace" }}>
+                          {getPartyMetaLine(party)}
+                        </div>
 
                       </div>
                     </div>
@@ -330,11 +430,12 @@ export default function Party_Product_Assignment() {
         {/* Selected party chips */}
         {selectedParties.length > 0 && (
           <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", marginTop: "16px" }}>
-            {selectedParties.map((code) => {
-              const p = parties.find((x) => x.card_code === code);
+            {selectedParties.map((partyKey) => {
+              const p = partyOptions.find((x) => getPartySelectionKey(x) === partyKey);
+              const fallback = getSelectionFromKey(partyKey);
               return (
                 <span
-                  key={code}
+                  key={partyKey}
                   style={{
                     display: "inline-flex",
                     alignItems: "center",
@@ -348,9 +449,12 @@ export default function Party_Product_Assignment() {
                     color: "#1d4ed8",
                   }}
                 >
-                  {p?.card_name || code}
+                  {p ? getPartyName(p) || fallback.card_code : fallback.card_code}
+                  <span style={{ color: "#64748b", fontSize: "0.75rem", fontWeight: 600 }}>
+                    {p ? getPartyCategory(p) : fallback.category}
+                  </span>
                   <button
-                    onClick={() => removeSelectedParty(code)}
+                    onClick={() => removeSelectedParty(partyKey)}
                     style={{
                       background: "none",
                       border: "none",
@@ -436,11 +540,12 @@ export default function Party_Product_Assignment() {
           </div>
 
           <div style={{ marginTop: "16px", display: "flex", flexWrap: "wrap", gap: "8px" }}>
-            {selectedParties.map((code) => {
-              const p = parties.find((x) => x.card_code === code);
+            {selectedParties.map((partyKey) => {
+              const p = partyOptions.find((x) => getPartySelectionKey(x) === partyKey);
+              const fallback = getSelectionFromKey(partyKey);
               return (
                 <div
-                  key={code}
+                  key={partyKey}
                   style={{
                     background: "#f8fafc",
                     border: "1px solid #e2e8f0",
@@ -449,8 +554,10 @@ export default function Party_Product_Assignment() {
                     fontSize: "0.85rem",
                   }}
                 >
-                  <span style={{ fontWeight: 600, color: "#0f172a" }}>{p?.card_name || code}</span>
-                  <span style={{ color: "#64748b", marginLeft: "6px" }}>{code}</span>
+                  <span style={{ fontWeight: 600, color: "#0f172a" }}>{p ? getPartyName(p) || fallback.card_code : fallback.card_code}</span>
+                  <span style={{ color: "#64748b", marginLeft: "6px" }}>
+                    {p ? getPartyMetaLine(p) : [fallback.card_code, fallback.category].filter(Boolean).join(" | ")}
+                  </span>
                 </div>
               );
             })}
@@ -481,7 +588,7 @@ export default function Party_Product_Assignment() {
           >
             <div>
           <h2 style={{ fontSize: "24px", fontWeight: 800, color: "#0f172a", margin: "0 0 4px", letterSpacing: "-0.02em" }}>
-                {selectedPartyDetails.card_name}
+                {getPartyName(selectedPartyDetails)}
               </h2>
               <div style={{ display: "flex", gap: "12px", alignItems: "center" }}>
                 <span
@@ -494,11 +601,12 @@ export default function Party_Product_Assignment() {
                     borderRadius: "4px",
                   }}
                 >
-                  {selectedPartyDetails.card_code}
+                  {getPartyCode(selectedPartyDetails)}
                 </span>
                 <span style={{ fontSize: "0.875rem", color: "#64748b" }}>
                   {selectedPartyDetails.state || "Unknown State"} •{" "}
-                  {selectedPartyDetails.main_group || "Unknown Group"}
+                  {selectedPartyDetails.main_group || "Unknown Group"} •{" "}
+                  {getPartyCategory(selectedPartyDetails) || "Unknown Category"}
                 </span>
               </div>
             </div>

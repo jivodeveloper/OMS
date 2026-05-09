@@ -30,6 +30,7 @@ export default function PersonWise_Report() {
   const [selectedGroups, setSelectedGroups] = useState<number[]>([]);
   const [mgDropdownOpen, setMgDropdownOpen] = useState(false);
   const [orders, setOrders] = useState<Order[]>([]);
+  const [isOrdersLoading, setIsOrdersLoading] = useState(true);
   const [selectedUser, setSelectedUser] = useState<string>("");
   const [showDetails, setShowDetails] = useState(false);
   const [orderDetails, setOrderDetails] = useState<Order | null>(null);
@@ -42,11 +43,14 @@ export default function PersonWise_Report() {
   
 
   const fetchOrders = async () => {
+    setIsOrdersLoading(true);
     try {
       const data = await loadManagerOrders();
       setOrders(data);
     } catch (error) {
       console.error("Failed to fetch orders:", error);
+    } finally {
+      setIsOrdersLoading(false);
     }
   };
 
@@ -380,11 +384,11 @@ export default function PersonWise_Report() {
             </div>
           </div>
 
-          {/* Orders Report â€” show today's orders by default */}
+          {/* Orders Report of show today's orders by default */}
           {selectedUser && (
             <div className="dr-report-card">
               <div className="dr-report-header">
-                <h2 className="dr-report-title">{selectedUser ? `Orders â€” ${selectedUser}` : null}</h2>
+                <h2 className="dr-report-title">{selectedUser ? `Orders of ${selectedUser}` : null}</h2>
                 <div className="dr-report-stats">
                   <span className="dr-stat">Total Orders: <strong>{filteredOrders.length}</strong></span>
                   <span className="dr-stat">Total Amount: <strong>{filteredOrders.reduce((sum, o) => sum + Number(o.total_amount || 0), 0).toFixed(2)}</strong></span>
@@ -395,7 +399,9 @@ export default function PersonWise_Report() {
                 </div>
               </div>
 
-              {filteredOrders.length > 0 ? (
+              {isOrdersLoading ? (
+                <div className="dr-empty" style={{ padding: "40px", textAlign: "center", color: "#64748b", background: "#f8fafc", borderRadius: "8px", border: "1px dashed #cbd5e1", margin: "20px 0" }}>Loading orders...</div>
+              ) : filteredOrders.length > 0 ? (
                 <div className="dr-table-wrap">
                   <table className="dr-table">
                     <thead>
@@ -451,7 +457,7 @@ export default function PersonWise_Report() {
                     disabled={currentPage === 1}
                     onClick={() => setCurrentPage((page) => page - 1)}
                   >
-                    â† Prev
+                    Prev
                   </button>
                   <span className="dr-pg-info">
                     {currentPage} / {totalPages}
@@ -461,7 +467,7 @@ export default function PersonWise_Report() {
                     disabled={currentPage === totalPages}
                     onClick={() => setCurrentPage((page) => page + 1)}
                   >
-                    Next â†’
+                    Next
                   </button>
                 </div>
               )}
