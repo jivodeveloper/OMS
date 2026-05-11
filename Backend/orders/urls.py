@@ -1,6 +1,6 @@
 from django.contrib import admin
 from django.urls import path,include
-from .views import DashboardKPIView,WDashboardKPIView,WDashboardChartsView,OrderLogsByOrderView, OrderDetailsByOrderView,OrdersByUserView,DashboardChartsView,OrderStatusList,BranchView,PartyView,DispatchLocationListView, SchemeProductView,UpdateOrderStatusView,PartyAddressesView,ProductFiltersView,ProductListView,PartyProductsView,CreateOrderView,UpdateOrderView,OrderListView,RejectOrderView,ApproveOrderView,SchemeListView,CreateSchemeView,NotificationListView
+from .views import DashboardKPIView,WDashboardKPIView,WDashboardChartsView,OrderLogsByOrderView, OrderDetailsByOrderView,OrdersByUserView,DashboardChartsView,OrderStatusList,BranchView,PartyView,DispatchLocationListView, SchemeProductView,UpdateOrderStatusView,PartyAddressesView,ProductFiltersView,ProductListView,PartyProductsView,CreateOrderView,UpdateOrderView,OrderListView,RejectOrderView,ApproveOrderView,SchemeListView,CreateSchemeView, ai_order_summary, TemplatePartyListView, TemplateOrderListView
 
 urlpatterns=[
     
@@ -29,7 +29,9 @@ urlpatterns=[
     path("<int:order_id>/orderdetails/",OrderDetailsByOrderView.as_view(),name="order-details-by-orderid"),
     path("ordersbyuser/<int:user_id>/",OrdersByUserView.as_view(),name="orders-by-user"),
     path("create-scheme/",CreateSchemeView.as_view(), name="create-scheme"),
-    path("notifications/",NotificationListView.as_view(), name="notifications"),
-    path("notifications/<int:pk>/",NotificationListView.as_view(), name="notification-detail"),
+    path("api/ai-order-summary/", ai_order_summary),
+    path('templates/parties/', TemplatePartyListView.as_view(), name='template_parties'),
+    path('templates/orders/', TemplateOrderListView.as_view(), name='template_orders'),
+    
     
 ]

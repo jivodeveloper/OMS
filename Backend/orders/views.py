@@ -1,8 +1,8 @@
 from urllib import request
 from django.shortcuts import render
 import re
-from .serializers import SchemeProductSerializer,OrderDetailSerializer, OrderListByUserIdSerializer,OrdersLogSerializer,OrderStatusUpdateSerializer, DispatchLocationSerializer,BranchSerializer, PartyAddressSerializer,ProductSerializer,CreateOrderSerializer,OrderItemSerializer, CreateSchemeSerializer,NotificationSerializer
-from .models import PartyProductAssignment,OrdersLog,Parties, Branches, DispatchLocation, UserPartyAssignment, PartyAddress,ProductDetails,Order,OrderItem,OrderStatus,log_order_action,Notification
+from .serializers import SchemeProductSerializer,OrderDetailSerializer, OrderListByUserIdSerializer,OrdersLogSerializer,OrderStatusUpdateSerializer, DispatchLocationSerializer,BranchSerializer, PartyAddressSerializer,ProductSerializer,CreateOrderSerializer,OrderItemSerializer, CreateSchemeSerializer,OrderItemSchemeSerializer
+from .models import PartyProductAssignment,OrdersLog,Parties, Branches, DispatchLocation, UserPartyAssignment, PartyAddress,ProductDetails,Order,OrderItem,OrderStatus,log_order_action, OrderItemScheme,OrderItemScheme,Template
 from rest_framework.generics import ListAPIView
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.views import APIView
@@ -24,59 +24,100 @@ from .models import PartyProductAssignment
 from .scheme_rules import (
     get_ordered_quantity,
     get_party_product_scheme,
-    should_mirror_punjab_combo_scheme_qty,
-)
-from users.models import SchemeProduct, User
+    should_mirror_punjab_combo_scheme_qty)
+from users.models import SchemeProduct, User, State
+from django.http import JsonResponse
+from django.views.decorators.csrf import csrf_exempt
+import json
+from .ai_service import get_order_summary
+
 
 BILLING_ACTIVE_CODES = ['BILLING', 'BILLING_PENDING']
 BILLING_RESOLVED_CODES = ['BILLING_REJECTED', 'COMPLETED']
 
+@csrf_exempt
+def ai_order_summary(request):
+    data = json.loads(request.body)
+
+    result = get_order_summary(data)
+
+    return JsonResponse({"summary": result})
+
 def _get_rate_approval_reason(item, basic_price, market_price):
+    if item.get('item_type') == 'SCHEME':
+        return None
+        
+    qty = float(item.get('qty') or 0)
+    if qty <= 0:
+        return None
+
     item_name = item.get('item_name') or item.get('item_code') or 'Item'
 
-    if basic_price == 0:
-        return f"{item_name}: Basic price is 0 (Market ₹{market_price})"
+    # if basic_price == 0:
+    #     return f"{item_name}: Basic price is 0 (Market ₹{market_price})"
 
     if market_price > 0 and market_price < basic_price:
         return f"{item_name}: Market ₹{market_price} < Basic ₹{basic_price}"
 
     return None
 
-def _resolve_order_item_scheme(card_code, item):
-    scheme_id = item.get('scheme_id') or item.get('scheme')
+def _resolve_scheme_by_id(scheme_id):
     if scheme_id:
         try:
             return SchemeProduct.objects.get(scheme_id=int(scheme_id))
         except (SchemeProduct.DoesNotExist, ValueError, TypeError):
             return None
-
-    assigned_scheme = get_party_product_scheme(
-        card_code=card_code,
-        item_code=item.get('item_code', ''),
-        category=item.get('category', ''),
-    )
-    if assigned_scheme and should_mirror_punjab_combo_scheme_qty(
-        card_code,
-        item_name=item.get('item_name'),
-        scheme_name=getattr(assigned_scheme, 'scheme_name', None),
-    ):
-        return assigned_scheme
-
     return None
 
-def _resolve_order_item_scheme_qty(card_code, item, scheme_obj, provided_scheme_qty):
-    if not scheme_obj:
-        return provided_scheme_qty
+def _extract_order_item_schemes(item, to_float):
+    raw_schemes = item.get('schemes')
+    if isinstance(raw_schemes, list):
+        extracted = []
+        for raw_scheme in raw_schemes:
+            if not isinstance(raw_scheme, dict):
+                continue
+            scheme_obj = _resolve_scheme_by_id(raw_scheme.get('scheme_id') or raw_scheme.get('scheme'))
+            scheme_qty = to_float(raw_scheme.get('scheme_qty', raw_scheme.get('qty_scheme', 0)))
+            if scheme_obj and scheme_qty > 0:
+                extracted.append((scheme_obj, scheme_qty))
+        return extracted
 
-    scheme_name = item.get('scheme_name') or getattr(scheme_obj, 'scheme_name', None)
-    if should_mirror_punjab_combo_scheme_qty(
-        card_code,
-        item_name=item.get('item_name'),
-        scheme_name=scheme_name,
-    ):
-        return get_ordered_quantity(item)
+    scheme_obj = _resolve_scheme_by_id(item.get('scheme_id') or item.get('scheme'))
+    scheme_qty = to_float(item.get('scheme_qty', item.get('qty_scheme', 0)))
+    return [(scheme_obj, scheme_qty)] if scheme_obj and scheme_qty > 0 else []
 
-    return provided_scheme_qty
+def _create_order_item(order, item, to_float, to_bool):
+    item_schemes = _extract_order_item_schemes(item, to_float)
+    first_scheme = item_schemes[0][0] if item_schemes else None
+    total_scheme_qty = sum(qty for _, qty in item_schemes)
+
+    order_item = OrderItem.objects.create(
+        order=order,
+        item_code=item.get('item_code', ''),
+        item_name=item.get('item_name', ''),
+        category=item.get('category', ''),
+        brand=item.get('brand', ''),
+        variety=item.get('variety', ''),
+        item_type=item.get('item_type', ''),
+        qty=to_float(item.get('qty', 0)),
+        pcs=to_float(item.get('pcs', 0)),
+        boxes=to_float(item.get('boxes', 0)),
+        ltrs=to_float(item.get('ltrs', 0)),
+        basic_price=to_float(item.get('basic_price', 0)),
+        market_price=to_float(item.get('market_price', 0)),
+        total=to_float(item.get('total', 0)),
+        tax_rate=to_float(item.get('tax_rate', 0)),
+        scheme=first_scheme,
+        qty_scheme=total_scheme_qty,
+        is_scheme_visible=to_bool(item.get('is_scheme_visible')) or bool(item_schemes),
+    )
+
+    OrderItemScheme.objects.bulk_create([
+        OrderItemScheme(order_item=order_item, scheme=scheme_obj, qty_scheme=scheme_qty)
+        for scheme_obj, scheme_qty in item_schemes
+    ])
+
+    return order_item
 
 def _get_base_orders(user):
     """Scope orders by user role:
@@ -99,7 +140,21 @@ def _get_base_orders(user):
             Q(logs__action__name__icontains='auditor')
         ).distinct()
     if role_name == 'approver':
-        return Order.objects.filter(status__code__in=['NEED_APPROVAL', 'RATE_APPROVAL'])
+        handled_order_ids = (
+            OrdersLog.objects
+            .filter(performed_by=user)
+            .filter(
+                Q(action__code__in=['APPROVED', 'REJECTED']) |
+                Q(action__name__icontains='approve') |
+                Q(action__name__icontains='reject')
+            )
+            .values_list('order_id', flat=True)
+            .distinct()
+        )
+        return Order.objects.filter(
+            Q(status__code__in=['NEED_APPROVAL', 'RATE_APPROVAL']) |
+            Q(id__in=handled_order_ids)
+        ).distinct()
     if role_name == 'billing':
         handled_order_ids = (
             OrdersLog.objects
@@ -178,6 +233,23 @@ class WDashboardKPIView(APIView):
                 Q(logs__action__name__icontains='billing')
             ).distinct().count()
             pending_review_orders = year_orders.filter(status__code='AUDITOR_APPROVAL').distinct().count()
+        if role_name == 'approver':
+            approver_handled_orders = year_orders.filter(
+                logs__performed_by=request.user,
+            ).distinct()
+
+            accepted_orders = approver_handled_orders.filter(
+                Q(logs__action__name__icontains='approve') |
+                Q(logs__action__code='APPROVED')
+            ).distinct().count()
+
+            rejected_orders = approver_handled_orders.filter(
+                Q(status__code__in=['REJECTED', 'BILLING_REJECTED']) |
+                Q(logs__action__code__in=['REJECTED', 'BILLING_REJECTED']) |
+                Q(logs__action__name__icontains='reject')
+            ).distinct().count()
+
+            pending_review_orders = year_orders.filter(status__code__in=['NEED_APPROVAL', 'RATE_APPROVAL']).distinct().count()
 
         status_counts = {}
         for os in OrderStatus.objects.all():
@@ -582,19 +654,36 @@ class PartyView(APIView):
 
     def get(self, request):
         user_id = request.user.id
-        
-        assigned_card_codes = UserPartyAssignment.objects.filter(
+
+        assignments = UserPartyAssignment.objects.filter(
             user_id=user_id,
             is_active=True
-        ).values_list('card_code', flat=True).distinct()
+        ).values('card_code', 'category').distinct()
 
-        parties = SapParty.objects.filter(
-            card_code__in=assigned_card_codes
-        ).distinct().order_by('card_name')
+        assignment_filters = Q()
+        fallback_card_codes = []
+        for assignment in assignments:
+            card_code = assignment.get('card_code')
+            category = str(assignment.get('category') or '').strip()
+            if not card_code:
+                continue
+            if category:
+                assignment_filters |= Q(card_code=card_code, category__iexact=category)
+            else:
+                fallback_card_codes.append(card_code)
+
+        parties = SapParty.objects.none()
+        if assignment_filters:
+            parties = parties | SapParty.objects.filter(assignment_filters)
+        if fallback_card_codes:
+            parties = parties | SapParty.objects.filter(card_code__in=fallback_card_codes)
+        parties = parties.distinct().order_by('card_name')
 
         data = [
             {
                 'value': p.card_code,
+                'card_code': p.card_code,
+                'card_name': p.card_name,
                 'label': f"{p.card_name} ({p.card_code})",
                 'category': p.category,
                 'state': p.state,
@@ -615,21 +704,24 @@ class PartyAddressesView(APIView):
 
     def get(self, request):
         card_code = request.query_params.get('card_code')
+        category = str(request.query_params.get('category') or '').strip().upper()
             
         if not card_code:
             return Response({'error': 'card_code is required'}, status=400)
-            
+
         bill_addresses = SapPartyAddress.objects.filter(
             card_code=card_code,
-            address_type='B',
-            category='OIL'
+            address_type='B'
         )
 
         ship_addresses = SapPartyAddress.objects.filter(
             card_code=card_code,
-            address_type='S',
-            category='OIL'
-        ) 
+            address_type='S'
+        )
+
+        if category:
+            bill_addresses = bill_addresses.filter(category__iexact=category)
+            ship_addresses = ship_addresses.filter(category__iexact=category)
 
         # if not bill_addresses.exists() and not ship_addresses.exists():
         #     try:
@@ -882,8 +974,6 @@ class UpdateOrderView(APIView):
                 order.status = next_status
 
         order.save()
-        if next_status:
-            send_order_notifications(order, next_status.name)
 
         user = request.user if request.user.is_authenticated else None
         log_order_action(order, 'Auditor Approval' if not needs_approval else 'Rate Approval', user=user)
@@ -898,7 +988,7 @@ class UpdateOrderView(APIView):
         }, status=status.HTTP_200_OK)
 
 class CreateOrderView(APIView):
-    permission_classes = [AllowAny]
+    permission_classes = [IsAuthenticated]
     
     def post(self, request):
         def _to_float(value, default=0.0):
@@ -949,33 +1039,7 @@ class CreateOrderView(APIView):
             needs_approval = False
             flagged_items = []
             for item in items:
-                scheme_obj = _resolve_order_item_scheme(order.card_code, item)
-                scheme_qty = _resolve_order_item_scheme_qty(
-                    order.card_code,
-                    item,
-                    scheme_obj,
-                    _to_float(item.get('scheme_qty', 0)),
-                )
-                OrderItem.objects.create(
-                    order=order,
-                    item_code=item.get('item_code', ''),
-                    item_name=item.get('item_name', ''),
-                    category=item.get('category', ''),
-                    brand=item.get('brand', ''),
-                    variety=item.get('variety', ''),
-                    item_type=item.get('item_type', ''),
-                    qty=_to_float(item.get('qty', 0)),
-                    pcs=_to_float(item.get('pcs', 0)),
-                    boxes=_to_float(item.get('boxes', 0)),
-                    ltrs=_to_float(item.get('ltrs', 0)),
-                    basic_price=_to_float(item.get('basic_price', 0)),
-                    market_price=_to_float(item.get('market_price', 0)),
-                    total=_to_float(item.get('total', 0)),
-                    tax_rate=_to_float(item.get('tax_rate', 0)),
-                    scheme=scheme_obj,
-                    qty_scheme=scheme_qty,
-                    is_scheme_visible=_to_bool(item.get('is_scheme_visible')) or bool(scheme_obj and scheme_qty > 0),
-                )
+                _create_order_item(order, item, _to_float, _to_bool)
                 bp = _to_float(item.get('basic_price', 0))
                 mp = _to_float(item.get('market_price', 0))
                 rate_approval_reason = _get_rate_approval_reason(item, bp, mp)
@@ -988,11 +1052,26 @@ class CreateOrderView(APIView):
             if next_status:
                 order.status = next_status
             order.save()
-            if next_status:
-                send_order_notifications(order, next_status.name)
 
             user = request.user if request.user.is_authenticated else None
             log_order_action(order, 'Rate Approval' if needs_approval else 'Auditor Approval', user=user)
+
+            # Save as template if no exact match (same items and quantities) exists
+            if user:
+                new_items = set((item.item_code, item.qty) for item in order.items.all())
+                existing_templates = Template.objects.filter(
+                    user=user, order__card_code=order.card_code
+                ).exclude(order=order).prefetch_related('order__items')
+                
+                is_duplicate = False
+                for t in existing_templates:
+                    t_items = set((item.item_code, item.qty) for item in t.order.items.all())
+                    if t_items == new_items:
+                        is_duplicate = True
+                        break
+                
+                if not is_duplicate:
+                    Template.objects.get_or_create(user=user, order=order)
 
             return Response({
                 'id': order.id,
@@ -1051,47 +1130,33 @@ class CreateOrderView(APIView):
             created_by=user,
             delivery_date=data.get('delivery_date'),
             remarks=order_remarks
-        )   
+        )
 
         needs_approval = False
         flagged_items = []
 
         for item in items:
-            scheme_obj = _resolve_order_item_scheme(order.card_code, item)
-            scheme_qty = _resolve_order_item_scheme_qty(
-                order.card_code,
-                item,
-                scheme_obj,
-                _to_float(item.get('scheme_qty', 0)),
-            )
-
-            OrderItem.objects.create(
-                order=order,
-                item_code=item.get('item_code', ''),
-                item_name=item.get('item_name', ''),
-                category=item.get('category', ''),
-                brand=item.get('brand', ''),
-                variety=item.get('variety', ''),
-                item_type=item.get('item_type', ''),
-                qty=_to_float(item.get('qty', 0)),
-                pcs=_to_float(item.get('pcs', 0)),
-                boxes=_to_float(item.get('boxes', 0)),
-                ltrs=_to_float(item.get('ltrs', 0)),
-                basic_price=_to_float(item.get('basic_price', 0)),
-                market_price=_to_float(item.get('market_price', 0)),
-                total=_to_float(item.get('total', 0)),
-                tax_rate=_to_float(item.get('tax_rate', 0)),
-                scheme=scheme_obj,
-                qty_scheme=scheme_qty,
-                is_scheme_visible=_to_bool(item.get('is_scheme_visible')) or bool(scheme_obj and scheme_qty > 0),
-            )
-
+            _create_order_item(order, item, _to_float, _to_bool)
             bp = _to_float(item.get('basic_price', 0))
             mp = _to_float(item.get('market_price', 0))
             rate_approval_reason = _get_rate_approval_reason(item, bp, mp)
             if rate_approval_reason:
                 needs_approval = True
                 flagged_items.append(rate_approval_reason)
+
+        # Save as template if no exact match (same items and quantities) exists
+        if user:
+            new_items = set((item.item_code, float(item.qty)) for item in order.items.all())
+            existing_templates = Template.objects.filter(
+                user=user, order__card_code=order.card_code
+            ).exclude(order=order).prefetch_related('order__items')
+            
+            for t in existing_templates:
+                t_items = set((item.item_code, float(item.qty)) for item in t.order.items.all())
+                if t_items == new_items:
+                    t.delete()
+
+            Template.objects.get_or_create(user=user, order=order)
 
         # Log: Order created
         log_order_action(order, 'Order Created', user=user)
@@ -1102,14 +1167,12 @@ class CreateOrderView(APIView):
             if next_status:
                 order.status = next_status
                 order.save()
-                send_order_notifications(order, next_status.name)
             log_order_action(order, 'Rate Approval', user=None, remarks='; '.join(flagged_items))
         else:
             next_status = get_status('Auditor Approval')
             if next_status:
                 order.status = next_status
                 order.save()
-                send_order_notifications(order, next_status.name)
             log_order_action(order, 'Auditor Approval', user=None)
 
         return Response({
@@ -1123,26 +1186,36 @@ class CreateOrderView(APIView):
             'message': 'Order sent for approval' if needs_approval else 'Order sent to auditor approval',
         }, status=status.HTTP_201_CREATED)
         
+
 class SchemeListView(APIView):
     permission_classes = [AllowAny]
 
     def get(self, request):
         from users.models import SchemeProduct
-        state_code = request.query_params.get('state_code')
         queryset = SchemeProduct.objects.filter(is_active=True)
+        state_code = (request.query_params.get('state_code') or '').strip()
 
         if state_code:
-            filtered_queryset = queryset.filter(state_code=state_code)
-            print(f"Filtering schemes for state_code={state_code}, found {filtered_queryset} schemes")
-            queryset = filtered_queryset 
-            print(f"After filtering, using {queryset} schemes for response")
+            state_match = State.objects.filter(
+                Q(code__iexact=state_code) | Q(name__iexact=state_code),
+                is_active=True,
+            ).values('code', 'name').first()
+            state_values = {state_code}
+            if state_match:
+                state_values.update(
+                    value for value in (state_match.get('code'), state_match.get('name')) if value
+                )
+            state_filter = Q()
+            for value in state_values:
+                state_filter |= Q(state_code__iexact=value)
+            queryset = queryset.filter(state_filter)
 
         schemes = queryset.order_by('scheme_name', 'scheme_id','state_code').values('scheme_id', 'scheme_name','state_code').distinct()
         return Response(list(schemes))
 
+
 class OrderStatusList(APIView):
     permission_classes = [AllowAny]
-
     def get(self,request):
         status = OrderStatus.objects.all().values('id','name')
         return Response(list(status))
@@ -1153,7 +1226,6 @@ class SchemeProductView(APIView):
     def get(self, request):
         queryset = SchemeProduct.objects.select_related('state').filter(is_active=True)
 
-        state_code = request.query_params.get('state_code')
         product_id = request.query_params.get('product_id')
         item_code = request.query_params.get('item_code')
         scheme_id = request.query_params.get('scheme_id')
@@ -1163,8 +1235,6 @@ class SchemeProductView(APIView):
             queryset = queryset.filter(scheme_id=scheme_id)
         if scheme_name:
             queryset = queryset.filter(scheme_name=scheme_name)
-        if state_code:
-            queryset = queryset.filter(state__state_code=state_code)
         if product_id:
             product = SapProduct.objects.filter(id=product_id).only('item_code').first()
             queryset = queryset.filter(item_code=product.item_code) if product else queryset.none()
@@ -1178,11 +1248,13 @@ class SchemeProductView(APIView):
             'total': len(serializer.data),
         })
 
+   
+
 class BranchView(APIView):
     permission_classes = [AllowAny]
 
     def get(self, request):
-        branches = Branches.objects.filter(category = 'OIL',bpl_name__icontains='FACTORY').order_by("bpl_name").distinct('bpl_name')
+        branches = Branches.objects.filter(bpl_name__icontains='FACTORY').order_by("bpl_name").distinct('bpl_name')
         serializer = BranchSerializer(branches, many=True)
         return Response(serializer.data) 
 
@@ -1224,9 +1296,6 @@ class UpdateOrderStatusView(APIView):
         if reason:
             order.reject_reason = reason
 
-        # Mark all previous notifications for this order as read to prevent stale alerts
-        Notification.objects.filter(order=order, is_read=False).update(is_read=True)
-
         order.save()
 
         new_name = (status_obj.name or "").strip().lower()
@@ -1264,7 +1333,6 @@ class UpdateOrderStatusView(APIView):
                 order.save()
                 # Create pending Auditor Approval log
                 log_order_action(order=order, action_name=auditor_status.name, user=None, remarks="")
-                send_order_notifications(order, auditor_status.name)
 
             return Response({
                 "message": "Rate approved, order sent to auditor",
@@ -1300,8 +1368,6 @@ class UpdateOrderStatusView(APIView):
                     user=None,
                     remarks=""
                 )
-            
-            send_order_notifications(order, status_obj.name)
 
             return Response({
                 "message": "Order status updated successfully",
@@ -1332,8 +1398,6 @@ class UpdateOrderStatusView(APIView):
                 user=user,
                 remarks=reason
             )
-            
-        send_order_notifications(order, status_obj.name)
 
         return Response({
             "message": "Order status updated successfully",
@@ -1410,12 +1474,6 @@ class ApproveOrderView(APIView):
         order.approved_at = datetime.now()
         order.save()
         
-        # Mark all previous notifications for this order as read
-        Notification.objects.filter(order=order, is_read=False).update(is_read=True)
-        
-        if order.status:
-            send_order_notifications(order, 'Approved')
-            
         return Response({
             'message': f'Order {order.order_number} approved successfully',
             'order_number': order.order_number,
@@ -1451,12 +1509,6 @@ class RejectOrderView(APIView):
         order.rejection_reason = reason
         order.save()
         
-        # Mark all previous notifications for this order as read
-        Notification.objects.filter(order=order, is_read=False).update(is_read=True)
-        
-        if order.status:
-            send_order_notifications(order, 'Rejected')
-            
         return Response({
             'message': f'Order {order.order_number} rejected',
             'order_number': order.order_number,
@@ -1474,7 +1526,7 @@ class OrderListView(APIView):
 
         if billing_view:
             # Billing view: show all billing-related orders regardless of sap_created
-            orders = Order.objects.filter(status_id__in=[3, 5, 6]).order_by('-created_at')
+            orders = Order.objects.filter(status_id__in=[3, 5, 6, 8]).order_by('-created_at')
         else:
             if status_filter:
                 orders = Order.objects.filter(status__code=status_filter).order_by('-created_at')
@@ -1536,78 +1588,47 @@ class CreateSchemeView(APIView):
             'message': 'Failed to create scheme',
             'errors': serializer.errors
         }, status=status.HTTP_400_BAD_REQUEST)
+        
+    permission_classes = [AllowAny]
+class TemplatePartyListView(APIView):
+    permission_classes = [IsAuthenticated]
+        
+    def get(self, request):
+      
+        templates = Template.objects.filter(user=request.user).select_related('order')
+        
+        parties_dict = {}
+        for t in templates:
+            card_code = t.order.card_code
+            if card_code not in parties_dict:
+                parties_dict[card_code] = {
+                    "label": f"{t.order.card_name}",
+                    # "label": f"{t.order.card_name} ({card_code})",
+                    "value": card_code
+                }
+        
+        return Response(list(parties_dict.values()), status=status.HTTP_200_OK)
 
 
-def send_order_notifications(order, status_name):
-    from users.models import User
-    
-    creator = order.created_by
-    creator_name = getattr(creator, 'username', 'Unknown')
-    if getattr(creator, 'name', None):
-        creator_name = creator.name
-
-    # 1. Notify the Manager (Creator) about their order updates
-    if creator:
-        if status_name in ['Approved', 'Completed', 'Rejected', 'Billing Rejected']:
-            Notification.objects.create(
-                user=creator, 
-                order=order,
-                message=f"Your order {order.order_number} has been {status_name}."
-            )
-
-    # 2. Notify Auditors if a new order needs their approval
-    if status_name == 'Auditor Approval':
-        auditors = User.objects.filter(role__name__iexact='auditor', is_active=True) 
-        for auditor in auditors:
-            Notification.objects.create(
-                user=auditor,
-                order=order,
-                message=f"New Order {order.order_number} from {creator_name} is pending for your review."
-            )
-
-    # 3. Notify Approvers if order goes to them
-    elif status_name in ['Need Approval', 'Rate Approval']:
-        approvers = User.objects.filter(role__name__iexact='approver', is_active=True)
-        for approver in approvers:
-            Notification.objects.create(
-                user=approver,
-                order=order,
-                message=f"Order {order.order_number} from {creator_name} needs your approval."
-            )
-
-    # 4. Notify Billing if order goes to Billing Pending
-    elif status_name in ['Billing', 'Billing Pending', 'Billing Approval']:
-        billing_users = User.objects.filter(role__name__iexact='billing', is_active=True)
-        for bill_user in billing_users:
-            Notification.objects.create(
-                user=bill_user,
-                order=order,
-                message=f"Order {order.order_number} is ready for billing."
-            )
-
-class NotificationListView(APIView):
+class TemplateOrderListView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        notifications = Notification.objects.filter(user=request.user).order_by('-created_at')[:50]
-        serializer = NotificationSerializer(notifications, many=True)
-        return Response(serializer.data)
-
-    def post(self, request):
-        # Mark all as read
-        Notification.objects.filter(user=request.user, is_read=False).update(is_read=True)
-        return Response({"message": "All notifications marked as read"})
-
-    def patch(self, request, pk=None):
-        # Mark single as read
-        if pk:
-            try:
-                notification = Notification.objects.get(id=pk, user=request.user)
-                notification.is_read = True
-                notification.save()
-                return Response({"message": "Notification marked as read"})
-            except Notification.DoesNotExist:
-                return Response({"error": "Notification not found"}, status=status.HTTP_404_NOT_FOUND)
-        return Response({"error": "No ID provided"}, status=status.HTTP_400_BAD_REQUEST)
+        card_code = request.query_params.get('card_code')
+        if not card_code:
+            return Response({"error": "card_code is required"}, status=status.HTTP_400_BAD_REQUEST)
         
-    permission_classes = [AllowAny]
+        templates = Template.objects.filter(
+            user=request.user, 
+            order__card_code=card_code
+        ).select_related('order').order_by('-created_at')
+        
+        orders_data = []
+        for t in templates:
+            date_str = t.order.created_at.strftime('%d-%b-%Y') if t.order.created_at else 'Unknown Date'
+            orders_data.append({
+                "label": f"Order #{t.order.order_number} ({date_str}) - ₹{t.order.total_amount}",
+                "value": t.order.id
+            })
+            
+        return Response(orders_data, status=status.HTTP_200_OK)

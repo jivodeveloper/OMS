@@ -29,7 +29,7 @@ def populate_statuses(apps, schema_editor):
                 'name': status_data['name']
             }
         )
-
+    
 def remove_statuses(apps, schema_editor):
     try:
         OrderStatus = apps.get_model('orders', 'OrderStatus')

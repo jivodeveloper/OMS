@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import * as XLSX from "xlsx";
 import { saveAs } from "file-saver";
 import type { Order, OrderItem } from "../services/ordersService";
 import { sapService } from "../services/sapService";
 import { loadManagerOrders } from "../utils/orderHistory";
-import { ordersService } from "../services/ordersService";
+import { getOrderItemSchemes, getOrderItemTotalLtrs, ordersService } from "../services/ordersService";
 import "../styles/Order_Status_Tracking.css";
 import {
   HiEye,HiArrowDownTray
@@ -68,14 +68,11 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
   const [showDetails, setShowDetails] = useState(false);
   const [orderDetails, setOrderDetails] = useState<Order | null>(null);
   const [selectedItems, setSelectedItems] = useState<OrderItem[]>([]);
+  const fetchedQuotationIds = useRef<Set<number>>(new Set());
 
   const itemsPerPage = 10;
   const pageTitle = mode === "auditor" ? "Auditor Status Tracking" : "Billing Status Tracking";
-  const pageSubtitle =
-    mode === "auditor"
-      ? "Track orders reviewed and marked accepted or rejected by the auditor stage."
-      : "Track orders handled at billing stage and review accepted or rejected outcomes.";
-
+  
   useEffect(() => {
     void fetchOrders();
   }, [mode]);
@@ -155,6 +152,19 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
     }
   };
 
+  useEffect(() => {
+    const fetchMissingQuotations = async () => {
+      const ordersToFetch = paginatedOrders.filter(
+        (o) => !String(o.sap_doc_number || "").trim() && isCompletedStatus(o) && !fetchedQuotationIds.current.has(o.id)
+      );
+      if (ordersToFetch.length === 0) return;
+
+      ordersToFetch.forEach((o) => fetchedQuotationIds.current.add(o.id));
+      await Promise.all(ordersToFetch.map((order) => resolveQuotationNumber(order)));
+    };
+    void fetchMissingQuotations();
+  }, [paginatedOrders]);
+
      const fetchOrderDetails = async (orderId: number) => {
   try {
     const data = await ordersService.getOrderDetails(orderId);
@@ -174,7 +184,7 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
 
   const totalLtrs = selectedItems.reduce(
     (sum, item) =>
-      sum + (Number((item as any).total_ltrs) || (Number(item.ltrs || 0) + Number((item as any).scheme_ltrs || 0))),
+      sum + getOrderItemTotalLtrs(item),
     0,
   );
   const subtotal = selectedItems.reduce((sum, item) => sum + Number(item.total || 0), 0);
@@ -192,7 +202,9 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
     let excelData: object[] = [];
 
     if (exportOrder.items && exportOrder.items.length > 0) {
-      excelData = exportOrder.items.map((item: OrderItem) => ({
+      excelData = exportOrder.items.flatMap((item: OrderItem) => {
+        const schemes = getOrderItemSchemes(item);
+        const baseRow = {
         "Order Number": exportOrder.order_number,
         "Card Code": exportOrder.card_code,
         "Card Name": exportOrder.card_name,
@@ -203,15 +215,16 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
         "Ship To": exportOrder.ship_to_address,
         "Item Code": item.item_code,
         "Item Name": item.item_name,
-        Scheme: item.scheme_name || "",
-        "Scheme Qty": item.scheme_qty || "",
-        
         Qty: item.qty,
         Boxes: item.boxes,
         Liters: item.ltrs,
-        "Total Ltrs": (item as any).total_ltrs || (Number(item.ltrs || 0) + Number((item as any).scheme_qty || 0)).toFixed(2),
+        "Total Ltrs": getOrderItemTotalLtrs(item).toFixed(2),
         "Total Amount": item.total,
-      }));
+        };
+        return schemes.length
+          ? schemes.map((scheme) => ({ ...baseRow, Scheme: scheme.name, "Scheme Qty": scheme.qty }))
+          : [{ ...baseRow, Scheme: "", "Scheme Qty": "" }];
+      });
     } else {
       excelData.push({
         "Order Number": exportOrder.order_number,
@@ -342,7 +355,7 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
               <thead>
                 <tr>
                   <th>Order ID</th>
-              <th>Quotation No</th>
+              {/* <th>Quotation No</th> */}
                   <th>Card Code</th>
                   <th>Card Name</th>
                   <th>Delivery Date</th>
@@ -356,13 +369,13 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
                   paginatedOrders.map((order) => (
                     <tr key={order.id}>
                       <td>{order.order_number}</td>
-                  <td>
+                  {/* <td>
                     {String(order.sap_doc_number || "").trim() ? (
                       <span className="ot-badge" style={{ background: "#f8fafc", color: "#475569", border: "1px solid #e2e8f0" }}>
                         {order.sap_doc_number}
                       </span>
                     ) : "—"}
-                  </td>
+                  </td> */}
                       <td>{order.card_code}</td>
                       <td>{order.card_name}</td>
                       <td>{order.delivery_date}</td>
@@ -457,6 +470,10 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
                 <span className="ot-detail-value">{orderDetails.delivery_date || "—"}</span>
               </div>
               <div className="ot-detail-field">
+                <span className="ot-detail-label">PO Number</span>
+                <span className="ot-detail-value">{orderDetails.po_number || "—"}</span>
+              </div>
+              <div className="ot-detail-field">
                 <span className="ot-detail-label">Party Name</span>
                 <span className="ot-detail-value">{orderDetails.card_name || "—"}</span>
               </div>
@@ -510,23 +527,39 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
                 </thead>
                 <tbody>
                   {selectedItems.length > 0 ? (
-                    selectedItems.map((item, index) => (
+                    selectedItems.map((item, index) => {
+                      const schemes = getOrderItemSchemes(item);
+
+                      return (
                       <tr key={`${item.item_code}-${index}`}>
                         <td>{index + 1}</td>
                         <td>{item.item_code}</td>
                         <td style={{ minWidth: '250px' }}>{item.item_name}</td>
                         <td>{item.category}</td>
-                        <td>{item.scheme_name || "—"}</td>
-                        <td>{item.scheme_name ? item.scheme_qty || 0 : "—"}</td>
+                        <td colSpan={2}>
+                          {schemes.length > 0 ? (
+                            <div className="order-scheme-stack" aria-label="Applied schemes">
+                              {schemes.map((scheme, schemeIndex) => (
+                                <div className="order-scheme-chip" key={`${item.item_code}-scheme-${schemeIndex}`}>
+                                  <span className="order-scheme-name">{scheme.name || "-"}</span>
+                                  <span className="order-scheme-qty">Qty {scheme.qty || 0}</span>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <span className="order-scheme-empty">No scheme</span>
+                          )}
+                        </td>
                         <td>{item.qty}</td>
                         <td>{item.pcs}</td>
                         <td>{Number(item.boxes).toFixed(2)}</td>
                         <td>{item.ltrs}</td>
                         {/* <td>{item.scheme_name ? (item as any).scheme_ltrs || 0 : "—"}</td> */}
-                        <td>{(item as any).total_ltrs || (Number(item.ltrs || 0) + Number((item as any).scheme_qty || 0)).toFixed(2)}</td>
+                        <td>{getOrderItemTotalLtrs(item).toFixed(2)}</td>
                         <td>{Number(item.total).toFixed(2)}</td>
                       </tr>
-                    ))
+                      );
+                    })
                   ) : (
                     <tr>
                       <td colSpan={11} className="ot-empty">No items found.</td>
@@ -560,3 +593,4 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
     </div>
   );
 }
+

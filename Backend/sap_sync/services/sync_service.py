@@ -242,8 +242,14 @@ def _to_float(value, default=0.0):
 
 def _get_sap_line_quantity(item):
     if isinstance(item, dict):
-        return _to_float(item.get("qty"), 0)
-    return _to_float(getattr(item, "qty", None), 0)
+        qty = _to_float(item.get("qty"), 0)
+        if qty <= 0:
+            qty = _to_float(item.get("boxes"), 0)
+    else:
+        qty = _to_float(getattr(item, "qty", None), 0)
+        if qty <= 0:
+            qty = _to_float(getattr(item, "boxes", None), 0)
+    return qty
 
 
 def _get_sap_unit_price(item):
@@ -795,6 +801,20 @@ class SyncService:
                             getattr(item, "id", None),
                             raw_scheme_id,
                         )
+
+                if raw_scheme_id not in (None, ""):
+                    for comp_code in combo_component_codes:
+                        comp_scheme = get_party_product_scheme(card_code, comp_code, category)
+                        if comp_scheme and getattr(comp_scheme, "scheme_id", None):
+                            try:
+                                comp_scheme_items = get_scheme_item_codes_for_combo(
+                                    int(comp_scheme.scheme_id),
+                                    party_state_code,
+                                )
+                                scheme_item_codes.extend(comp_scheme_items)
+                            except (TypeError, ValueError):
+                                pass
+
                 scheme_item_codes = list(dict.fromkeys(code for code in scheme_item_codes if code))
             elif raw_scheme_id not in (None, ""):
                 try:
@@ -808,20 +828,23 @@ class SyncService:
                         raw_scheme_id,
                     )
 
-            # Line 1: always the ordered item at its price
-            document_lines.append(
-                {
-                    "ItemCode": item_code,
-                    "Quantity": order_qty,
-                    "UnitPrice": item_unit_price,
-                    "WarehouseCode": "GP-FG",
-                }
-            )
+            is_scheme_line = getattr(item, 'item_type', '') == 'SCHEME'
 
-            if should_mirror_combo_qty:
+            # Line 1: always the ordered item at its price
+            if not is_scheme_line and (order_qty > 0 or item_unit_price > 0):
+                document_lines.append(
+                    {
+                        "ItemCode": item_code,
+                        "Quantity": order_qty,
+                        "UnitPrice": item_unit_price,
+                        "WarehouseCode": "GP-FG",
+                    }
+                )
+
+            if should_mirror_combo_qty and order_qty > 0:
                 scheme_qty = order_qty
 
-            if should_mirror_combo_qty:
+            if should_mirror_combo_qty and order_qty > 0:
                 if combo_component_codes:
                     # Explicit component assignments — add each at party price
                     for comp_code in combo_component_codes:
@@ -852,6 +875,17 @@ class SyncService:
                         )
 
             if scheme_item_codes and scheme_qty > 0:
+                # If this is a Punjab combo item (e.g., "A + B") and the scheme
+                # resolution only found one free item, the business logic may
+                # require two free items. We duplicate the single found item
+                # to create two free scheme lines in the payload.
+                is_plus_combo = '+' in (getattr(item, "item_name", "") or "")
+                if should_mirror_combo_qty and is_plus_combo and len(scheme_item_codes) == 1:
+                    logger.warning(
+                        "Duplicating single scheme item for Punjab combo: %s", scheme_item_codes[0]
+                    )
+                    scheme_item_codes.append(scheme_item_codes[0])
+
                 for scheme_item_code in scheme_item_codes:
                     if scheme_item_code == item_code:
                         continue
@@ -865,7 +899,7 @@ class SyncService:
                         }
                     )
 
-
+        
         posting_date = timezone.localdate()
         due_date = _as_iso_date(getattr(order, "delivery_date", None), posting_date)
 

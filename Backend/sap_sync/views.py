@@ -136,8 +136,11 @@ class ProductListView(ListAPIView):
     serializer_class = ProductSerializer
 
     def get_queryset(self):
-        # ✅ Only OIL category
-        queryset = Product.objects.filter(category__iexact='OIL')
+        queryset = Product.objects.all()
+
+        category = self.request.query_params.get('category', None)
+        if category:
+            queryset = queryset.filter(category__iexact=category)
 
         search = self.request.query_params.get('search', None)
         if search:
@@ -180,8 +183,8 @@ class PartyListView(ListAPIView):
     serializer_class = PartyListSerializer
 
     def get_queryset(self):
-        # ✅ Only OIL category
-        queryset = Party.objects.filter(category__iexact='OIL')
+        # Return all parties; filtering is handled on the client or via query params
+        queryset = Party.objects.all()
 
         search = self.request.query_params.get('search', None)
         if search:

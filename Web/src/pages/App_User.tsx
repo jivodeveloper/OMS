@@ -1,8 +1,20 @@
 import { useState, useEffect, useRef } from "react";
 import { userService } from "../services/userService";
-import type { User, Option, CreateUserData } from "../services/userService";
+import type { User, Option, CreateUserData, CategoryOption } from "../services/userService";
 import "../styles/App_User.css";
-import { HiPencilSquare } from "react-icons/hi2";
+import {
+  HiAtSymbol,
+  HiBuildingOffice2,
+  HiEnvelope,
+  HiLockClosed,
+  HiMapPin,
+  HiPencilSquare,
+  HiPhone,
+  HiShieldCheck,
+  HiTag,
+  HiUser,
+  HiUserGroup,
+} from "react-icons/hi2";
 
 export default function App_User() {
 
@@ -13,6 +25,7 @@ export default function App_User() {
   const [state, setState] = useState<Option[]>([]);
   const [role, setRole] = useState<Option[]>([]);
   const [company, setCompany] = useState<Option[]>([]);
+  const [categories, setCategories] = useState<CategoryOption[]>([]);
   const [formData, setFormData] = useState<CreateUserData>({
     name: "",
     username: "",
@@ -25,6 +38,7 @@ export default function App_User() {
     states: [],
     role: 0,
     company: 0,
+    category: null,
   });
   const [showForm, setShowForm] = useState(false);
   const [showUsers, setShowUsers] = useState(true);
@@ -42,6 +56,7 @@ export default function App_User() {
     fetchState();
     fetchRole();
     fetchCompany();
+    fetchCategories();
   }, []);
 
   useEffect(() => {
@@ -114,6 +129,15 @@ export default function App_User() {
     }
   };
 
+  const fetchCategories = async () => {
+    try {
+      const data = await userService.getCategories();
+      setCategories(data);
+    } catch (error) {
+      console.log("Error fetching Category:", error);
+    }
+  };
+
   const toggleMainGroup = (id: number) => {
     setFormData((prev) => {
       const current = prev.mainGroups || [];
@@ -174,7 +198,7 @@ export default function App_User() {
       [name]:
         name === "role"
           ? (value === "" ? 0 : Number(value))
-          : name === "company"
+          : name === "company" || name === "category"
             ? (value === "" ? null : Number(value))
             : value,
     }));
@@ -183,57 +207,49 @@ export default function App_User() {
   const getCreateUserErrorMessage = (source: any) => {
     const responseData = source?.response?.data || source;
     const errorBag = responseData?.errors || {};
-    const usernameError = errorBag?.username?.[0] || responseData?.username?.[0];
-    const emailError = errorBag?.email?.[0] || responseData?.email?.[0];
-    const nonFieldError =
-      errorBag?.non_field_errors?.[0] || responseData?.non_field_errors?.[0];
-    const rawMessage =
-      responseData?.message ||
-      responseData?.error ||
-      responseData?.detail ||
-      usernameError ||
-      emailError ||
-      nonFieldError ||
-      "";
 
-    const isDuplicateFieldError = (value: unknown) => {
-      const message = String(value || "").toLowerCase();
-      return (
-        message.includes("already exists") ||
-        message.includes("already exist") ||
-        message.includes("duplicate") ||
-        message.includes("already taken")
-      );
-    };
+    const errorsToScan = Object.keys(errorBag).length > 0 ? errorBag : responseData;
 
-    const usernameDuplicate = isDuplicateFieldError(usernameError);
-    const emailDuplicate = isDuplicateFieldError(emailError);
+    if (errorsToScan && typeof errorsToScan === "object" && !Array.isArray(errorsToScan)) {
+      const usernameError = errorsToScan.username?.[0] || (typeof errorsToScan.username === "string" ? errorsToScan.username : null);
+      const emailError = errorsToScan.email?.[0] || (typeof errorsToScan.email === "string" ? errorsToScan.email : null);
+      const passwordError = errorsToScan.password?.[0] || (typeof errorsToScan.password === "string" ? errorsToScan.password : null);
+      const nonFieldError = errorsToScan.non_field_errors?.[0];
 
-    if (usernameDuplicate && emailDuplicate) {
-      return "Username and email already exist.";
+      const isDuplicate = (val: any) => {
+        const msg = String(val || "").toLowerCase();
+        return msg.includes("already exist") || msg.includes("duplicate") || msg.includes("already taken");
+      };
+
+      if (isDuplicate(usernameError) && isDuplicate(emailError)) {
+        return "Username and email already exist.";
+      }
+      if (isDuplicate(usernameError)) return "Username already exists.";
+      if (isDuplicate(emailError)) return "Email already exists.";
+
+      if (passwordError) return `Password: ${passwordError}`;
+      if (usernameError) return `Username: ${usernameError}`;
+      if (emailError) return `Email: ${emailError}`;
+      if (nonFieldError) return String(nonFieldError);
+
+      // Dynamically extract any other field error (e.g., phone, name)
+      for (const [key, value] of Object.entries(errorsToScan)) {
+        if (key !== "message" && key !== "error" && key !== "detail" && key !== "success") {
+          if (Array.isArray(value) && value.length > 0 && typeof value[0] === "string") {
+            const fieldName = key.charAt(0).toUpperCase() + key.slice(1);
+            return `${fieldName}: ${value[0]}`;
+          }
+        }
+      }
     }
 
-    if (usernameDuplicate) {
-      return "Username already exists.";
-    }
+    if (typeof responseData?.message === "string" && responseData.message) return responseData.message;
+    if (typeof responseData?.error === "string" && responseData.error) return responseData.error;
+    if (typeof responseData?.detail === "string" && responseData.detail) return responseData.detail;
 
-    if (emailDuplicate) {
-      return "Email already exists.";
-    }
-
-    if (usernameError) {
-      return String(usernameError);
-    }
-
-    if (emailError) {
-      return String(emailError);
-    }
-
-    if (nonFieldError) {
-      return String(nonFieldError);
-    }
-
-    return rawMessage || "Something went wrong while creating the user.";
+    return typeof responseData === "string" && responseData.trim() !== ""
+      ? responseData
+      : "Something went wrong while creating the user.";
   };
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -263,6 +279,7 @@ export default function App_User() {
           states: [],
           role: 0,
           company: 0,
+          category: null,
         });
 
         setIsEditMode(false);
@@ -299,6 +316,7 @@ export default function App_User() {
       state?: unknown;
       states?: unknown;
       company?: unknown;
+      category?: unknown;
       role?: unknown;
       role_display?: string;
     };
@@ -324,6 +342,7 @@ export default function App_User() {
       states: stateIds,
       role: roleId,
       company: getId(editableUser.company) || null,
+      category: getId(editableUser.category) || null,
     });
 
     setShowForm(true);
@@ -463,7 +482,8 @@ export default function App_User() {
             <div className="au-form-grid">
               <div className="au-field">
                 <label className="au-label">Full Name</label>
-                <div className="au-input-wrap">
+                <div className="au-input-wrap au-has-icon">
+                  <HiUser className="au-field-icon" aria-hidden="true" />
                   <input
                     type="text"
                     name="name"
@@ -477,7 +497,8 @@ export default function App_User() {
               </div>
               <div className="au-field">
                 <label className="au-label">Username</label>
-                <div className="au-input-wrap">
+                <div className="au-input-wrap au-has-icon">
+                  <HiAtSymbol className="au-field-icon" aria-hidden="true" />
                   <input
                     type="text"
                     name="username"
@@ -491,7 +512,8 @@ export default function App_User() {
               </div>
               <div className="au-field">
                 <label className="au-label">Password</label>
-                <div className="au-input-wrap">
+                <div className="au-input-wrap au-has-icon">
+                  <HiLockClosed className="au-field-icon" aria-hidden="true" />
                   <input
                     className="au-password-input"
                     type={showPassword ? "text" : "password"}
@@ -541,7 +563,8 @@ export default function App_User() {
               </div>
               <div className="au-field">
                 <label className="au-label">Email Address</label>
-                <div className="au-input-wrap">
+                <div className="au-input-wrap au-has-icon">
+                  <HiEnvelope className="au-field-icon" aria-hidden="true" />
                   <input
                     type="email"
                     name="email"
@@ -555,7 +578,8 @@ export default function App_User() {
               </div>
               <div className="au-field">
                 <label className="au-label">Contact No.</label>
-                <div className="au-input-wrap">
+                <div className="au-input-wrap au-has-icon">
+                  <HiPhone className="au-field-icon" aria-hidden="true" />
                   <input
                     type="tel"
                     name="phone"
@@ -575,12 +599,17 @@ export default function App_User() {
                     className="au-mg-trigger"
                     onClick={() => setMgDropdownOpen((v) => !v)}
                   >
-                    {(formData.mainGroups?.length || 0) === 1
-                      ? mainGroup.find((g) => g.id === formData.mainGroups![0])
-                        ?.name || "1 selected"
-                      : (formData.mainGroups?.length || 0) > 1
-                        ? `${formData.mainGroups!.length} selected`
-                        : "Select Main Group"}
+                    <span className="au-trigger-label">
+                      <HiUserGroup className="au-field-icon" aria-hidden="true" />
+                      <span>
+                        {(formData.mainGroups?.length || 0) === 1
+                          ? mainGroup.find((g) => g.id === formData.mainGroups![0])
+                            ?.name || "1 selected"
+                          : (formData.mainGroups?.length || 0) > 1
+                            ? `${formData.mainGroups!.length} selected`
+                            : "Select Main Group"}
+                      </span>
+                    </span>
                     <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
                       <path
                         d="M3 4.5L6 7.5L9 4.5"
@@ -627,12 +656,17 @@ export default function App_User() {
                     className="au-mg-trigger"
                     onClick={() => setStDropdownOpen((v) => !v)}
                   >
-                    {(formData.states?.length || 0) === 1
-                      ? state.find((s) => s.id === formData.states![0])?.name ||
-                      "1 selected"
-                      : (formData.states?.length || 0) > 1
-                        ? `${formData.states!.length} selected`
-                        : "Select State"}
+                    <span className="au-trigger-label">
+                      <HiMapPin className="au-field-icon" aria-hidden="true" />
+                      <span>
+                        {(formData.states?.length || 0) === 1
+                          ? state.find((s) => s.id === formData.states![0])?.name ||
+                          "1 selected"
+                          : (formData.states?.length || 0) > 1
+                            ? `${formData.states!.length} selected`
+                            : "Select State"}
+                      </span>
+                    </span>
                     <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
                       <path
                         d="M3 4.5L6 7.5L9 4.5"
@@ -672,7 +706,8 @@ export default function App_User() {
               </div>
               <div className="au-field">
                 <label className="au-label">User Role</label>
-                <div className="au-input-wrap">
+                <div className="au-input-wrap au-has-icon">
+                  <HiShieldCheck className="au-field-icon" aria-hidden="true" />
 
                   <select
                     name="role"
@@ -692,7 +727,8 @@ export default function App_User() {
               </div>
               <div className="au-field au-full">
                 <label className="au-label">Company</label>
-                <div className="au-input-wrap">
+                <div className="au-input-wrap au-has-icon">
+                  <HiBuildingOffice2 className="au-field-icon" aria-hidden="true" />
                   <select
                     name="company"
                     value={formData.company ?? ""}
@@ -703,6 +739,26 @@ export default function App_User() {
                     {company.map((c) => (
                       <option key={c.id} value={c.id}>
                         {c.name}
+                      </option>
+                    ))}
+                  </select>
+                  <div className="au-focus-line" />
+                </div>
+              </div>
+              <div className="au-field au-full">
+                <label className="au-label">Category</label>
+                <div className="au-input-wrap au-has-icon">
+                  <HiTag className="au-field-icon" aria-hidden="true" />
+                  <select
+                    name="category"
+                    value={formData.category ?? ""}
+                    onChange={handleChange}
+                    required
+                  >
+                    <option value="">Select Category</option>
+                    {categories.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.category}
                       </option>
                     ))}
                   </select>

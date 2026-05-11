@@ -1,7 +1,13 @@
 import { useState, useEffect, useMemo } from "react";
 import * as XLSX from "xlsx";
 import { saveAs } from "file-saver";
-import { ordersService } from "../services/ordersService";
+import {
+  getOrderItemSchemeNames,
+  getOrderItemSchemes,
+  getOrderItemSchemeQtyText,
+  getOrderItemTotalLtrs,
+  ordersService,
+} from "../services/ordersService";
 import type { OrderItem, Order, OrderStatus, PartyProduct } from "../services/ordersService";
 import { loadCurrentUserOrders } from "../utils/orderHistory";
 import "../styles/View_Orders.css";
@@ -216,17 +222,6 @@ export default function View_Orders() {
     pageNumber * itemsPerPage,
   );
 
-  const getItemTotalLtrs = (item: OrderItem) => {
-    const totalLtrs = Number(item.total_ltrs);
-
-    if (Number.isFinite(totalLtrs) && totalLtrs > 0) {
-      return totalLtrs;
-    }
-
-    return Number(item.ltrs || 0) + Number(item.scheme_qty || 0);
-  };
-
-
   const downloadExcel = (order: Order) => {
     let excelData = [];
 
@@ -244,13 +239,13 @@ export default function View_Orders() {
 
         "Item Code": item.item_code,
         "Item Name": item.item_name,
-        "Scheme": item.scheme_name || "",
-        "Scheme Qty": item.scheme_qty || "",
+        "Scheme": getOrderItemSchemeNames(item),
+        "Scheme Qty": getOrderItemSchemeQtyText(item),
         // "Scheme Ltrs": (item as any).scheme_ltrs || "",
         "Qty": item.qty,
         "Boxes": item.boxes,
         "Liters": item.ltrs,
-        "Total Ltrs": getItemTotalLtrs(item),
+        "Total Ltrs": getOrderItemTotalLtrs(item),
         "Total Amount": item.total,
       }));
     } else {
@@ -450,6 +445,10 @@ export default function View_Orders() {
                 <span className="vo-d-hf-value">{orderDetails.delivery_date || "—"}</span>
               </div>
               <div className="vo-d-info-field">
+                <span className="vo-d-hf-label">PO Number</span>
+                <span className="vo-d-hf-value">{orderDetails.po_number || "—"}</span>
+              </div>
+              <div className="vo-d-info-field">
                 <span className="vo-d-hf-label">Party Name</span>
                 <span className="vo-d-hf-value">{orderDetails.card_name}</span>
               </div>
@@ -484,26 +483,42 @@ export default function View_Orders() {
                   </tr>
                 </thead>
                 <tbody>
-                  {selectedItems.length > 0 ? selectedItems.map((item, i) => (
+                  {selectedItems.length > 0 ? selectedItems.map((item, i) => {
+                    const schemes = getOrderItemSchemes(item);
+
+                    return (
                     <tr key={i}>
                       <td style={{textAlign:'center',color:'#94a3b8'}}>{i + 1}</td>
                       <td><span className="vo-d-item-code">{item.item_code}</span></td>
                       <td style={{fontWeight:500,color:'#0f172a', minWidth: '250px'}}>{item.item_name}</td>
                       <td>{item.category}</td>
-                      <td>{item.scheme_name || "—"}</td>
-                      <td style={{textAlign:'center'}}>{item.scheme_name ? (item.scheme_qty || 0) : "—"}</td>
+                      <td colSpan={2}>
+                        {schemes.length > 0 ? (
+                          <div className="order-scheme-stack" aria-label="Applied schemes">
+                            {schemes.map((scheme, schemeIndex) => (
+                              <div className="order-scheme-chip" key={`${item.item_code}-scheme-${schemeIndex}`}>
+                                <span className="order-scheme-name">{scheme.name || "-"}</span>
+                                <span className="order-scheme-qty">Qty {scheme.qty || 0}</span>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <span className="order-scheme-empty">No scheme</span>
+                        )}
+                      </td>
                       <td style={{textAlign:'center'}}>{item.qty}</td>
                       <td style={{textAlign:'center'}}>{item.pcs}</td>
                       <td style={{textAlign:'center'}}>{Number(item.boxes).toFixed(2)}</td>
                       <td style={{textAlign:'center'}}>{item.ltrs}</td>
                       {/* <td style={{textAlign:'center'}}>{item.scheme_name ? ((item as any).scheme_ltrs || 0) : "—"}</td> */}
-                      <td style={{textAlign:'center'}}>{getItemTotalLtrs(item).toFixed(2)}</td>
+                      <td style={{textAlign:'center'}}>{getOrderItemTotalLtrs(item).toFixed(2)}</td>
                       <td style={{textAlign:'right'}}>{Number(item.basic_price).toFixed(2)}</td>
                       <td style={{textAlign:'right'}}>{Number(item.market_price).toFixed(2)}</td>
                       <td style={{textAlign:'center'}}>{Number(item.tax_rate).toFixed(2)}</td>
                       <td style={{textAlign:'right',fontWeight:600,color:'#0f172a'}}>{Number(item.total).toFixed(2)}</td>
                     </tr>
-                  )) : (<tr><td colSpan={14} className="vo-empty">No items found</td></tr>)}
+                    );
+                  }) : (<tr><td colSpan={14} className="vo-empty">No items found</td></tr>)}
                 </tbody>
               </table>
             </div>
@@ -513,7 +528,7 @@ export default function View_Orders() {
           <div className="vo-d-summary">
             <div className="vo-d-sum-row">
               <span className="vo-d-sum-label">Total Ltrs</span>
-              <span className="vo-d-sum-val">{selectedItems.reduce((s, i) => s + getItemTotalLtrs(i), 0).toFixed(2)}</span>
+              <span className="vo-d-sum-val">{selectedItems.reduce((s, i) => s + getOrderItemTotalLtrs(i), 0).toFixed(2)}</span>
             </div>
             <div className="vo-d-sum-row">
               <span className="vo-d-sum-label">Subtotal</span>

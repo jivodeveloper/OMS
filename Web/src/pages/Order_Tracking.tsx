@@ -399,6 +399,10 @@ export default function Order_Tracking() {
               <p className="tracker-label">Delivery Date</p>
               <p>{selectedOrder.delivery_date || "-"}</p>
             </div>
+            <div>
+              <p className="tracker-label">PO Number</p>
+              <p>{selectedOrder.po_number || "-"}</p>
+            </div>
           </div>
 
           <div className="tracker-timeline">

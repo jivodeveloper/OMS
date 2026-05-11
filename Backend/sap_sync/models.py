@@ -9,7 +9,7 @@ class Product(models.Model):
         ('BEVERAGES', 'Beverages'),
         ('MART', 'Mart'),
     ]
-    
+        
     item_code = models.CharField(max_length=50)
     item_name = models.CharField(max_length=255, blank=True, null=True)
     category = models.CharField(max_length=20)

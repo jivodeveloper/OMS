@@ -1,9 +1,9 @@
-import { useState, useEffect, useRef  } from "react";
+﻿import { useState, useEffect, useRef  } from "react";
 import { userService } from "../services/userService";
 import type { User } from "../services/userService";
 import type { Order, OrderItem } from "../services/ordersService";
 import { loadManagerOrders } from "../utils/orderHistory";
-import { ordersService } from "../services/ordersService";
+import { getOrderItemSchemeNames, getOrderItemSchemes, getOrderItemSchemeQtyText, getOrderItemTotalLtrs, ordersService } from "../services/ordersService";
 import * as XLSX from "xlsx";
 import { saveAs } from "file-saver";
 import "../styles/Report.css";
@@ -39,6 +39,7 @@ export default function Sales_Report() {
   const [selectedGroups, setSelectedGroups] = useState<number[]>([]);
   const [mgDropdownOpen, setMgDropdownOpen] = useState(false);
   const [orders, setOrders] = useState<Order[]>([]);
+  const [isOrdersLoading, setIsOrdersLoading] = useState(true);
     // const [selectedUser] = useState<string>("");
   const [showDetails, setShowDetails] = useState(false);
   const [orderDetails, setOrderDetails] = useState<Order | null>(null);
@@ -54,11 +55,14 @@ export default function Sales_Report() {
   const varietyRef = useRef<HTMLDivElement>(null);
 
   const fetchOrders = async () => {
+    setIsOrdersLoading(true);
     try {
       const data = await loadManagerOrders();
       setOrders(data);
     } catch (error) {
       console.error("Failed to fetch orders:", error);
+    } finally {
+      setIsOrdersLoading(false);
     }
   };
 
@@ -293,13 +297,13 @@ export default function Sales_Report() {
           Status: order.status_display,
           "Item Code": item.item_code,
           "Item Name": item.item_name,
-          Scheme: item.scheme_name || "",
-          "Scheme Qty": item.scheme_qty || "",
+          Scheme: getOrderItemSchemeNames(item),
+          "Scheme Qty": getOrderItemSchemeQtyText(item),
           // "Scheme Ltrs": (item as any).scheme_ltrs || "",
           Qty: item.qty,
           Boxes: item.boxes,
           Liters: item.ltrs,
-          "Total Ltrs": (item as any).total_ltrs || (Number(item.ltrs || 0) + Number((item as any).scheme_qty || 0)).toFixed(2),
+          "Total Ltrs": getOrderItemTotalLtrs(item).toFixed(2),
           "Tax Rate": item.tax_rate,
           "Total Amount": item.total,
           "Grand Total": (
@@ -375,13 +379,13 @@ export default function Sales_Report() {
             Status: order.status_display,
             "Item Code": item.item_code,
             "Item Name": item.item_name,
-            Scheme: item.scheme_name || "",
-            "Scheme Qty": item.scheme_qty || "",
+            Scheme: getOrderItemSchemeNames(item),
+            "Scheme Qty": getOrderItemSchemeQtyText(item),
             // "Scheme Ltrs": (item as any).scheme_ltrs || "",
             Qty: item.qty,
             Boxes: item.boxes,
             Liters: item.ltrs,
-            "Total Ltrs": (item as any).total_ltrs || (Number(item.ltrs || 0) + Number((item as any).scheme_qty || 0)).toFixed(2),
+            "Total Ltrs": getOrderItemTotalLtrs(item).toFixed(2),
             "Tax Rate": item.tax_rate,
             "Total Amount": item.total,
             "Grand Total": (
@@ -458,7 +462,7 @@ export default function Sales_Report() {
 
   return (
     <div className="dr-page">
-      {/* ── LIST VIEW ── */}
+      {/* â”€â”€ LIST VIEW â”€â”€ */}
       {!showDetails && (
         <>
           <div className="dr-header">
@@ -734,7 +738,9 @@ export default function Sales_Report() {
                 </div>
               </div>
 
-              {filteredOrders.length > 0 ? (
+              {isOrdersLoading ? (
+                <div className="dr-empty" style={{ padding: "40px", textAlign: "center", color: "#64748b", background: "#f8fafc", borderRadius: "8px", border: "1px dashed #cbd5e1", margin: "20px 0" }}>Loading orders...</div>
+              ) : filteredOrders.length > 0 ? (
                 <div className="dr-table-wrap">
                   <table className="dr-table">
                     <thead>
@@ -792,7 +798,7 @@ export default function Sales_Report() {
                     disabled={currentPage === 1}
                     onClick={() => setCurrentPage((page) => page - 1)}
                   >
-                    ← Prev
+                    Prev
                   </button>
                   <span className="dr-pg-info">
                     {currentPage} / {totalPages}
@@ -802,7 +808,7 @@ export default function Sales_Report() {
                     disabled={currentPage === totalPages}
                     onClick={() => setCurrentPage((page) => page + 1)}
                   >
-                    Next →
+                    Next
                   </button>
                 </div>
               )}
@@ -811,7 +817,7 @@ export default function Sales_Report() {
         </>
       )}
 
-      {/* ── DETAIL VIEW ── */}
+      {/* â”€â”€ DETAIL VIEW â”€â”€ */}
       {showDetails && orderDetails && (
         <div className="dr-detail">
           <div className="dr-d-nav">
@@ -937,8 +943,7 @@ export default function Sales_Report() {
                         </td>
                         <td>{item.category}</td>
                         <td>{item.variety}</td>
-                        <td>{item.scheme_name || "—"}</td>
-                        <td style={{ textAlign: "center" }}>{item.scheme_name ? (item.scheme_qty || 0) : "—"}</td>
+                        <td colSpan={2}>{getOrderItemSchemes(item).length > 0 ? <div className="order-scheme-stack" aria-label="Applied schemes">{getOrderItemSchemes(item).map((scheme, schemeIndex) => <div className="order-scheme-chip" key={`${item.item_code}-scheme-${schemeIndex}`}><span className="order-scheme-name">{scheme.name || "-"}</span><span className="order-scheme-qty">Qty {scheme.qty || 0}</span></div>)}</div> : <span className="order-scheme-empty">No scheme</span>}</td>
                         <td style={{ textAlign: "center" }}>{item.qty}</td>
                         <td style={{ textAlign: "center" }}>{item.pcs}</td>
                         <td style={{ textAlign: "center" }}>
@@ -982,7 +987,7 @@ export default function Sales_Report() {
           <div className="dr-d-summary">
             <div className="dr-d-sum-row">
               <span className="dr-d-sum-label">Total Ltrs</span>
-              <span className="dr-d-sum-val">{selectedItems.reduce((s, i) => s + (Number((i as any).total_ltrs) || (Number(i.ltrs || 0) + Number((i as any).scheme_ltrs || 0))), 0).toFixed(2)}</span>
+              <span className="dr-d-sum-val">{selectedItems.reduce((s, i) => s + getOrderItemTotalLtrs(i), 0).toFixed(2)}</span>
             </div>
             <div className="dr-d-sum-row">
               <span className="dr-d-sum-label">Subtotal</span>
@@ -1025,3 +1030,6 @@ export default function Sales_Report() {
     </div>
   );
 }
+
+
+

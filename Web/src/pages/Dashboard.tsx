@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import type { ReactNode } from "react";
+import { HiOutlineClipboardDocumentList } from "react-icons/hi2";
 import {
   Area,
   AreaChart,
@@ -302,7 +304,7 @@ export default function Dashboard() {
     ],
     auditor: [
       { icon: "📥", tone: "db-card--teal", label: "This Month Orders", value: fmt(kpi?.this_month_orders ?? 0), sub: "Orders assigned for audit review" },
-      { icon: "�", tone: "db-card--blue", label: "Pending Review", value: fmt(outstandingOrders), sub: "Orders still awaiting decision" },
+      { icon: <HiOutlineClipboardDocumentList aria-hidden="true" />, tone: "db-card--blue", label: "Pending Review", value: fmt(outstandingOrders), sub: "Orders still awaiting decision" },
       { icon: "✅", tone: "db-card--dark", label: "Accepted Orders", value: fmt(auditorAcceptedCount), sub: "Orders accepted by auditor" },
     ],
     manager: [
@@ -315,7 +317,7 @@ export default function Dashboard() {
       { icon: "📌", tone: "db-card--teal", label: "Handled Orders", value: fmt(billingHandledCount), sub: "Orders completed or rejected by billing" },
       { icon: "🗓️", tone: "db-card--blue", label: "Today Orders", value: fmt(kpi?.today_orders ?? 0), sub: "Billing orders updated today" },
     ],
-  } satisfies Record<SupportedRole, { icon: string; tone: string; label: string; value: string; sub: string }[]>;
+  } satisfies Record<SupportedRole, { icon: ReactNode; tone: string; label: string; value: string; sub: string }[]>;
 
   const chartCopy = {
     admin: {
@@ -394,6 +396,29 @@ export default function Dashboard() {
 
   return (
     <div className="db-root">
+      <style>{`
+        @media (max-width: 1024px) {
+          .db-kpi-row { grid-template-columns: repeat(2, 1fr) !important; }
+          .db-overview-grid { grid-template-columns: repeat(2, 1fr) !important; }
+          .db-charts-row { display: flex !important; flex-direction: column !important; gap: 24px !important; }
+        }
+        @media (max-width: 768px) {
+          .db-kpi-row, .db-overview-grid { grid-template-columns: 1fr !important; display: flex !important; flex-direction: column !important; }
+          .db-header { flex-direction: column !important; align-items: flex-start !important; gap: 16px !important; }
+          .db-hero-summary { flex-wrap: wrap !important; justify-content: flex-start !important; margin-top: 16px !important; gap: 12px !important; }
+          .db-overview-top, .db-chart-head { flex-direction: column !important; align-items: flex-start !important; gap: 16px !important; }
+          .db-overview-top > div { width: 100%; }
+          .db-party-list-details { flex: 1; min-width: 0; word-break: break-word; }
+          .db-legend { flex-wrap: wrap !important; }
+        }
+        @media (max-width: 480px) {
+          .db-hero-stats { flex-direction: column !important; align-items: flex-start !important; gap: 8px !important; }
+          .db-year-select { width: 100% !important; }
+          .db-segmented-control { width: 100% !important; display: flex !important; flex-wrap: wrap !important; }
+          .db-segmented-btn { flex: 1 1 auto !important; text-align: center !important; }
+          .db-highlight-sub { word-break: break-word; }
+        }
+      `}</style>
       <div className="db-hero">
         <div className="db-hero-main">
           <div className="db-header">
@@ -476,7 +501,7 @@ export default function Dashboard() {
                     : "No party data available"}
                 </div>
               </div>
-              <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+            <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap", width: "100%" }}>
                 <select
                   className="db-year-select"
                   value={month}

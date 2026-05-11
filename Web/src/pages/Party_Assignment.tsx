@@ -5,9 +5,70 @@ import { sapService } from "../services/sapService";
 import type { Party } from "../services/sapService";
 import "../styles/Party_Assignment.css";
 
+type SearchableParty = Party & {
+  CardCode?: string | number | null;
+  CardName?: string | null;
+};
+
+const asText = (value: unknown) => String(value ?? "").trim();
+const normalizeSearch = (value: unknown) =>
+  asText(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+const getPartyCode = (party: SearchableParty) => asText(party.card_code || party.CardCode);
+const getPartyName = (party: SearchableParty) => asText(party.card_name || party.CardName);
+const getPartyCategory = (party: SearchableParty) => asText(party.category);
+const normalizeCategory = (value: unknown) => asText(value).toUpperCase();
+const getPartySelectionKey = (party: SearchableParty) =>
+  `${getPartyCode(party)}||${normalizeCategory(getPartyCategory(party))}`;
+const getPartyKey = (party: SearchableParty) =>
+  [getPartyCode(party), asText(party.category), asText(party.id)].filter(Boolean).join("-");
+
+const getUserCategory = (user?: User) => {
+  const category = user?.category;
+  if (!category) return "";
+  if (typeof category === "string" || typeof category === "number") return asText(category);
+  return asText(category.category);
+};
+
+const isPartyInUserCategory = (party: Party, userCategory: string) =>
+  !userCategory || normalizeSearch(party.category) === normalizeSearch(userCategory);
+
+const getSelectionFromKey = (key: string) => {
+  const [cardCode, category = ""] = key.split("||");
+  return {
+    card_code: cardCode,
+    category: category || null,
+  };
+};
+
+const mergeParties = (partyList: Party[]) => {
+  const seen = new Set<string>();
+
+  return partyList.filter((party) => {
+    const key = getPartyKey(party);
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+};
+
+const getPartyList = (data: unknown): Party[] => {
+  if (Array.isArray(data)) return data as Party[];
+  if (data && typeof data === "object") {
+    const response = data as { data?: unknown; results?: unknown };
+    if (Array.isArray(response.data)) return response.data as Party[];
+    if (Array.isArray(response.results)) return response.results as Party[];
+  }
+  return [];
+};
+
 export default function Party_Assignment() {
   const [users, setUsers] = useState<User[]>([]);
   const [parties, setParties] = useState<Party[]>([]);
+  const [isPartiesLoading, setIsPartiesLoading] = useState(false);
   const [selectedUser, setSelectedUser] = useState<number | "">("");
   const [showParties, setShowParties] = useState(false);
   const [search, setSearch] = useState("");
@@ -40,11 +101,15 @@ export default function Party_Assignment() {
   };
 
   const fetchParties = async () => {
+    setIsPartiesLoading(true);
     try {
       const data = await sapService.getParties();
-      setParties(data);
+      setParties(mergeParties(getPartyList(data)));
     } catch (error) {
       console.error("Error fetching parties:", error);
+      setParties([]);
+    } finally {
+      setIsPartiesLoading(false);
     }
   };
 
@@ -52,9 +117,10 @@ export default function Party_Assignment() {
     try {
       const res = await userService.getUserParties(userId);
 
-    const assigned = (res.data?.parties || []).map(
-  (p: any) => p.card_code
-);
+      const userCategory = getUserCategory(users.find((user) => user.id === userId));
+      const assigned = (res.data?.parties || [])
+        .filter((p: any) => isPartyInUserCategory(p, userCategory))
+        .map((p: any) => asText(p.party_key) || getPartySelectionKey(p));
           console.log("Assigned parties for user", userId, assigned);
 
       setSelectedParties(assigned);
@@ -63,14 +129,29 @@ export default function Party_Assignment() {
     }
   };
 
-  const filteredParties = parties.filter(
-    (party) =>
-      party.card_name.toLowerCase().includes(search.toLowerCase()) ||
-      party.card_code.toLowerCase().includes(search.toLowerCase()),
-  );
+  const selectedUserRecord = users.find((user) => user.id === selectedUser);
+  const selectedUserCategory = getUserCategory(selectedUserRecord);
+  const partyOptions = parties.filter((party) => isPartyInUserCategory(party, selectedUserCategory));
+  const partySearchTerm = normalizeSearch(search);
+  const visibleParties = partyOptions.filter((party) => {
+    if (!partySearchTerm) return true;
+
+    const searchableText = [
+      getPartyName(party),
+      getPartyCode(party),
+      party.state,
+      party.main_group,
+      getPartyCategory(party),
+    ].map(normalizeSearch).join(" ");
+
+    return partySearchTerm
+      .split(" ")
+      .every((term) => searchableText.includes(term));
+  });
+  const visiblePartyKeys = visibleParties.map(getPartySelectionKey);
 
   const filteredUsers = users.filter((user) =>
-    user.name.toLowerCase().includes(userSearch.toLowerCase()),
+    normalizeSearch(user.name).includes(normalizeSearch(userSearch)),
   );
 
  const handleSave = async () => {
@@ -81,9 +162,13 @@ export default function Party_Assignment() {
     }
 
    
+    const selectedPartySelections = selectedParties.map(getSelectionFromKey);
+    const selectedPartyCodes = [...new Set(selectedPartySelections.map((party) => party.card_code))];
+
     const res = await userService.assignPartiesToUser(
       Number(selectedUser),
-      selectedParties
+      selectedPartyCodes,
+      selectedPartySelections,
     );
 
     console.log("API Response:", res);
@@ -102,14 +187,20 @@ export default function Party_Assignment() {
   }
 };
 
-const handleDel =  async (code: string) => {
+const handleDel =  async (partyKey: string) => {
   try {
     if (!selectedUser) return;
 
-    console.log("Removing party", code, "from user", selectedUser);
+    console.log("Removing party", partyKey, "from user", selectedUser);
 
-    const newParties = selectedParties.filter((p) => p !== code);
-    await userService.assignPartiesToUser(Number(selectedUser), newParties);
+    const newParties = selectedParties.filter((p) => p !== partyKey);
+    const selectedPartySelections = newParties.map(getSelectionFromKey);
+    const selectedPartyCodes = [...new Set(selectedPartySelections.map((party) => party.card_code))];
+    await userService.assignPartiesToUser(
+      Number(selectedUser),
+      selectedPartyCodes,
+      selectedPartySelections,
+    );
 
     alert("Party removed ✅");
 
@@ -214,7 +305,8 @@ const handleDel =  async (code: string) => {
                 <div>
                   <h3 style={{ fontSize: '1.1rem', fontWeight: 600, color: '#0f172a', margin: 0 }}>Assigned Parties</h3>
                   <p style={{ fontSize: '0.875rem', color: '#64748b', margin: '4px 0 0' }}>
-                    <strong>{[...new Set(selectedParties)].length}</strong> parties assigned to <strong>{users.find((u) => u.id === selectedUser)?.name}</strong>
+                    <strong>{[...new Set(selectedParties)].length}</strong> parties assigned to <strong>{selectedUserRecord?.name}</strong>
+                    {selectedUserCategory && <> in <strong>{selectedUserCategory}</strong></>}
                   </p>
                 </div>
                 <button
@@ -228,7 +320,11 @@ const handleDel =  async (code: string) => {
                     cursor: 'pointer',
                     boxShadow: '0 1px 2px rgba(37, 99, 235, 0.2)'
                   }}
-                  onClick={() => setShowParties(true)}
+                  onClick={() => {
+                    setSearch("");
+                    setShowParties(true);
+                    if (parties.length === 0) fetchParties();
+                  }}
                 >
                   + Assign New Parties
                 </button>
@@ -236,10 +332,10 @@ const handleDel =  async (code: string) => {
 
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '16px' }}>
                 {(selectedParties || []).length > 0 ? (
-                  [...new Set(selectedParties)].map((code) => {
-                    const party = parties.find((p) => p.card_code === code);
+                  [...new Set(selectedParties)].map((partyKey) => {
+                    const party = partyOptions.find((p) => getPartySelectionKey(p) === partyKey);
                     return party ? (
-                      <div key={party.card_code} style={{ 
+                      <div key={getPartyKey(party)} style={{ 
                         display: 'flex', 
                         justifyContent: 'space-between', 
                         alignItems: 'flex-start', 
@@ -249,9 +345,10 @@ const handleDel =  async (code: string) => {
                         border: '1px solid #e2e8f0' 
                       }}>
                         <div>
-                          <div style={{ fontWeight: 600, color: '#1e293b', fontSize: '0.95rem' }}>{party.card_name}</div>
-                          <div style={{ fontSize: '0.8rem', color: '#64748b', marginTop: '4px', fontFamily: 'monospace' }}>{party.card_code}</div>
-                          <div style={{ fontSize: '0.8rem', color: '#64748b', marginTop: '4px', fontFamily: 'monospace' }}>{party.state}</div>
+                          <div style={{ fontWeight: 600, color: '#1e293b', fontSize: '0.95rem' }}>{getPartyName(party)}</div>
+                          <div style={{ fontSize: '0.8rem', color: '#64748b', marginTop: '4px', fontFamily: 'monospace' }}>
+                            {[getPartyCode(party), party.state, getPartyCategory(party)].filter(Boolean).join(" • ")}
+                          </div>
                         </div>
                         <button
                           style={{ 
@@ -266,7 +363,7 @@ const handleDel =  async (code: string) => {
                           }}
                           onMouseEnter={(e) => e.currentTarget.style.opacity = '1'}
                           onMouseLeave={(e) => e.currentTarget.style.opacity = '0.7'}
-                          onClick={() => handleDel(party.card_code)}
+                          onClick={() => handleDel(getPartySelectionKey(party))}
                           title="Remove Party"
                         >
                           ×
@@ -291,7 +388,7 @@ const handleDel =  async (code: string) => {
             <div>
               <h2 style={{ margin: '0 0 4px', fontSize: '24px', fontWeight: 800, color: '#0f172a', letterSpacing: '-0.02em' }}>Assign Parties</h2>
               <p style={{ fontSize: '0.875rem', color: '#64748b', margin: '4px 0 0' }}>
-                Select multiple parties to map to <strong>{users.find((u) => u.id === selectedUser)?.name}</strong>
+                Select multiple {selectedUserCategory && <strong>{selectedUserCategory} </strong>}parties to map to <strong>{selectedUserRecord?.name}</strong>
               </p>
             </div>
             <button
@@ -328,14 +425,17 @@ const handleDel =  async (code: string) => {
             />
           </div>
 
-          <div style={{ 
+          <div
+            key={`party-list-${partySearchTerm}-${visibleParties.length}`}
+            style={{ 
             maxHeight: '400px', 
             overflowY: 'auto', 
             border: '1px solid #e2e8f0', 
             borderRadius: '8px', 
             background: '#f8fafc' 
-          }}>
-            {filteredParties.length > 0 && (
+          }}
+          >
+            {!isPartiesLoading && visibleParties.length > 0 && (
               <label 
                 style={{ 
                   display: 'flex', 
@@ -353,33 +453,39 @@ const handleDel =  async (code: string) => {
                 <input
                   type="checkbox"
                   style={{ marginRight: '16px', width: '18px', height: '18px', cursor: 'pointer', accentColor: '#2563eb' }}
-                  checked={filteredParties.length > 0 && filteredParties.every((p) => selectedParties.includes(p.card_code))}
+                  checked={visibleParties.length > 0 && visiblePartyKeys.every((key) => selectedParties.includes(key))}
                   onChange={(e) => {
                     if (e.target.checked) {
-                      const newCodes = filteredParties.map(p => p.card_code).filter(code => !selectedParties.includes(code));
-                      setSelectedParties([...selectedParties, ...newCodes]);
+                      const newKeys = visiblePartyKeys.filter(key => !selectedParties.includes(key));
+                      setSelectedParties([...selectedParties, ...newKeys]);
                     } else {
-                      const filteredCodes = filteredParties.map(p => p.card_code);
-                      setSelectedParties(selectedParties.filter(code => !filteredCodes.includes(code)));
+                      setSelectedParties(selectedParties.filter(key => !visiblePartyKeys.includes(key)));
                     }
                   }}
                 />
             <div style={{ fontWeight: 600, color: '#0f172a', fontSize: '0.95rem' }}>
-              Select All ({filteredParties.filter((p) => selectedParties.includes(p.card_code)).length}/{filteredParties.length})
+              Select All ({visiblePartyKeys.filter((key) => selectedParties.includes(key)).length}/{visibleParties.length})
             </div>
               </label>
             )}
-            {filteredParties.length > 0 ? (
-              filteredParties.map((party) => (
+            {isPartiesLoading ? (
+              <div style={{ padding: '32px', textAlign: 'center', color: '#64748b' }}>Loading parties...</div>
+            ) : visibleParties.length > 0 ? (
+              visibleParties.map((party) => {
+                const partyCode = getPartyCode(party);
+                const partyName = getPartyName(party);
+                const partyKey = getPartySelectionKey(party);
+
+                return (
                 <label 
-                  key={party.card_code} 
+                  key={getPartyKey(party)} 
                   style={{ 
                     display: 'flex', 
                     alignItems: 'center', 
                     padding: '14px 16px', 
                     borderBottom: '1px solid #e2e8f0', 
                     cursor: 'pointer', 
-                    background: selectedParties.includes(party.card_code) ? '#eff6ff' : '#fff', 
+                    background: selectedParties.includes(partyKey) ? '#eff6ff' : '#fff', 
                     transition: 'background 0.2s',
                     margin: 0
                   }}
@@ -387,23 +493,26 @@ const handleDel =  async (code: string) => {
                   <input
                     type="checkbox"
                     style={{ marginRight: '16px', width: '18px', height: '18px', cursor: 'pointer', accentColor: '#2563eb' }}
-                    checked={selectedParties.includes(party.card_code)}
+                    checked={selectedParties.includes(partyKey)}
                     onChange={(e) => {
                       if (e.target.checked) {
-                        setSelectedParties([...selectedParties, party.card_code]);
+                        setSelectedParties([...selectedParties, partyKey]);
                       } else {
-                        setSelectedParties(selectedParties.filter((code) => code !== party.card_code));
+                        setSelectedParties(selectedParties.filter((key) => key !== partyKey));
                       }
                     }}
                   />
                   <div>
-                    <div style={{ fontWeight: 500, color: '#0f172a', fontSize: '0.95rem' }}>{party.card_name} ({party.state})</div>
-                                        
-
-                    <div style={{ fontSize: '0.8rem', color: '#64748b', marginTop: '2px', fontFamily: 'monospace' }}>{party.card_code}</div>
+                    <div style={{ fontWeight: 500, color: '#0f172a', fontSize: '0.95rem' }}>
+                      {partyName || "Unnamed party"}
+                    </div>
+                    <div style={{ fontSize: '0.8rem', color: '#64748b', marginTop: '2px', fontFamily: 'monospace' }}>
+                      {[partyCode, party.state, getPartyCategory(party)].filter(Boolean).join(" • ")}
+                    </div>
                   </div>
                 </label>
-              ))
+              );
+            })
             ) : (
               <div style={{ padding: '32px', textAlign: 'center', color: '#64748b' }}>No matching parties found</div>
             )}

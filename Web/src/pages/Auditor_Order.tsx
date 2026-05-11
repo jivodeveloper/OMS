@@ -1,7 +1,7 @@
-import { useState, useEffect } from "react";
+﻿import { useState, useEffect } from "react";
 import * as XLSX from "xlsx";
 import { saveAs } from "file-saver";
-import { ordersService } from "../services/ordersService";
+import { getOrderItemSchemeNames, getOrderItemSchemes, getOrderItemSchemeQtyText, getOrderItemTotalLtrs, ordersService } from "../services/ordersService";
 import type { Order, OrderItem } from "../services/ordersService";
 import "../styles/Auditor_Order.css";
 import { useLocation, useNavigate } from "react-router-dom";
@@ -106,13 +106,13 @@ export default function Auditor_orders() {
         "Ship To": order.ship_to_address,
         "Item Code": item.item_code,
         "Item Name": item.item_name,
-        Scheme: item.scheme_name || "",
-        "Scheme Qty": item.scheme_qty || "",
+        Scheme: getOrderItemSchemeNames(item),
+        "Scheme Qty": getOrderItemSchemeQtyText(item),
         // "Scheme Ltrs": (item as any).scheme_ltrs || "",
         Qty: item.qty,
         Boxes: item.boxes,
         Liters: item.ltrs,
-        "Total Ltrs": (item as any).total_ltrs || (Number(item.ltrs || 0) + Number((item as any).scheme_qty || 0)).toFixed(2),
+        "Total Ltrs": getOrderItemTotalLtrs(item).toFixed(2),
         "Total Amount": item.total,
       }));
     } else {
@@ -155,7 +155,7 @@ export default function Auditor_orders() {
   return (
     <div className="ao-page">
 
-      {/* ── LIST VIEW ── */}
+      {/* â”€â”€ LIST VIEW â”€â”€ */}
       {!showDetails && (
         <>
           <div className="ao-toolbar">
@@ -247,15 +247,15 @@ export default function Auditor_orders() {
 
           {filteredOrders.length > itemsPerPage && (
             <div className="ao-pagination">
-              <button className="ao-pg-btn" disabled={currentPage === 1} onClick={() => setCurrentPage((p) => p - 1)}>← Prev</button>
+              <button className="ao-pg-btn" disabled={currentPage === 1} onClick={() => setCurrentPage((p) => p - 1)}>Prev</button>
               <span className="ao-pg-info">{currentPage} / {Math.ceil(filteredOrders.length / itemsPerPage)}</span>
-              <button className="ao-pg-btn" disabled={currentPage === Math.ceil(filteredOrders.length / itemsPerPage)} onClick={() => setCurrentPage((p) => p + 1)}>Next →</button>
+              <button className="ao-pg-btn" disabled={currentPage === Math.ceil(filteredOrders.length / itemsPerPage)} onClick={() => setCurrentPage((p) => p + 1)}>Next</button>
             </div>
           )}
         </>
       )}
 
-      {/* ── DETAIL VIEW ── */}
+      {/* â”€â”€ DETAIL VIEW â”€â”€ */}
       {showDetails && orderDetails && (
         <div className="ao-detail">
           <div className="ao-d-nav">
@@ -353,8 +353,7 @@ export default function Auditor_orders() {
                   <td><span className="ao-d-item-code">{item.item_code}</span></td>
                       <td style={{fontWeight:500,color:'#0f172a', minWidth: '250px'}}>{item.item_name}</td>
                       <td>{item.category}</td>
-                      <td>{item.scheme_name || "—"}</td>
-                      <td style={{textAlign:'center'}}>{item.scheme_name ? (item.scheme_qty || 0) : "—"}</td>
+                      <td colSpan={2}>{getOrderItemSchemes(item).length > 0 ? <div className="order-scheme-stack" aria-label="Applied schemes">{getOrderItemSchemes(item).map((scheme, schemeIndex) => <div className="order-scheme-chip" key={`${item.item_code}-scheme-${schemeIndex}`}><span className="order-scheme-name">{scheme.name || "-"}</span><span className="order-scheme-qty">Qty {scheme.qty || 0}</span></div>)}</div> : <span className="order-scheme-empty">No scheme</span>}</td>
                       <td style={{textAlign:'center'}}>{item.qty}</td>
                       <td style={{textAlign:'center'}}>{item.pcs}</td>
                       <td style={{textAlign:'center'}}>{Number(item.boxes).toFixed(2)}</td>
@@ -373,7 +372,7 @@ export default function Auditor_orders() {
           </div>
 
           <div className="ao-d-summary">
-            <div className="ao-d-sum-row"><span className="ao-d-sum-label">Total Ltrs</span><span className="ao-d-sum-val">{selectedItems.reduce((s, i) => s + (Number((i as any).total_ltrs) || (Number(i.ltrs || 0) + Number((i as any).scheme_ltrs || 0))), 0).toFixed(2)}</span></div>
+            <div className="ao-d-sum-row"><span className="ao-d-sum-label">Total Ltrs</span><span className="ao-d-sum-val">{selectedItems.reduce((s, i) => s + getOrderItemTotalLtrs(i), 0).toFixed(2)}</span></div>
             <div className="ao-d-sum-row"><span className="ao-d-sum-label">Subtotal</span><span className="ao-d-sum-val">{selectedItems.reduce((s, i) => s + Number(i.total || 0), 0).toFixed(2)}</span></div>
             <div className="ao-d-sum-row"><span className="ao-d-sum-label">Tax</span><span className="ao-d-sum-val">{selectedItems.reduce((s, i) => s + (Number(i.total || 0) * Number(i.tax_rate || 0) / 100), 0).toFixed(2)}</span></div>
             <div className="ao-d-sum-row ao-d-sum-grand"><span className="ao-d-sum-label">Grand Total</span><span className="ao-d-sum-val">{(selectedItems.reduce((s, i) => s + Number(i.total || 0), 0) + selectedItems.reduce((s, i) => s + (Number(i.total || 0) * Number(i.tax_rate || 0) / 100), 0)).toFixed(2)}</span></div>
@@ -381,7 +380,7 @@ export default function Auditor_orders() {
         </div>
       )}
 
-      {/* ── REJECT MODAL ── */}
+      {/* â”€â”€ REJECT MODAL â”€â”€ */}
       {showRejectModal && (
         <div className="ao-modal-overlay">
           <div className="ao-modal">
@@ -416,3 +415,6 @@ export default function Auditor_orders() {
     </div>
   );
 }
+
+
+
