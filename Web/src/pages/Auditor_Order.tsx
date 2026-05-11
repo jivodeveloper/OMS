@@ -194,7 +194,7 @@ export default function Auditor_orders() {
                         <td>{order.order_number}</td>
                         <td>{order.card_code}</td>
                         <td>{order.card_name}</td>
-                        <td>{order.created_at ? new Date(order.created_at).toLocaleDateString("en-GB") : "—"}</td>
+                        <td>{order.created_at ? new Date(order.created_at).toLocaleDateString("en-GB") : "-"}</td>
                         <td>{order.delivery_date}</td>
                         {/* <td>
                           <span className={`ao-badge ao-badge-${(order.status_display || "").toLowerCase().replace(/\s+/g, "-")}`}>
@@ -281,22 +281,26 @@ export default function Auditor_orders() {
 
                <div className="ao-d-info-field">
                 <span className="ao-d-hf-label">Party State</span>
-                <span className="ao-d-hf-value">{orderDetails.party_state || "—"}</span>
+                <span className="ao-d-hf-value">{orderDetails.party_state || "-"}</span>
               </div>
 
               <div className="ao-d-info-field">
                 <span className="ao-d-hf-label">Punched By</span>
-                <span className="ao-d-hf-value">{orderDetails.created_by_name || "—"}</span>
+                <span className="ao-d-hf-value">{orderDetails.created_by_name || "-"}</span>
               </div>
         
               <div className="ao-d-info-field">
                 <span className="ao-d-hf-label">Created Date</span>
-                <span className="ao-d-hf-value">{orderDetails.created_at ? new Date(orderDetails.created_at).toLocaleDateString("en-GB") : "—"}</span>
+                <span className="ao-d-hf-value">{orderDetails.created_at ? new Date(orderDetails.created_at).toLocaleDateString("en-GB") : "-"}</span>
               </div>
         
               <div className="ao-d-info-field">
                 <span className="ao-d-hf-label">Delivery Date</span>
-                <span className="ao-d-hf-value">{orderDetails.delivery_date || "—"}</span>
+                <span className="ao-d-hf-value">{orderDetails.delivery_date || "-"}</span>
+              </div>
+              <div className="ao-d-info-field">
+                <span className="ao-d-hf-label">PO Number</span>
+                <span className="ao-d-hf-value">{orderDetails.po_number || "-"}</span>
               </div>
               <div className="ao-d-info-field">
                 <span className="ao-d-hf-label">Party Name</span>
@@ -308,11 +312,11 @@ export default function Auditor_orders() {
               </div>
               <div className="ao-d-info-field">
                 <span className="ao-d-hf-label">Bill To</span>
-                <span className="ao-d-hf-value">{orderDetails.bill_to_address || "—"}</span>
+                <span className="ao-d-hf-value">{orderDetails.bill_to_address || "-"}</span>
               </div>
               <div className="ao-d-info-field">
                 <span className="ao-d-hf-label">Ship To</span>
-                <span className="ao-d-hf-value">{orderDetails.ship_to_address || "—"}</span>
+                <span className="ao-d-hf-value">{orderDetails.ship_to_address || "-"}</span>
               </div>
             </div>
           </div>
@@ -355,8 +359,8 @@ export default function Auditor_orders() {
                       <td style={{textAlign:'center'}}>{item.pcs}</td>
                       <td style={{textAlign:'center'}}>{Number(item.boxes).toFixed(2)}</td>
                       <td style={{textAlign:'center'}}>{item.ltrs}</td>
-                      {/* <td style={{textAlign:'center'}}>{item.scheme_name ? ((item as any).scheme_ltrs || 0) : "—"}</td> */}
-                      <td style={{textAlign:'center'}}>{(item as any).total_ltrs || (Number(item.ltrs || 0) + Number((item as any).scheme_qty || 0)).toFixed(2)}</td>
+                      {/* <td style={{textAlign:'center'}}>{item.scheme_name ? ((item as any).scheme_ltrs || 0) : "-"}</td> */}
+                      <td style={{textAlign:'center'}}>{getOrderItemTotalLtrs(item).toFixed(2)}</td>
                       <td style={{textAlign:'right'}}>{Number(item.basic_price).toFixed(2)}</td>
                       <td style={{textAlign:'right'}}>{Number(item.market_price).toFixed(2)}</td>
                       <td style={{textAlign:'center'}}>{Number(item.tax_rate).toFixed(2)}</td>

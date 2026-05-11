@@ -105,7 +105,11 @@ export default function Billing_orders() {
       });
       if (salesResponse.data) {
         const sapData = salesResponse.data.data ?? salesResponse.data;
+<<<<<<< HEAD
         const quotationNumber = sapData.DocNum ?? sapData.doc_num ?? sapData.DocEntry ?? "—";
+=======
+        const quotationNumber = sapData.DocNum ?? sapData.doc_num ?? sapData.DocEntry ?? "-";
+>>>>>>> 205fb3d (new changes to web and a little in backend)
         await ordersService.UpdateStatus(pendingOrderId, 9);
         setQuotationResult({ number: String(quotationNumber), order_id: pendingOrderNum });
         setShowSuccess(true);
@@ -222,6 +226,8 @@ export default function Billing_orders() {
       state: {
         editOrderId: order.id,
         returnTo: "/Billing_orders",
+        mode: "edit",
+        allowPoNumber: true,
       },
     });
   };
@@ -269,7 +275,11 @@ export default function Billing_orders() {
                       <td>{order.order_number}</td>
                       <td>{order.card_code}</td>
                       <td>{order.card_name}</td>
+<<<<<<< HEAD
                       <td>{order.created_at ? new Date(order.created_at).toLocaleDateString("en-GB") : "—"}</td>
+=======
+                      <td>{order.created_at ? new Date(order.created_at).toLocaleDateString("en-GB") : "-"}</td>
+>>>>>>> 205fb3d (new changes to web and a little in backend)
                       <td>{order.delivery_date}</td>
                       {/* <td>
                         <span className={`bo-badge bo-badge-${(order.status_display || "").toLowerCase().replace(/\s+/g, "-")}`}>
@@ -389,11 +399,16 @@ export default function Billing_orders() {
                 </div>
                 <div className="ao-d-info-field">
                 <span className="ao-d-hf-label">Party State</span>
+<<<<<<< HEAD
                 <span className="ao-d-hf-value">{orderDetails.party_state || "—"}</span>
+=======
+                <span className="ao-d-hf-value">{orderDetails.party_state || "-"}</span>
+>>>>>>> 205fb3d (new changes to web and a little in backend)
               </div>
               </div>
                <div className="bo-d-info-field">
                 <span className="bo-d-hf-label">Created By</span>
+<<<<<<< HEAD
                 <span className="bo-d-hf-value">{orderDetails.created_by_name || "—"}</span>
               </div>
               <div className="bo-d-info-field">
@@ -403,6 +418,21 @@ export default function Billing_orders() {
               <div className="bo-d-info-field">
                 <span className="bo-d-hf-label">Delivery Date</span>
                 <span className="bo-d-hf-value">{orderDetails.delivery_date || "—"}</span>
+=======
+                <span className="bo-d-hf-value">{orderDetails.created_by_name || "-"}</span>
+              </div>
+              <div className="bo-d-info-field">
+                <span className="bo-d-hf-label">Created Date</span>
+                <span className="bo-d-hf-value">{orderDetails.created_at ? new Date(orderDetails.created_at).toLocaleDateString("en-GB") : "-"}</span>
+              </div>
+              <div className="bo-d-info-field">
+                <span className="bo-d-hf-label">Delivery Date</span>
+                <span className="bo-d-hf-value">{orderDetails.delivery_date || "-"}</span>
+              </div>
+              <div className="bo-d-info-field">
+                <span className="bo-d-hf-label">PO Number</span>
+                <span className="bo-d-hf-value">{orderDetails.po_number || "-"}</span>
+>>>>>>> 205fb3d (new changes to web and a little in backend)
               </div>
               <div className="bo-d-info-field">
                 <span className="bo-d-hf-label">Party Name</span>
@@ -414,11 +444,19 @@ export default function Billing_orders() {
               </div>
               <div className="bo-d-info-field">
                 <span className="bo-d-hf-label">Bill To</span>
+<<<<<<< HEAD
                 <span className="bo-d-hf-value">{orderDetails.bill_to_address || "—"}</span>
               </div>
               <div className="bo-d-info-field">
                 <span className="bo-d-hf-label">Ship To</span>
                 <span className="bo-d-hf-value">{orderDetails.ship_to_address || "—"}</span>
+=======
+                <span className="bo-d-hf-value">{orderDetails.bill_to_address || "-"}</span>
+              </div>
+              <div className="bo-d-info-field">
+                <span className="bo-d-hf-label">Ship To</span>
+                <span className="bo-d-hf-value">{orderDetails.ship_to_address || "-"}</span>
+>>>>>>> 205fb3d (new changes to web and a little in backend)
               </div>
             </div>
           </div>
@@ -449,8 +487,13 @@ export default function Billing_orders() {
                       <td style={{ textAlign: 'center' }}>{item.pcs}</td>
                       <td style={{ textAlign: 'center' }}>{Number(item.boxes).toFixed(2)}</td>
                       <td style={{ textAlign: 'center' }}>{item.ltrs}</td>
+<<<<<<< HEAD
                       {/* <td style={{textAlign:'center'}}>{item.scheme_name ? ((item as any).scheme_ltrs || 0) : "—"}</td> */}
                       <td style={{ textAlign: 'center' }}>{(item as any).total_ltrs || (Number(item.ltrs || 0) + Number((item as any).scheme_qty || 0)).toFixed(2)}</td>
+=======
+                      {/* <td style={{textAlign:'center'}}>{item.scheme_name ? ((item as any).scheme_ltrs || 0) : "-"}</td> */}
+                      <td style={{ textAlign: 'center' }}>{getOrderItemTotalLtrs(item).toFixed(2)}</td>
+>>>>>>> 205fb3d (new changes to web and a little in backend)
                       <td style={{ textAlign: 'right' }}>{Number(item.basic_price).toFixed(2)}</td>
                       <td style={{ textAlign: 'right' }}>{Number(item.market_price).toFixed(2)}</td>
                       <td style={{ textAlign: 'center' }}>{Number(item.tax_rate).toFixed(2)}</td>
