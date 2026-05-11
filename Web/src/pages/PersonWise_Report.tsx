@@ -501,11 +501,11 @@ export default function PersonWise_Report() {
               </div>
               <div className="dr-d-info-field">
                 <span className="dr-d-hf-label">Delivery Date</span>
-                <span className="dr-d-hf-value">{orderDetails.delivery_date || "â€”"}</span>
+                <span className="dr-d-hf-value">{orderDetails.delivery_date || "-"}</span>
               </div>
               <div className="dr-d-info-field">
                 <span className="dr-d-hf-label">PO Number</span>
-                <span className="dr-d-hf-value">{orderDetails.po_number || "â€”"}</span>
+                <span className="dr-d-hf-value">{orderDetails.po_number || "-"}</span>
               </div>
               <div className="dr-d-info-field">
                 <span className="dr-d-hf-label">Party Name</span>
@@ -517,11 +517,11 @@ export default function PersonWise_Report() {
               </div>
               <div className="dr-d-info-field">
                 <span className="dr-d-hf-label">Bill To</span>
-                <span className="dr-d-hf-value">{orderDetails.bill_to_address || "â€”"}</span>
+                <span className="dr-d-hf-value">{orderDetails.bill_to_address || "-"}</span>
               </div>
               <div className="dr-d-info-field">
                 <span className="dr-d-hf-label">Ship To</span>
-                <span className="dr-d-hf-value">{orderDetails.ship_to_address || "â€”"}</span>
+                <span className="dr-d-hf-value">{orderDetails.ship_to_address || "-"}</span>
               </div>
             </div>
           </div>
@@ -555,7 +555,7 @@ export default function PersonWise_Report() {
                       <td style={{textAlign:'center'}}>{item.pcs}</td>
                       <td style={{textAlign:'center'}}>{Number(item.boxes).toFixed(2)}</td>
                       <td style={{textAlign:'center'}}>{item.ltrs}</td>
-                      {/* <td style={{textAlign:'center'}}>{item.scheme_name ? ((item as any).scheme_ltrs || 0) : "â€”"}</td> */}
+                      {/* <td style={{textAlign:'center'}}>{item.scheme_name ? ((item as any).scheme_ltrs || 0) : "-"}</td> */}
                       <td style={{textAlign:'center'}}>{getOrderItemTotalLtrs(item).toFixed(2)}</td>
                       <td style={{textAlign:'right'}}>{Number(item.basic_price).toFixed(2)}</td>
                       <td style={{textAlign:'right'}}>{Number(item.market_price).toFixed(2)}</td>

@@ -914,6 +914,10 @@ class SyncService:
             "BPL_IDAssignedToInvoice": order.dispatch_from_id,
             "DocumentLines": document_lines,
         }
+        po_number = str(getattr(order, "po_number", "") or "").strip()
+        if po_number:
+            payload["NumAtCard"] = po_number
+
         print_sap_payload(
             f"SAP quotation payload for order {getattr(order, 'id', 'N/A')}:",
             payload,

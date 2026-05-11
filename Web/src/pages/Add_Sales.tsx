@@ -2,7 +2,7 @@ import { Fragment, useState, useEffect, useRef } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { ordersService } from "../services/ordersService";
 import { userService } from "../services/userService";
-// import { getCurrentUser } from "../services/authService";
+import { getCurrentUser } from "../services/authService";
 import type {
   Order,
   OrderItem,
@@ -66,6 +66,7 @@ type EditOrderLocationState = {
   editOrderId?: number;
   returnTo?: string;
   mode?: "edit" | "duplicate";
+  allowPoNumber?: boolean;
 };
 
 type EditOrderFallback = {
@@ -73,6 +74,12 @@ type EditOrderFallback = {
   partyLabel: string;
   billAddress: string;
   shipAddress: string;
+};
+
+type OrderSaveSuccess = {
+  orderId: string;
+  nextStage: string;
+  message: string;
 };
 
 const emptyEditOrderFallback: EditOrderFallback = {
@@ -96,6 +103,7 @@ export default function Add_Sales() {
   const isEditMode = mode === "edit" && editOrderId !== null;
   const isDuplicateMode = mode === "duplicate" && editOrderId !== null;
   const isLoadingFromOrder = isEditMode || isDuplicateMode;
+  const [userRole, setUserRole] = useState("");
   const [parties, setParties] = useState<any[]>([]);
   const [partySearch, setPartySearch] = useState("");
   const [partyDropdownOpen, setPartyDropdownOpen] = useState(false);
@@ -118,6 +126,7 @@ export default function Add_Sales() {
     emptyEditOrderFallback,
   );
   const [showSaveConfirm, setShowSaveConfirm] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState<OrderSaveSuccess | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [isLoadingEditOrder, setIsLoadingEditOrder] = useState(false);
   const partyDropdownRef = useRef<HTMLDivElement>(null);
@@ -136,6 +145,9 @@ export default function Add_Sales() {
   });
 
   const [rows, setRows] = useState<SalesRow[]>([createEmptyRow()]);
+  const isBillingUser = userRole.toLowerCase() === "billing";
+  const canEditPoNumber =
+    isEditMode && isBillingUser && locationState?.allowPoNumber === true;
 
   // Use Effects
   useEffect(() => {
@@ -143,8 +155,19 @@ export default function Add_Sales() {
     fetchBranch();
     fetchProducts();
     fetchCompany();
-    // fetchCurrentUserProfile();
+    fetchCurrentUserProfile();
   }, []);
+
+  const fetchCurrentUserProfile = async () => {
+    try {
+      const user = await getCurrentUser();
+      const role = user?.role_name || user?.role || user?.role_display || "";
+      setUserRole(typeof role === "object" ? role.name || "" : String(role));
+    } catch (error) {
+      console.log("Error fetching current user:", error);
+      setUserRole("");
+    }
+  };
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -495,6 +518,34 @@ export default function Add_Sales() {
     return true;
   };
 
+  const getNextStageLabel = (data: any) => {
+    const status = String(data?.status || "").trim();
+    const message = String(data?.message || "").trim();
+    const source = `${status} ${message}`.toLowerCase();
+
+    if (source.includes("rate")) return "Rate Approval";
+    if (source.includes("auditor")) return "Auditor Approval";
+    if (source.includes("billing")) return "Billing";
+
+    return status || message || "Next approval stage";
+  };
+
+  const resetOrderForm = () => {
+    setFormData({
+      parties: "",
+      dispatch: "",
+      date: new Date().toISOString().split("T")[0],
+      billAddress: "",
+      shipAddress: "",
+      Deliverydate: "",
+      poNumber: "",
+      company: "",
+    });
+
+    setRows([createEmptyRow()]);
+    setSchemeOptions({});
+  };
+
   const submitOrder = async () => {
     const confirmedRows = rows.filter((row) => row.confirmed);
 
@@ -518,7 +569,7 @@ export default function Add_Sales() {
         "",
 
       delivery_date: formData.Deliverydate,
-      po_number: formData.poNumber.trim(),
+      ...(canEditPoNumber ? { po_number: formData.poNumber.trim() } : {}),
       company: Number(formData.company),
 
       total_amount: totalAmount,
@@ -576,18 +627,16 @@ export default function Add_Sales() {
       const data = await ordersService.createOrder(payload);
 
       console.log("API Response:", data);
-
-      alert(
-        isEditMode
-          ? "Order updated and sent for approval ✅"
-          : "New order created successfully ✅",
-      );
       setShowSaveConfirm(false);
-      if (isLoadingFromOrder) {
-        navigate(returnTo);
-        return;
+      setSaveSuccess({
+        orderId: String(data?.order_number || data?.id || editOrderId || "-"),
+        nextStage: getNextStageLabel(data),
+        message: isEditMode ? "Order updated successfully" : "Order created successfully",
+      });
+
+      if (!isLoadingFromOrder) {
+        resetOrderForm();
       }
-      handleClearForm();
     } catch (error) {
       console.error(error);
 
@@ -613,25 +662,20 @@ export default function Add_Sales() {
     setShowSaveConfirm(true);
   };
 
+  const handleSuccessClose = () => {
+    setSaveSuccess(null);
+    if (isLoadingFromOrder) {
+      navigate(returnTo);
+    }
+  };
+
   const handleClearForm = () => {
     if (isLoadingFromOrder) {
       navigate(returnTo);
       return;
     }
 
-    setFormData({
-      parties: "",
-      dispatch: "",
-      date: new Date().toISOString().split("T")[0],
-      billAddress: "",
-      shipAddress: "",
-      Deliverydate: "",
-      poNumber: "",
-      company: "",
-    });
-
-    setRows([createEmptyRow()]);
-    setSchemeOptions({});
+    resetOrderForm();
     setShowSaveConfirm(false);
   };
 
@@ -1854,22 +1898,24 @@ export default function Add_Sales() {
 
         <div className="sl-section-label">Summary</div>
         <div className="sl-grid sl-summary-grid">
-          <div className="sl-field">
-            <label className="sl-label" htmlFor="poNumber">
-              PO Number
-            </label>
-            <div className="sl-input-wrap">
-              <input
-                type="text"
-                id="poNumber"
-                name="poNumber"
-                value={formData.poNumber}
-                onChange={handleChange}
-                placeholder="Enter PO number"
-              />
-              <div className="sl-focus-line" />
+          {canEditPoNumber && (
+            <div className="sl-field">
+              <label className="sl-label" htmlFor="poNumber">
+                PO Number
+              </label>
+              <div className="sl-input-wrap">
+                <input
+                  type="text"
+                  id="poNumber"
+                  name="poNumber"
+                  value={formData.poNumber}
+                  onChange={handleChange}
+                  placeholder="Enter PO number"
+                />
+                <div className="sl-focus-line" />
+              </div>
             </div>
-          </div>
+          )}
 
           <div className="sl-field">
             <label className="sl-label">Company</label>
@@ -2003,6 +2049,41 @@ export default function Add_Sales() {
           </div>
         </div>
       )}
+
+      {saveSuccess && (
+        <div className="sl-modal-overlay">
+          <div
+            className="sl-modal sl-success-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="sl-save-success-title"
+          >
+            <div id="sl-save-success-title" className="sl-modal-title">
+              {saveSuccess.message}
+            </div>
+            <div className="sl-success-details">
+              <div className="sl-success-row">
+                <span>Order ID</span>
+                <strong>{saveSuccess.orderId}</strong>
+              </div>
+              <div className="sl-success-row">
+                <span>Received Next By</span>
+                <strong>{saveSuccess.nextStage}</strong>
+              </div>
+            </div>
+            <div className="sl-modal-actions">
+              <button
+                type="button"
+                className="sl-modal-btn sl-modal-btn-primary"
+                onClick={handleSuccessClose}
+              >
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
+
