@@ -141,10 +141,12 @@ export const orderService = {
  return res;
  },
 
- // Fetch orders (templates) for a specific party
- getTemplateOrders: async (cardCode: string) => {
+ // Fetch orders (templates) for a specific party (optionally scoped to a category)
+ getTemplateOrders: async (cardCode: string, category?: string) => {
  const token = await storage.getAccessToken();
- const res = await api.get(`/orders/templates/orders/?card_code=${cardCode}`, token || undefined);
+ const params = `card_code=${encodeURIComponent(cardCode)}` +
+   (category ? `&category=${encodeURIComponent(category)}` : '');
+ const res = await api.get(`/orders/templates/orders/?${params}`, token || undefined);
  return res;
  },
  // Get detailed order data to autofill the form

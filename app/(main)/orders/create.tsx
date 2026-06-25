@@ -712,13 +712,16 @@ export function OrderEntryScreen({
     return "Others";
   };
 
-  const handleTemplatePartyChange = async (cardCode: string) => {
-    setSelectedTemplateParty(cardCode);
+  const handleTemplatePartyChange = async (partyValue: string) => {
+    setSelectedTemplateParty(partyValue);
     setSelectedTemplateOrder(null);
     setTemplateOrders([]);
-    if (cardCode) {
+    if (partyValue) {
       try {
-        const orders = await orderService.getTemplateOrders(cardCode);
+        // The value is card_code||CATEGORY so the same card_code under different
+        // categories stays distinct; scope the order list to that category.
+        const { cardCode, category } = parsePartyValue(partyValue);
+        const orders = await orderService.getTemplateOrders(cardCode, category);
         setTemplateOrders(orders || []);
       } catch (e) {
         console.log("Error loading template orders", e);
@@ -736,14 +739,31 @@ export function OrderEntryScreen({
         const res = await orderService.getorderdetailsbyid(orderId);
         const orderDetails = res?.data || res;
 
-        // 2. Load party data (addresses, products) first
+        // 2. Load party data (addresses, products) first.
+        // The same card_code can be assigned under multiple categories (OIL,
+        // BEVERAGES, MART). Match the party by card_code AND the template
+        // order's own category so selecting an OIL template never loads MART
+        // data; only fall back to a card_code-only match if no category-specific
+        // party exists in the dropdown.
+        const orderCategory = getOrderPartyCategory(orderDetails);
+        const categoryMatchedParty =
+          parties.find(
+            (party) =>
+              String(party.cardCode) === String(orderDetails.card_code) &&
+              normalizeCategory(party.category) === orderCategory,
+          ) || null;
         const matchedTemplateParty =
+          categoryMatchedParty ||
           parties.find(
             (party) => String(party.cardCode) === String(orderDetails.card_code),
-          ) || null;
+          ) ||
+          null;
         const templatePartyValue =
-          matchedTemplateParty?.value ??
-          createPartyValue(orderDetails.card_code, matchedTemplateParty?.category);
+          categoryMatchedParty?.value ??
+          createPartyValue(
+            orderDetails.card_code,
+            orderCategory || matchedTemplateParty?.category,
+          );
         const fetchedProducts = await handlePartyChange(templatePartyValue);
         const products = fetchedProducts || [];
         const templateStateCode = String(matchedTemplateParty?.state || "").trim();
