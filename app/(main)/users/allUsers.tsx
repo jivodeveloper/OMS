@@ -24,37 +24,52 @@ type User = {
   main_group__name: string;
   is_active: boolean;
   category?: { id: number; category: string } | string | null;
+  role?: string | { id?: number; name?: string; display_name?: string } | null;
+  role_display?: string | null;
 };
+
+const ALL_ROLES = "all";
+
+const getRoleLabel = (user: User) => {
+  if (user.role_display) return String(user.role_display).trim();
+  if (typeof user.role === "string") return user.role.trim();
+  if (user.role && typeof user.role === "object") {
+    return String(user.role.display_name || user.role.name || "").trim();
+  }
+  return "";
+};
+
+const getRoleValue = (role: string) => role.trim().toLowerCase();
+
+const formatRoleLabel = (role: string) =>
+  role
+    .trim()
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
 
 export default function AllUsersScreen() {
   const router = useRouter();
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
+  const [selectedRole, setSelectedRole] = useState(ALL_ROLES);
+  const [roleDropdownVisible, setRoleDropdownVisible] = useState(false);
   const [expandedStates, setExpandedStates] = useState<Set<number>>(new Set());
   const [refreshing, setRefreshing] = useState(false);
 
   const toggleStates = (userId: number) => {
     setExpandedStates((prev) => {
       const next = new Set(prev);
-      next.has(userId) ? next.delete(userId) : next.add(userId);
+      if (next.has(userId)) {
+        next.delete(userId);
+      } else {
+        next.add(userId);
+      }
       return next;
     });
   };
 
-  useFocusEffect(
-    useCallback(() => {
-      getUsers();
-    }, [])
-  );
-
-  const onRefresh = useCallback(async () => {
-    setRefreshing(true);
-    await getUsers();
-    setRefreshing(false);
-  }, []);
-
-  const getUsers = async () => {
+  const getUsers = useCallback(async () => {
     try {
       if (users.length === 0) setLoading(true);
       const response = await userService.users();
@@ -67,7 +82,30 @@ export default function AllUsersScreen() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [users.length]);
+
+  useFocusEffect(
+    useCallback(() => {
+      getUsers();
+    }, [getUsers])
+  );
+
+  useFocusEffect(
+    useCallback(() => {
+      return () => {
+        setSearchQuery("");
+        setSelectedRole(ALL_ROLES);
+        setRoleDropdownVisible(false);
+        setExpandedStates(new Set());
+      };
+    }, [])
+  );
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await getUsers();
+    setRefreshing(false);
+  }, [getUsers]);
 
   const confirmRemoveUser = (userId: number) => {
     Alert.alert("Remove User", "Are you sure you want to remove this user?", [
@@ -104,14 +142,37 @@ export default function AllUsersScreen() {
     }
   };
 
+  const roleOptions = [
+    { label: "All Roles", value: ALL_ROLES },
+    ...Array.from(
+      users.reduce((roles, user) => {
+        const role = getRoleLabel(user);
+        if (!role) return roles;
+        const value = getRoleValue(role);
+        if (!roles.has(value)) roles.set(value, formatRoleLabel(role));
+        return roles;
+      }, new Map<string, string>())
+    )
+      .map(([value, label]) => ({ label, value }))
+      .sort((a, b) => a.label.localeCompare(b.label)),
+  ];
+  const selectedRoleLabel =
+    roleOptions.find((role) => role.value === selectedRole)?.label ||
+    "Select Role";
+
   const filteredUsers = users.filter((user) => {
     const query = searchQuery.trim().toLowerCase();
-    if (!query) return true;
-    return (
+    const role = getRoleLabel(user);
+    const matchesRole =
+      selectedRole === ALL_ROLES || getRoleValue(role) === selectedRole;
+    const matchesSearch =
+      !query ||
       user.name?.toLowerCase().startsWith(query) ||
       user.states?.some((s) => s.name.toLowerCase().startsWith(query)) ||
-      user.phone?.toString().startsWith(query)
-    );
+      user.phone?.toString().startsWith(query) ||
+      role.toLowerCase().startsWith(query);
+
+    return matchesRole && matchesSearch;
   });
 
   const renderItem = ({ item }: { item: User }) => (
@@ -209,26 +270,104 @@ export default function AllUsersScreen() {
   return (
     <StateWrapper loading={loading}>
       <View style={styles.container}>
-        <View style={styles.searchContainer}>
-          <MaterialCommunityIcons
-            name="magnify"
-            size={24}
-            color={COLORS.textSecondary}
-            style={styles.searchIcon}
-          />
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Search by name, state, or phone..."
-            placeholderTextColor={COLORS.textSecondary}
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-          />
-          {searchQuery.length > 0 && (
-            <TouchableOpacity onPress={() => setSearchQuery("")}>
-              <MaterialCommunityIcons name="close-circle" size={20} color={COLORS.textSecondary} />
+        <View style={styles.filterRow}>
+          <View style={styles.searchContainer}>
+            <MaterialCommunityIcons
+              name="magnify"
+              size={22}
+              color={COLORS.textSecondary}
+              style={styles.searchIcon}
+            />
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Search users..."
+              placeholderTextColor={COLORS.textSecondary}
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+            />
+            {searchQuery.length > 0 && (
+              <TouchableOpacity onPress={() => setSearchQuery("")}>
+                <MaterialCommunityIcons name="close-circle" size={20} color={COLORS.textSecondary} />
+              </TouchableOpacity>
+            )}
+          </View>
+
+          <View style={styles.roleSelectWrap}>
+            <TouchableOpacity
+              style={styles.roleSelectBox}
+              activeOpacity={0.85}
+              onPress={() => setRoleDropdownVisible((visible) => !visible)}
+            >
+              <Text
+                style={[
+                  styles.roleSelectText,
+                  selectedRole === ALL_ROLES && styles.roleSelectPlaceholder,
+                ]}
+                numberOfLines={1}
+              >
+                {selectedRole === ALL_ROLES ? "Role" : selectedRoleLabel}
+              </Text>
+              <MaterialCommunityIcons
+                name="chevron-down"
+                size={18}
+                color={COLORS.textSecondary}
+              />
             </TouchableOpacity>
-          )}
+
+            {roleDropdownVisible && (
+              <View style={styles.roleDropdown}>
+                {roleOptions.map((role) => {
+                  const isSelected = selectedRole === role.value;
+                  return (
+                    <TouchableOpacity
+                      key={role.value}
+                      style={[
+                        styles.roleOption,
+                        isSelected && styles.roleOptionActive,
+                      ]}
+                      onPress={() => {
+                        setSelectedRole(role.value);
+                        setRoleDropdownVisible(false);
+                      }}
+                    >
+                      <Text
+                        style={[
+                          styles.roleOptionText,
+                          isSelected && styles.roleOptionTextActive,
+                        ]}
+                        numberOfLines={1}
+                      >
+                        {role.label}
+                      </Text>
+                      {isSelected && (
+                        <MaterialCommunityIcons
+                          name="check"
+                          size={18}
+                          color={COLORS.primary}
+                        />
+                      )}
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            )}
+          </View>
         </View>
+
+        {selectedRole !== ALL_ROLES && (
+          <View style={styles.activeFilterRow}>
+            <Text style={styles.activeFilterText}>
+              Showing {selectedRoleLabel}
+            </Text>
+            <TouchableOpacity onPress={() => setSelectedRole(ALL_ROLES)}>
+              <MaterialCommunityIcons
+                name="close-circle"
+                size={18}
+                color={COLORS.primary}
+              />
+            </TouchableOpacity>
+          </View>
+        )}
 
         <FlatList
           data={filteredUsers}
@@ -285,18 +424,26 @@ const styles = StyleSheet.create({
     color: COLORS.primaryDark,
     letterSpacing: 1,
   },
-  searchContainer: {
+  filterRow: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: COLORS.surface,
+    gap: SPACING.sm,
     marginHorizontal: SPACING.md,
     marginTop: SPACING.md,
     marginBottom: SPACING.xs,
+    zIndex: 30,
+    elevation: 30,
+  },
+  searchContainer: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: COLORS.surface,
     paddingHorizontal: SPACING.md,
     borderRadius: RADIUS.md,
     borderWidth: 1,
     borderColor: COLORS.borderLight,
-    height: 48,
+    height: 44,
   },
   searchIcon: {
     marginRight: SPACING.sm,
@@ -305,6 +452,88 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 15,
     color: "#1A1A1A",
+  },
+  activeFilterRow: {
+    alignSelf: "flex-start",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginHorizontal: SPACING.md,
+    marginBottom: SPACING.xs,
+    paddingHorizontal: SPACING.sm,
+    paddingVertical: 4,
+    borderRadius: RADIUS.sm,
+    backgroundColor: COLORS.primaryLighter,
+  },
+  activeFilterText: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: COLORS.primary,
+  },
+  roleSelectWrap: {
+    width: 108,
+    position: "relative",
+    zIndex: 50,
+    elevation: 50,
+  },
+  roleSelectBox: {
+    width: "100%",
+    height: 44,
+    borderRadius: RADIUS.md,
+    borderWidth: 1,
+    borderColor: COLORS.borderLight,
+    backgroundColor: COLORS.surface,
+    paddingHorizontal: SPACING.sm,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  roleSelectText: {
+    flex: 1,
+    fontSize: 12,
+    fontWeight: "700",
+    color: COLORS.text,
+  },
+  roleSelectPlaceholder: {
+    color: COLORS.textSecondary,
+  },
+  roleDropdown: {
+    position: "absolute",
+    top: 48,
+    right: 0,
+    width: 150,
+    backgroundColor: COLORS.surface,
+    borderRadius: RADIUS.md,
+    paddingVertical: 4,
+    borderWidth: 1,
+    borderColor: COLORS.borderLight,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 10,
+    elevation: 20,
+    zIndex: 100,
+  },
+  roleOption: {
+    minHeight: 38,
+    borderRadius: RADIUS.sm,
+    paddingHorizontal: SPACING.sm,
+    marginHorizontal: 4,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  roleOptionActive: {
+    backgroundColor: COLORS.primaryLighter,
+  },
+  roleOptionText: {
+    flex: 1,
+    fontSize: 12,
+    fontWeight: "600",
+    color: COLORS.text,
+  },
+  roleOptionTextActive: {
+    color: COLORS.primary,
   },
 
   listContent: {
