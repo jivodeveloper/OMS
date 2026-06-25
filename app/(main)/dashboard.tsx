@@ -231,7 +231,10 @@ export default function DashboardScreen() {
   const fetchUserParties = async () => {
     try {
       const token = await storage.getAccessToken();
-      const userPartiesRes = await api.get(`/auth/users/${user?.id}/parties/`, token || undefined);
+      // category=all returns the user's assigned parties across every category
+      // (e.g. the same card_code under both OIL and BEVERAGES), so the dashboard
+      // count and list reflect all assignments, not just the primary category.
+      const userPartiesRes = await api.get(`/auth/users/${user?.id}/parties/?category=all`, token || undefined);
       if (userPartiesRes?.success && Array.isArray(userPartiesRes?.data?.parties)) {
         setAllAssignedParties(userPartiesRes.data.parties);
       } else {
@@ -451,25 +454,41 @@ export default function DashboardScreen() {
 
 
 
+  // A party is identified by card_code AND category: the same card_code can be
+  // assigned under multiple categories (e.g. OIL and BEVERAGES) and must count
+  // as separate parties. This mirrors the backend, which keys assignments and
+  // top_parties by (card_code, category).
+  const partyKey = (cardCode: any, category: any) =>
+    `${String(cardCode ?? '').trim()}||${String(category ?? '').trim().toUpperCase()}`;
+
+  // Display category as Title Case (e.g. "OIL" -> "Oil", "BEVERAGES" -> "Beverages").
+  const formatCategory = (category: any) => {
+    const raw = String(category ?? '').trim();
+    if (!raw || raw.toUpperCase() === 'UNKNOWN') return '';
+    return raw.charAt(0).toUpperCase() + raw.slice(1).toLowerCase();
+  };
+
   const revenueByPartyCode = new Map<string, any>();
   (chartData?.top_parties || []).forEach((party: any) => {
     if (!party.card_code) return;
-    const key = String(party.card_code);
+    const key = partyKey(party.card_code, party.category);
     const existing = revenueByPartyCode.get(key);
     revenueByPartyCode.set(key, {
-      card_code: key,
-      card_name: existing?.card_name || party.card_name || key,
+      card_code: String(party.card_code),
+      category: party.category ?? existing?.category,
+      card_name: existing?.card_name || party.card_name || String(party.card_code),
       revenue: Number(existing?.revenue || 0) + Number(party.revenue || 0),
       count: Number(existing?.count || 0) + Number(party.count || 0),
     });
   });
 
   const uniquePartyMap = new Map<string, any>(
-    Array.from(revenueByPartyCode.entries()).map(([cardCode, party]) => [
-      cardCode,
+    Array.from(revenueByPartyCode.entries()).map(([key, party]) => [
+      key,
       {
         card_code: party.card_code,
-        card_name: party.card_name || cardCode,
+        card_name: party.card_name || party.card_code,
+        category: party.category,
         revenue: Number(party.revenue || 0),
         count: Number(party.count || 0),
         // Parties sourced only from order revenue are not necessarily an active
@@ -482,11 +501,12 @@ export default function DashboardScreen() {
   allAssignedParties.forEach((party: any) => {
     if (!party.card_code) return;
 
-    const key = String(party.card_code);
+    const key = partyKey(party.card_code, party.category);
     const revenueParty = uniquePartyMap.get(key);
     uniquePartyMap.set(key, {
       card_code: party.card_code,
       card_name: party.card_name || revenueParty?.card_name || party.card_code,
+      category: party.category ?? revenueParty?.category,
       revenue: Number(revenueParty?.revenue || 0),
       count: Number(revenueParty?.count || 0),
       // The user-parties endpoint only returns active assignments.
@@ -1499,9 +1519,18 @@ export default function DashboardScreen() {
                         },
                       ]}
                     />
-                    <Text style={[styles.partyLegendText, { flex: 1 }]} numberOfLines={2}>
-                      {party.card_name} (₹{Number(party.revenue || 0).toLocaleString("en-IN")})
-                    </Text>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.partyLegendText} numberOfLines={2}>
+                        {party.card_name} (₹{Number(party.revenue || 0).toLocaleString("en-IN")})
+                      </Text>
+                      {formatCategory(party.category) ? (
+                        <View style={styles.partyCategoryChip}>
+                          <Text style={styles.partyCategoryChipText}>
+                            {formatCategory(party.category)}
+                          </Text>
+                        </View>
+                      ) : null}
+                    </View>
                   </View>
                 )) : (
                   <Text style={styles.partyLegendText}>No parties found.</Text>
@@ -2864,6 +2893,19 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: COLORS.textSecondary,
     fontWeight: '500',
+  },
+  partyCategoryChip: {
+    alignSelf: 'flex-start',
+    marginTop: 3,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 10,
+    backgroundColor: '#EEF2FF',
+  },
+  partyCategoryChipText: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: '#4F46E5',
   },
   performanceCard: {
     backgroundColor: "#F8FBFF",
