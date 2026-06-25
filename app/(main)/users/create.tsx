@@ -40,9 +40,13 @@ export default function CreateUserScreen() {
     companies: null as number | null, // Single
     mainGroup: [] as number[], // Multi
     state: [] as number[], // Multi
-    category: null as number | null, // Single
+    categories: [] as number[], // Multi
     variety: "" as string, // Comma-separated
   });
+
+  // First selected category is the "primary" used for the Sub Group lookup and
+  // sent to the backend as the single `category` FK (for backward compatibility).
+  const primaryCategory = formData.categories[0] ?? null;
 
   const [errors, setErrors] = useState<Record<string, string>>({});
   // Master data from API
@@ -164,7 +168,8 @@ const userData = {
   company: formData.companies,
   main_groups: formData.mainGroup,
   states: formData.state,
-  category: formData.category,
+  category: primaryCategory,
+  categories: formData.categories,
   // The "Variety" picker is populated from the backend's sub-group list, so the
   // selection is the user's sub group(s). Send it as sub_group (used for rate-approver
   // matching) and keep variety populated for backward compatibility/history.
@@ -213,7 +218,7 @@ const userData = {
       companies: null,
       mainGroup: [],
       state: [],
-      category: null,
+      categories: [],
       variety: "",
     });
     setVarietyOptions([]);
@@ -536,18 +541,25 @@ const userData = {
           </View>
 
           <View style={styles.field}>
-            <Dropdown
+            <Text style={styles.fieldLabel}>Category</Text>
+            <MultiSelectDropdown
               label="Category"
               data={categoryOptions}
-              value={formData.category}
-              onChange={(value: any) => {
-                setFormData((prev) => ({ ...prev, category: value, variety: "" }));
-                fetchVarieties(value);
+              values={formData.categories}
+              onChange={(values: number[]) => {
+                // Reset the sub group whenever the primary (first) category changes,
+                // since the sub-group options come from the primary category.
+                const prevPrimary = formData.categories[0] ?? null;
+                const nextPrimary = values[0] ?? null;
+                setFormData((prev) => ({
+                  ...prev,
+                  categories: values,
+                  variety: nextPrimary === prevPrimary ? prev.variety : "",
+                }));
+                if (nextPrimary !== prevPrimary) fetchVarieties(nextPrimary);
               }}
-              searchable={false}
               placeholder="Select categories..."
               icon="pricetags-outline"
-              iconColor={COLORS.textSecondary}
             />
           </View>
 
@@ -633,7 +645,7 @@ const userData = {
                     </>
                   ) : (
                     <Text style={{ padding: 16, color: COLORS.textSecondary }}>
-                      {formData.category ? "No sub groups found" : "Select a category first"}
+                      {primaryCategory ? "No sub groups found" : "Select a category first"}
                     </Text>
                   )}
 
@@ -681,7 +693,7 @@ const userData = {
               companies: 0,
               mainGroup: [],
               state: [],
-              category: null,
+              categories: [],
               variety: "",
             });
             setVarietyOptions([]);

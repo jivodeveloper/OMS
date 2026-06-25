@@ -44,9 +44,13 @@ export default function EditUserScreen() {
     companies: null as number | null, // Single
     mainGroup: [] as number[], // Multi
     state: [] as number[], // Multi
-    category: null as number | null, // Single
+    categories: [] as number[], // Multi
     variety: "" as string, // Comma-separated
   });
+
+  // First selected category is the "primary" used for the Sub Group lookup and
+  // sent to the backend as the single `category` FK (for backward compatibility).
+  const primaryCategory = formData.categories[0] ?? null;
 
   const [errors, setErrors] = useState<Record<string, string>>({});
   // Snapshot of the form as first loaded, so we can send only changed fields.
@@ -167,7 +171,11 @@ export default function EditUserScreen() {
       if (formData.companies !== base.companies) userData.company = formData.companies;
       if (!arraysEqual(formData.mainGroup, base.mainGroup)) userData.main_groups = formData.mainGroup;
       if (!arraysEqual(formData.state, base.state)) userData.states = formData.state;
-      if (formData.category !== base.category) userData.category = formData.category;
+      if (!arraysEqual(formData.categories, base.categories)) {
+        userData.categories = formData.categories;
+        // Keep the single `category` FK in sync with the first selected one.
+        userData.category = formData.categories[0] ?? null;
+      }
       // The "Variety" picker is populated from the backend's sub-group list, so the
       // selection is the user's sub group(s). Send it as sub_group (used for
       // rate-approver matching) and keep variety populated for history.
@@ -286,7 +294,14 @@ export default function EditUserScreen() {
           roleId = user.role_id.toString();
         }
 
-        const userCategoryId = user.category?.id || user.category || null;
+        const getCatId = (c: any) => (typeof c === "object" ? c?.id : c);
+        // Full set of assigned categories; fall back to the single primary
+        // category for users created before multi-category support.
+        const categoryIds: number[] =
+          Array.isArray(user.categories) && user.categories.length
+            ? user.categories.map(getCatId).filter(Boolean)
+            : [getCatId(user.category)].filter(Boolean);
+        const primaryCategoryId = categoryIds[0] ?? null;
 
         const loadedFormData = {
           name: user.name || "",
@@ -298,7 +313,7 @@ export default function EditUserScreen() {
           companies: user.company?.id || null,
           mainGroup: user.main_groups?.map((g: any) => g.id) || (user.main_group ? [user.main_group.id] : []),
           state: user.states?.map((s: any) => s.id) || (user.state ? [user.state.id] : []),
-          category: userCategoryId,
+          categories: categoryIds,
           // Prefer the new sub_group field; fall back to legacy variety for users
           // created before the sub_group migration.
           variety: user.sub_group || user.variety || "",
@@ -307,8 +322,8 @@ export default function EditUserScreen() {
         setFormData(loadedFormData);
         setInitialFormData(loadedFormData);
 
-        if (userCategoryId) {
-          fetchVarieties(userCategoryId, parsedCat);
+        if (primaryCategoryId) {
+          fetchVarieties(primaryCategoryId, parsedCat);
         }
       }else{
         console.log("Failed to fetch user data:", userRes);
@@ -510,15 +525,22 @@ export default function EditUserScreen() {
             </View>
             
             <View style={styles.field}>
-              <Dropdown
+              <Text style={styles.fieldLabel}>Category</Text>
+              <MultiSelectDropdown
                 label="Category"
                 data={categoryOptions}
-                value={formData.category}
-                onChange={(value: any) => {
-                  setFormData((prev) => ({ ...prev, category: value, variety: "" }));
-                  fetchVarieties(value);
+                values={formData.categories}
+                onChange={(values: number[]) => {
+                  // Reset the sub group whenever the primary (first) category changes.
+                  const prevPrimary = formData.categories[0] ?? null;
+                  const nextPrimary = values[0] ?? null;
+                  setFormData((prev) => ({
+                    ...prev,
+                    categories: values,
+                    variety: nextPrimary === prevPrimary ? prev.variety : "",
+                  }));
+                  if (nextPrimary !== prevPrimary) fetchVarieties(nextPrimary);
                 }}
-                searchable={false}
                 placeholder="Select categories..."
                 icon="grid-outline"
               />
@@ -606,7 +628,7 @@ export default function EditUserScreen() {
                       </>
                     ) : (
                       <Text style={{ padding: 16, color: COLORS.textSecondary }}>
-                        {formData.category ? "No sub groups found" : "Select a category first"}
+                        {primaryCategory ? "No sub groups found" : "Select a category first"}
                       </Text>
                     )}
 

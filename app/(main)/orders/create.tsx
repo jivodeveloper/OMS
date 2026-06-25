@@ -536,6 +536,10 @@ export function OrderEntryScreen({
     }[]
   >([]);
   const [userCategory, setUserCategory] = useState<string | null>(null);
+  // All categories assigned to the logged-in user (OIL / BEVERAGES / MART). A
+  // user can have more than one, so parties are scoped to the full set rather
+  // than the single primary category.
+  const [userCategories, setUserCategories] = useState<string[]>([]);
 
   const [dispatches, setDispatches] = useState<
     { label: string; value: number }[]
@@ -576,7 +580,7 @@ export function OrderEntryScreen({
   const [allSchemes, setAllSchemes] = useState<{ label: string; value: string }[]>([]);
   const isFocOrder = isFocMode || loadedIsFocOrder;
   const shouldAllowSchemes = !isFocOrder;
-  const isBeverageUser = userCategory === "BEVERAGES";
+  const isBeverageUser = userCategories.includes("BEVERAGES") || userCategory === "BEVERAGES";
   // ── Templates States ──────────────────────────────────────────────────────
   const [templateParties, setTemplateParties] = useState<{ label: string; value: string }[]>([]);
   const [selectedTemplateParty, setSelectedTemplateParty] = useState<string | null>(null);
@@ -948,7 +952,31 @@ export function OrderEntryScreen({
                 fetchedCategory = String(latestUser.category).toUpperCase().trim();
             }
         }
+
+        // Full set of assigned categories; fall back to the single primary
+        // category for users created before multi-category support.
+        const fetchedCategoriesList: string[] = Array.isArray(latestUser?.categories)
+          ? Array.from(
+              new Set(
+                latestUser.categories
+                  .map((c: any) =>
+                    String(typeof c === 'string' ? c : c?.category || c?.name || '')
+                      .toUpperCase()
+                      .trim(),
+                  )
+                  .filter(Boolean),
+              ),
+            )
+          : [];
+        if (!fetchedCategoriesList.length && fetchedCategory) {
+          fetchedCategoriesList.push(fetchedCategory);
+        }
+        // Keep the single primary in sync (first selected) for any legacy uses.
+        if (!fetchedCategory && fetchedCategoriesList.length) {
+          fetchedCategory = fetchedCategoriesList[0];
+        }
         setUserCategory(fetchedCategory || null);
+        setUserCategories(fetchedCategoriesList);
 
         // Now fetch master data that depends on stateId
         const [partiesData, branchesData, schemeData] = await Promise.all([
@@ -976,14 +1004,14 @@ export function OrderEntryScreen({
         else if (Array.isArray((schemeData as any)?.data)) schemeList = (schemeData as any).data;
         else if (Array.isArray((schemeData as any)?.results)) schemeList = (schemeData as any).results;
 
-        const userCat = fetchedCategory ? fetchedCategory.toUpperCase().trim() : null;
+        const userCats = fetchedCategoriesList;
         const activeParties = partiesList.filter(
           (p: any) => {
             const pCat = String(p.category || "").toUpperCase().trim();
             if (!pCat || !ACTIVE_CATEGORIES.includes(pCat)) return false;
-            // Backend already limits parties by assignment. If the profile category
-            // is missing/stale, don't blank the dropdown on the client.
-            if (userCat) return pCat === userCat;
+            // Backend already limits parties by assignment. If the profile
+            // categories are missing/stale, don't blank the dropdown on the client.
+            if (userCats.length) return userCats.includes(pCat);
             return true;
           }
         );
@@ -1211,7 +1239,7 @@ export function OrderEntryScreen({
         (p: any) => {
           const pCat = String(p.category || "").toUpperCase().trim();
           return pCat && ACTIVE_CATEGORIES.includes(pCat) &&
-                 (userCategory ? pCat === userCategory : true);
+                 (userCategories.length ? userCategories.includes(pCat) : true);
         }
       );
     const products = dedupePartyProducts(filteredProducts);

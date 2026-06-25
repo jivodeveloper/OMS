@@ -68,6 +68,8 @@ export interface QuotationOverviewItem {
  quotation_cancelled_at: string | null;
  quotation_cancelled_by: string | null;
  quotation_status: QuotationStatusLabel;
+ category?: string;
+ categories?: string[];
 }
 
 export interface OrderFlowConditionOption {

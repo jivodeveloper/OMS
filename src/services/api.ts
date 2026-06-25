@@ -4,16 +4,16 @@ import Constants from 'expo-constants';
   
 const DEFAULT_BASE_URL = Platform.select({
 
-  android: 'http://103.89.45.75:8081/api',
-  ios: 'http://103.89.45.75:8081/api',
-  web: 'http://103.89.45.75:8081/api',
-  default: 'http://103.89.45.75:8081/api',
+  // android: 'http://103.89.45.75:8081/api',
+  // ios: 'http://103.89.45.75:8081/api',
+  // web: 'http://103.89.45.75:8081/api',
+  // default: 'http://103.89.45.75:8081/api',
   
   
-  // android: 'http://10.0.2.2:8001/api',  
-  // ios: 'http://127.0.0.1:8001/api',     
-  // web: 'http://127.0.0.1:8001/api',     
-  // default: 'http://127.0.0.1:8001/api',
+  android: 'http://10.0.2.2:8001/api',  
+  ios: 'http://127.0.0.1:8001/api',     
+  web: 'http://127.0.0.1:8001/api',     
+  default: 'http://127.0.0.1:8001/api',
   
   // android: 'http://103.89.45.75:8001/api',
   // ios: 'http://103.89.45.75:8001/api',

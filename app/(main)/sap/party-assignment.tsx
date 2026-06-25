@@ -26,7 +26,20 @@ interface User {
   role: string;
   role_id: number;
   category?: { id: number; category: string } | null;
+  categories?: ({ id: number; category: string } | string)[] | null;
 }
+
+// All categories assigned to a user (OIL / BEVERAGES / MART), falling back to
+// the single primary category for users created before multi-category support.
+const getUserCategories = (user?: User | null): string[] => {
+  const list = Array.isArray(user?.categories) ? user!.categories : [];
+  const names = list
+    .map((c) => normalizeCategory(typeof c === 'string' ? c : c?.category))
+    .filter(Boolean);
+  if (names.length) return Array.from(new Set(names));
+  const primary = normalizeCategory(user?.category?.category);
+  return primary ? [primary] : [];
+};
 
 interface Party {
   id?: number;
@@ -62,6 +75,8 @@ export default function PartyAssignmentScreen() {
   const [parties, setParties] = useState<Party[]>([]);
   const [assignedPartiesData, setAssignedPartiesData] = useState<Party[]>([]);
   const [selectedUserId, setSelectedUserId] = useState<number | null>(null);
+  // Which of the selected user's categories we're assigning parties for.
+  const [selectedCategory, setSelectedCategory] = useState<string>('');
   const [assignedPartyKeys, setAssignedPartyKeys] = useState<Set<string>>(new Set());
   const [tempSelectedKeys, setTempSelectedKeys] = useState<Set<string>>(new Set());
   const [searchQuery, setSearchQuery] = useState('');
@@ -73,8 +88,12 @@ export default function PartyAssignmentScreen() {
 
   useEffect(() => {
     if (selectedUserId) {
-      loadUserParties(selectedUserId);
+      const user = users.find((u) => u.id === selectedUserId) || null;
+      const defaultCategory = getUserCategories(user)[0] || '';
+      setSelectedCategory(defaultCategory);
+      loadUserParties(selectedUserId, defaultCategory);
     } else {
+      setSelectedCategory('');
       setAssignedPartiesData([]);
       setAssignedPartyKeys(new Set<string>());
     }
@@ -87,6 +106,7 @@ export default function PartyAssignmentScreen() {
       
       return () => {
         setSelectedUserId(null);
+        setSelectedCategory('');
         setAssignedPartiesData([]);
         setAssignedPartyKeys(new Set());
         setTempSelectedKeys(new Set());
@@ -142,12 +162,18 @@ export default function PartyAssignmentScreen() {
     setLoading(false);
   };
 
-  const loadUserParties = async (userId: number) => {
+  const loadUserParties = async (userId: number, category?: string) => {
     if (assignedPartyKeys.size === 0) setLoading(true);
     setMessage('');
     try {
       const token = await getToken();
-      const res = await api.get(`/auth/users/${userId}/parties/`, token);
+      // Scope to the chosen category (one of the user's categories); the backend
+      // defaults to the user's primary category when none is supplied.
+      const cat = category !== undefined ? category : selectedCategory;
+      const url = cat
+        ? `/auth/users/${userId}/parties/?category=${encodeURIComponent(cat)}`
+        : `/auth/users/${userId}/parties/`;
+      const res = await api.get(url, token);
       console.log('User parties response:', res);
       if (res && res.success) {
         const assignedParties = Array.isArray(res.data.parties)
@@ -245,18 +271,22 @@ export default function PartyAssignmentScreen() {
       console.log('Saving assignments:', {
         user_id: selectedUserId,
         card_codes: cardCodes,
+        category: selectedCategory,
       });
 
+      // Assign within the currently selected category so assigning for one
+      // category never disturbs parties in another.
       const res = await api.post('/auth/assign-parties/', {
         user_id: selectedUserId,
         card_codes: cardCodes,
+        ...(selectedCategory ? { category: selectedCategory } : {}),
       }, token);
-      
+
       console.log('Save response:', res);
 
       if (res && res.success) {
         setMessage(`✅ ${res.message}`);
-        await loadUserParties(selectedUserId);
+        await loadUserParties(selectedUserId, selectedCategory);
         setShowAssignModal(false);
       } else {
         setMessage(`❌ ${res?.message || 'Failed to save'}`);
@@ -295,24 +325,32 @@ export default function PartyAssignmentScreen() {
     }
   };
 
+  const handleCategoryChange = (cat: string) => {
+    if (cat === selectedCategory) return;
+    setSelectedCategory(cat);
+    setMessage('');
+    if (selectedUserId) loadUserParties(selectedUserId, cat);
+  };
+
   const selectedUser = users.find(u => u.id === selectedUserId);
+  const userCategories = getUserCategories(selectedUser);
+  // The category currently being assigned for (defaults to the user's first).
+  const effectiveCategory = selectedCategory || userCategories[0] || '';
 
   const filteredParties = parties.filter(p => {
     const matchesSearch = p.card_code?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       p.card_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       p.state?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       p.main_group?.toLowerCase().includes(searchQuery.toLowerCase());
-      
-    let matchesCategory = true;
-    if (selectedUser?.category?.category) {
-      matchesCategory = p.category === selectedUser.category.category;
-    }
+
+    const matchesCategory =
+      !effectiveCategory || normalizeCategory(p.category) === effectiveCategory;
 
     return matchesSearch && matchesCategory;
   });
 
   const assignedParties = assignedPartiesData.filter((party) =>
-    !selectedUser?.category?.category || party.category === selectedUser.category.category
+    !effectiveCategory || normalizeCategory(party.category) === effectiveCategory
   );
   
   return (
@@ -355,9 +393,11 @@ export default function PartyAssignmentScreen() {
         {selectedUserId && (
           <View style={styles.card}>
             <View style={styles.userInfoHeader}>
-              <View>
+              <View style={{ flex: 1, marginRight: 10 }}>
                 <Text style={styles.userName}>{selectedUser?.name || selectedUser?.username}</Text>
-                <Text style={styles.userCategory}>{selectedUser?.category?.category ? `Category: ${selectedUser.category.category}` : 'No Category Assigned'}</Text>
+                <Text style={styles.userCategory}>
+                  {userCategories.length ? `Categories: ${userCategories.join(', ')}` : 'No Category Assigned'}
+                </Text>
               </View>
               <TouchableOpacity
                 style={styles.assignButton}
@@ -369,6 +409,28 @@ export default function PartyAssignmentScreen() {
                 </Text>
               </TouchableOpacity>
             </View>
+
+            {userCategories.length > 1 && (
+              <View style={styles.categorySelectorWrap}>
+                <Text style={styles.categorySelectorLabel}>Assigning parties for</Text>
+                <View style={styles.categoryChips}>
+                  {userCategories.map((cat) => {
+                    const active = effectiveCategory === cat;
+                    return (
+                      <TouchableOpacity
+                        key={cat}
+                        style={[styles.categoryChip, active && styles.categoryChipActive]}
+                        onPress={() => handleCategoryChange(cat)}
+                      >
+                        <Text style={[styles.categoryChipText, active && styles.categoryChipTextActive]}>
+                          {cat}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </View>
+            )}
 
             <View style={styles.statsRow}>
               <View style={styles.statBox}>
@@ -673,6 +735,41 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#666',
     marginTop: 4,
+  },
+  categorySelectorWrap: {
+    marginBottom: 15,
+  },
+  categorySelectorLabel: {
+    fontSize: 12,
+    color: '#888',
+    marginBottom: 6,
+    fontWeight: '600',
+  },
+  categoryChips: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+  },
+  categoryChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#cbd5e1',
+    backgroundColor: '#fff',
+    marginRight: 8,
+    marginBottom: 8,
+  },
+  categoryChipActive: {
+    backgroundColor: '#1e3a5f',
+    borderColor: '#1e3a5f',
+  },
+  categoryChipText: {
+    fontSize: 13,
+    color: '#475569',
+    fontWeight: '600',
+  },
+  categoryChipTextActive: {
+    color: '#fff',
   },
   userRole: {
     fontSize: 14,
