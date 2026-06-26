@@ -172,6 +172,34 @@ export const orderService = {
  return await api.post('/orders/create/', { ...payload, order_id: orderId }, token || undefined);
  },
 
+ // Save a (possibly incomplete) order as a draft. Drafts skip the approval flow
+ // and notifications. Pass an existing orderId to update a draft in place.
+ saveDraft: async (payload: Partial<CreateOrderPayload>, orderId?: number) => {
+ const token = await storage.getAccessToken();
+ const body = {
+ ...payload,
+ ...(orderId ? { order_id: orderId } : {}),
+ is_draft: true,
+ };
+ return await api.post('/orders/create/', body, token || undefined);
+ },
+
+ // List the current user's draft orders.
+ getDrafts: async () => {
+ const userdata = await storage.getUser();
+ if (!userdata?.id) return [];
+ const orders = await api.get(`/orders/ordersbyuser/${userdata.id}/`);
+ if (!Array.isArray(orders)) return [];
+ return orders.filter(
+ (order: any) => String(order?.status_display || '').trim().toLowerCase() === 'draft',
+ );
+ },
+
+ deleteDraft: async (orderId: number) => {
+ const token = await storage.getAccessToken();
+ return await api.delete(`/orders/${orderId}/delete-draft/`, undefined, token || undefined);
+ },
+
  getPartyProducts: async (cardCode: string, category?: string | null) => {
  const query = category
  ? `/orders/party-products/${encodeURIComponent(cardCode)}?party_category=${encodeURIComponent(category)}`

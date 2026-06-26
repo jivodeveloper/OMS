@@ -103,6 +103,7 @@ export default function MainLayout() {
   const canSee: Record<string, string[]> = {
     dashboard: ["admin", "manager", "approver"],
     "orders/create": ["manager", "billing"],
+    "orders/drafts": ["manager", "billing"],
     "orders/foc": ["manager", "billing"],
     "orders/orderlist": ["billing"],
     "reports/daily-report": ["admin", "billing"],
@@ -305,6 +306,19 @@ export default function MainLayout() {
               );
             },
           })}
+        />
+        <Drawer.Screen
+          name="orders/drafts"
+          options={{
+            drawerLabel: ({ color }) => renderDrawerLabel("Drafts", color),
+            title: "Drafts",
+            drawerIcon: ({ color }) => (
+              <Ionicons name="document-text-outline" size={22} color={color} />
+            ),
+            drawerItemStyle: isVisible("orders/drafts")
+              ? visibleStyle
+              : hiddenStyle,
+          }}
         />
         <Drawer.Screen
           name="orders/foc"

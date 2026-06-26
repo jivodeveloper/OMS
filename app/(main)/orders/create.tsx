@@ -576,6 +576,8 @@ export function OrderEntryScreen({
   const [orderItems, setOrderItems] = useState<OrderItemType[]>([]);
   const [assignedStateCode, setAssignedStateCode] = useState<string>("");
   const [loadedIsFocOrder, setLoadedIsFocOrder] = useState(false);
+  const [loadedIsDraftOrder, setLoadedIsDraftOrder] = useState(false);
+  const [savingDraft, setSavingDraft] = useState(false);
 
   const [allSchemes, setAllSchemes] = useState<{ label: string; value: string }[]>([]);
   const isFocOrder = isFocMode || loadedIsFocOrder;
@@ -1083,6 +1085,9 @@ export function OrderEntryScreen({
       const orderIsFoc = Boolean(order?.is_foc);
       console.log("Loaded order for edit:", order);
       setLoadedIsFocOrder(orderIsFoc);
+      setLoadedIsDraftOrder(
+        String(order?.status_display || "").trim().toLowerCase() === "draft",
+      );
 
       const orderPartyCategory = getOrderPartyCategory(order);
       const orderPartyState = String(order.party_state || "").trim();
@@ -2359,6 +2364,93 @@ export function OrderEntryScreen({
     }
   };
 
+  // Save the order (even if incomplete) as a draft. Skips all validation and the
+  // approval flow; the draft can be resumed later from the Drafts screen.
+  const handleSaveDraft = async () => {
+    try {
+      setSavingDraft(true);
+      const selectedParty = partyName ? findSelectedParty(partyName) : null;
+      const parsedParty = partyName ? parsePartyValue(partyName) : { cardCode: "" };
+      const resolvedBillToId = selectedBillTo ?? selectedShipTo ?? 0;
+      const resolvedShipToId = selectedShipTo ?? selectedBillTo ?? 0;
+      const selectedBillToAddress =
+        billToAddresses.find((a) => a.value === resolvedBillToId) ??
+        shipToAddresses.find((a) => a.value === resolvedBillToId);
+      const selectedShipToAddress =
+        shipToAddresses.find((a) => a.value === resolvedShipToId) ??
+        billToAddresses.find((a) => a.value === resolvedShipToId);
+
+      const payload: Partial<CreateOrderPayload> = {
+        user_id: user?.id || 0,
+        card_code: selectedParty?.cardCode ?? parsedParty.cardCode ?? "",
+        card_name: selectedParty?.cardName ?? "",
+        bill_to_id: resolvedBillToId ?? 0,
+        bill_to_address: selectedBillToAddress?.name ?? "",
+        ship_to_id: resolvedShipToId ?? 0,
+        ship_to_address: selectedShipToAddress?.name ?? "",
+        dispatch_from_id: branch ?? 0,
+        dispatch_from_name: branches.find((d) => d.value === branch)?.label ?? "",
+        delivery_date: delivery || "",
+        company: String(company ?? ""),
+        remarks: String(comment ?? ""),
+        is_foc: isFocOrder,
+        ...(shouldShowPoNumber ? { po_number: String(poNumber ?? "") } : {}),
+        items: orderItems.map((item) => {
+          const schemes = getConfirmedSchemes(item);
+          const firstScheme = schemes[0];
+          return {
+            item_code: String(item.itemCode ?? ""),
+            item_name: String(item.itemName ?? ""),
+            category: String(item.category ?? ""),
+            brand: String(item.brand ?? ""),
+            variety: String(item.variety ?? ""),
+            item_type: String(item.type ?? ""),
+            qty: Number(item.boxes) || 0,
+            scheme_id: firstScheme?.scheme ? Number(firstScheme.scheme) : null,
+            scheme_name: firstScheme?.schemeName ? String(firstScheme.schemeName) : null,
+            is_scheme_visible: schemes.length > 0,
+            scheme_qty: firstScheme?.scheme ? Number(firstScheme.schemeQty) || 0 : 0,
+            schemes: schemes.map((scheme) => ({
+              scheme_id: scheme.scheme ? Number(scheme.scheme) : null,
+              scheme_name: scheme.schemeName ? String(scheme.schemeName) : null,
+              scheme_qty: Number(scheme.schemeQty) || 0,
+            })),
+            pcs: Number(item.pcs) || 0,
+            boxes: Number(item.qty) || 0,
+            ltrs: Number(item.ltrs) || 0,
+            basic_price: Number(item.basicPrice) || 0,
+            total: Number(item.total) || 0,
+            tax_rate: Number(item.taxRate) || 0,
+            price_list_basic: Number(item.priceListBasic) || 0,
+          };
+        }),
+      };
+
+      // Only update in place when resuming an existing draft.
+      const draftOrderId =
+        loadedIsDraftOrder && editOrderId ? Number(editOrderId) : undefined;
+      const response = await orderService.saveDraft(payload, draftOrderId);
+
+      if (response?.id || response?.order_number) {
+        handleClear();
+        Alert.alert("Draft saved", response.message || "Draft saved successfully", [
+          {
+            text: "View Drafts",
+            onPress: () =>
+              router.navigate({ pathname: "/(main)/orders/drafts" } as never),
+          },
+          { text: "OK" },
+        ]);
+      } else {
+        Alert.alert("Error", response?.message || "Failed to save draft");
+      }
+    } catch (error) {
+      Alert.alert("Error", "Failed to save draft");
+    } finally {
+      setSavingDraft(false);
+    }
+  };
+
   const handleClear = useCallback((options?: { keepSuccessModal?: boolean }) => {
     setPartyName(null);
     setBranch(branches.length === 1 ? branches[0].value : null);
@@ -2378,6 +2470,7 @@ export function OrderEntryScreen({
     setAllSchemes([]);
     setEditOrderLoaded(false);
     setLoadedIsFocOrder(false);
+    setLoadedIsDraftOrder(false);
     setSelectedTemplateParty(null);
     setSelectedTemplateOrder(null);
     setTemplateOrders([]);
@@ -3245,6 +3338,26 @@ export function OrderEntryScreen({
             <Text style={styles.cancelBtnText}>Clear</Text>
           </TouchableOpacity>
 
+          {(!isEditMode || loadedIsDraftOrder) && (
+            <TouchableOpacity
+              style={[
+                styles.draftBtn,
+                (savingDraft || loading) && styles.draftBtnDisabled,
+              ]}
+              onPress={handleSaveDraft}
+              disabled={savingDraft || loading}
+            >
+              {savingDraft ? (
+                <ActivityIndicator size="small" color={COLORS.primary} />
+              ) : (
+                <>
+                  <Ionicons name="save-outline" size={18} color={COLORS.primary} />
+                  <Text style={styles.draftBtnText}>Draft</Text>
+                </>
+              )}
+            </TouchableOpacity>
+          )}
+
           <TouchableOpacity
             onPress={handleSubmit}
             disabled={loading}
@@ -3838,6 +3951,20 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   cancelBtnText: { color: COLORS.textSecondary, fontWeight: "600" },
+  draftBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: SPACING.sm,
+    paddingHorizontal: SPACING.md,
+    borderRadius: RADIUS.md,
+    borderWidth: 1,
+    borderColor: COLORS.primary,
+    backgroundColor: COLORS.primaryLighter,
+    gap: SPACING.xs,
+  },
+  draftBtnDisabled: { opacity: 0.6 },
+  draftBtnText: { color: COLORS.primary, fontWeight: "600" },
   submitBtnWrapper: { flex: 1 },
   submitBtn: {
     flexDirection: "row",
