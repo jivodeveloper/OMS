@@ -1203,7 +1203,17 @@ export function OrderEntryScreen({
           priceListBasic: orderIsFoc ? FOC_PRICE_LIST_BASIC : Number(item.price_list_basic) || 0,
         };
       });
-      setOrderItems(items);
+      // Items that were never confirmed (no product picked) come back as editable
+      // rows so the user can finish them; fully-specified items stay confirmed.
+      const confirmedItems = items.filter((item) => item.itemCode);
+      const unconfirmedItems = items.filter((item) => !item.itemCode);
+      setOrderItems(confirmedItems);
+      setItemRows(
+        unconfirmedItems.map((item, idx) => ({
+          ...buildEditableRowFromItem(item),
+          id: Date.now() + idx,
+        })),
+      );
       setEditOrderLoaded(true);
     } catch (err) {
       console.log("Failed to load order for edit:", err);
@@ -2083,10 +2093,10 @@ export function OrderEntryScreen({
     setItemRows((prev) => prev.filter((r) => r.id !== rowId));
   };
 
-  const editOrderItem = (id: number) => {
-    const confirmedItem = orderItems.find((item) => item.id === id);
-    if (!confirmedItem) return;
-
+  // Rebuild a fully-populated editable ItemRow (with cascading dropdown option
+  // lists) from a stored order item. Used both when the user taps "edit" on a
+  // confirmed item, and when resuming a draft whose item was never confirmed.
+  const buildEditableRowFromItem = (confirmedItem: OrderItemType): ItemRow => {
     const matchedProduct = partyProducts.find(
       (product: any) =>
         String(product.item_code) === String(confirmedItem.itemCode),
@@ -2221,6 +2231,13 @@ export function OrderEntryScreen({
       isQtyManual: true,
     };
 
+    return editableRow;
+  };
+
+  const editOrderItem = (id: number) => {
+    const confirmedItem = orderItems.find((item) => item.id === id);
+    if (!confirmedItem) return;
+    const editableRow = buildEditableRowFromItem(confirmedItem);
     setOrderItems((prev) => prev.filter((item) => item.id !== id));
     setItemRows((prev) => [...prev, editableRow]);
   };
@@ -2364,6 +2381,63 @@ export function OrderEntryScreen({
     }
   };
 
+  // Map an in-progress (unconfirmed) item row to the draft payload shape, so a
+  // draft also captures item details the user filled in but didn't confirm.
+  const mapUnconfirmedRowToDraftItem = (row: ItemRow) => {
+    const product = partyProducts.find(
+      (p: any) => String(p.item_code) === String(row.selectedProduct),
+    );
+    const rowSchemes = isFocOrder
+      ? []
+      : getRowSchemeSelections(row)
+          .filter((selection) => Boolean(selection.selectedScheme))
+          .map((selection) => ({
+            scheme: selection.selectedScheme,
+            schemeName: getSelectedSchemeName({
+              selectedScheme: selection.selectedScheme,
+              schemes: row.schemes,
+            }),
+            schemeQty: parseFloat(selection.schemeQty) || 0,
+          }));
+    const firstScheme = rowSchemes[0];
+    return {
+      item_code: String(product?.item_code ?? row.selectedProduct ?? ""),
+      item_name: String(product?.item_name ?? ""),
+      category: String(row.selectedCategory ?? ""),
+      brand: String(row.selectedBrand ?? ""),
+      variety: String(row.selectedVariety ?? ""),
+      item_type: String(row.selectedType ?? ""),
+      // qty/boxes are swapped in the payload to mirror confirmed items.
+      qty: Number(row.boxes) || 0,
+      scheme_id: firstScheme?.scheme ? Number(firstScheme.scheme) : null,
+      scheme_name: firstScheme?.schemeName ? String(firstScheme.schemeName) : null,
+      is_scheme_visible: rowSchemes.length > 0,
+      scheme_qty: firstScheme?.scheme ? Number(firstScheme.schemeQty) || 0 : 0,
+      schemes: rowSchemes.map((scheme) => ({
+        scheme_id: scheme.scheme ? Number(scheme.scheme) : null,
+        scheme_name: scheme.schemeName ? String(scheme.schemeName) : null,
+        scheme_qty: Number(scheme.schemeQty) || 0,
+      })),
+      pcs: Number(row.pcs) || 0,
+      boxes: Number(row.qty) || 0,
+      ltrs: Number(row.ltrs) || 0,
+      basic_price: Number(row.basicPrice) || 0,
+      total:
+        Number(row.itemTotal) ||
+        Number(
+          calculateRowItemTotal({
+            qty: row.qty,
+            boxes: row.boxes,
+            priceListBasic: row.priceListBasic,
+            basicPrice: row.basicPrice,
+          }),
+        ) ||
+        0,
+      tax_rate: Number(row.tax) || 0,
+      price_list_basic: Number(row.priceListBasic) || 0,
+    };
+  };
+
   // Save the order (even if incomplete) as a draft. Skips all validation and the
   // approval flow; the draft can be resumed later from the Drafts screen.
   const handleSaveDraft = async () => {
@@ -2423,7 +2497,23 @@ export function OrderEntryScreen({
             tax_rate: Number(item.taxRate) || 0,
             price_list_basic: Number(item.priceListBasic) || 0,
           };
-        }),
+        }).concat(
+          // Also capture item rows the user filled in but didn't confirm, so
+          // their details aren't lost when saving the draft. A row counts as
+          // "started" if any of category/brand/sub-group/type/product/qty is set.
+          itemRows
+            .filter(
+              (row) =>
+                row.selectedCategory ||
+                row.selectedBrand ||
+                row.selectedVariety ||
+                row.selectedType ||
+                row.selectedProduct ||
+                Number(row.qty) > 0 ||
+                Number(row.boxes) > 0,
+            )
+            .map(mapUnconfirmedRowToDraftItem),
+        ),
       };
 
       // Only update in place when resuming an existing draft.
