@@ -220,7 +220,14 @@ export default function OrderProgressScreen() {
         orderService.getOrderLogs(Number(orderId)),
         orderService.getOrderDetails(Number(orderId)),
       ]);
-      setLogs(Array.isArray(logsResponse) ? logsResponse : []);
+      // Drafts aren't part of the approval history, so hide the "Draft" log.
+      setLogs(
+        Array.isArray(logsResponse)
+          ? logsResponse.filter(
+              (log: OrderLog) => normalizeText(log.status_name) !== "draft",
+            )
+          : [],
+      );
       const detail = detailResponse?.data || detailResponse;
       // The stage the order currently sits in is still pending — even if a log
       // for it already has a performer (e.g. billing forwarding to auditor).
