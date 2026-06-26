@@ -494,6 +494,7 @@ export function OrderEntryScreen({
     orderNumber: string;
     message: string;
     needsApproval: boolean;
+    isUpdate?: boolean;
   } | null>(null);
   const [dataLoading, setDataLoading] = useState(true);
   const [editOrderLoaded, setEditOrderLoaded] = useState(false);
@@ -2348,11 +2349,13 @@ export function OrderEntryScreen({
 
         const response = await orderService.updateOrder(Number(editOrderId), payload);
         if (response?.id || response?.order_number) {
-          Alert.alert(
-            "Success",
-            response.message || "Order updated successfully",
-            [{ text: "OK", onPress: () => router.back() }]
-          );
+          setOrderResult({
+            orderNumber: String(response.order_number || editOrderId || ""),
+            message: response.message || "Order updated successfully",
+            needsApproval: response.needs_approval || false,
+            isUpdate: true,
+          });
+          setSuccessModal(true);
         } else {
           Alert.alert("Error", response?.message || "Failed to update order");
         }
@@ -3364,12 +3367,18 @@ export function OrderEntryScreen({
                 </View>
 
                 <Text style={styles.modalHeaderTitle}>
-                  {orderResult?.needsApproval ? "Pending Approval" : "Order Placed!"}
+                  {orderResult?.needsApproval
+                    ? "Pending Approval"
+                    : orderResult?.isUpdate
+                      ? "Order Updated!"
+                      : "Order Placed!"}
                 </Text>
                 <Text style={styles.modalHeaderSub}>
                   {orderResult?.needsApproval
                     ? "Your order is awaiting rate approval"
-                    : "Your order has been created successfully"}
+                    : orderResult?.isUpdate
+                      ? "Your order has been updated successfully"
+                      : "Your order has been created successfully"}
                 </Text>
               </LinearGradient>
 
