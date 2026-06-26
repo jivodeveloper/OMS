@@ -48,6 +48,11 @@ const PENDING_ORANGE = "#F59E0B";
 const PENDING_LINE = "#F7C66B";
 const PENDING_CARD = "#FFF5DF";
 const PENDING_BORDER = "#F5D595";
+// Edit logs (e.g. a rejected order edited by the manager) use a blue tone.
+const EDIT_BLUE = "#2563EB";
+const EDIT_LINE = "#93B4F5";
+const EDIT_CARD = "#EFF5FF";
+const EDIT_BORDER = "#C7DBFB";
 
 const getOrdinalStageLabel = (position: number) => {
   const stageNumber = position + 1;
@@ -301,8 +306,8 @@ export default function OrderProgressScreen() {
     return String(item.remarks || "").trim() || "No remarks";
   };
 
-  const isRejectedLog = (item: ProgressLog) => {
-    const combinedText = [
+  const getCombinedLogText = (item: ProgressLog) =>
+    [
       item.status_name,
       item.stage_name,
       item.display_status_name,
@@ -313,8 +318,12 @@ export default function OrderProgressScreen() {
       .join(" ")
       .toLowerCase();
 
-    return combinedText.includes("reject");
-  };
+  // A log recorded when a (rejected) order was edited/resubmitted. Shown in the
+  // pending/yellow tone rather than red, even though its remark mentions "reject".
+  const isEditLog = (item: ProgressLog) => getCombinedLogText(item).includes("edited");
+
+  const isRejectedLog = (item: ProgressLog) =>
+    !isEditLog(item) && getCombinedLogText(item).includes("reject");
 
   const progressLogs = buildProgressLogs(logs).filter((log) => log.stage_key !== "completed");
 
@@ -371,17 +380,30 @@ export default function OrderProgressScreen() {
         ? rateApprovals
         : rateApproverActions;
 
+    const isEdit = isEditLog(item);
     const isRejected = isRejectedLog(item);
-    const accent = isRejected ? REJECTED_RED : isDone ? DONE_GREEN : PENDING_ORANGE;
-    const connectorColor = isRejected ? REJECTED_LINE : isDone ? DONE_LINE : PENDING_LINE;
-    const cardColor = isRejected ? REJECTED_CARD : isDone ? DONE_CARD : PENDING_CARD;
-    const borderColor = isRejected ? REJECTED_BORDER : isDone ? DONE_BORDER : PENDING_BORDER;
-    const timelineIconName = isRejected ? "close" : isDone ? "checkmark" : "time-outline";
-    const headerIconName = isRejected
-      ? "close-circle"
-      : isDone
-        ? "checkmark-done-circle"
-        : "time-outline";
+    // An edit log uses its own blue tone with a tick, regardless of whether it
+    // carries a performer (e.g. the manager who edited the order).
+    const isDoneFinal = isDone && !isEdit;
+    const accent = isEdit ? EDIT_BLUE : isRejected ? REJECTED_RED : isDoneFinal ? DONE_GREEN : PENDING_ORANGE;
+    const connectorColor = isEdit ? EDIT_LINE : isRejected ? REJECTED_LINE : isDoneFinal ? DONE_LINE : PENDING_LINE;
+    const cardColor = isEdit ? EDIT_CARD : isRejected ? REJECTED_CARD : isDoneFinal ? DONE_CARD : PENDING_CARD;
+    const borderColor = isEdit ? EDIT_BORDER : isRejected ? REJECTED_BORDER : isDoneFinal ? DONE_BORDER : PENDING_BORDER;
+    // Edit logs show a pencil (edit) icon; otherwise tick / cross / clock.
+    const timelineIconName = isEdit
+      ? "pencil"
+      : isRejected
+        ? "close"
+        : isDoneFinal
+          ? "checkmark"
+          : "time-outline";
+    const headerIconName = isEdit
+      ? "create-outline"
+      : isRejected
+        ? "close-circle"
+        : isDoneFinal
+          ? "checkmark-done-circle"
+          : "time-outline";
 
     return (
       <View style={styles.timelineRow}>
