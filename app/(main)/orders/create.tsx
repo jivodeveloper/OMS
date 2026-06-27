@@ -1118,35 +1118,48 @@ export function OrderEntryScreen({
       setCompany(1);
       if (order.dispatch_from_id) setBranch(Number(order.dispatch_from_id));
 
-      // Addresses
-      const addressData = await orderService.getAddresses(
-        order.card_code,
-        selectedParty?.category || orderPartyCategory,
-      );
-      const { billTo: billList, shipTo: shipList } = buildAddressOptions(addressData);
-      setBillToAddresses(billList);
-      setShipToAddresses(shipList);
+      // Addresses — best-effort: a failure here (e.g. an incomplete draft with
+      // no card_code) must not stop the order's items from pre-filling below.
+      try {
+        if (order.card_code) {
+          const addressData = await orderService.getAddresses(
+            order.card_code,
+            selectedParty?.category || orderPartyCategory,
+          );
+          const { billTo: billList, shipTo: shipList } = buildAddressOptions(addressData);
+          setBillToAddresses(billList);
+          setShipToAddresses(shipList);
 
-      const billMatch =
-        billList.find((a: AddressOption) => a.value === order.bill_to_id) ??
-        billList.find((a: AddressOption) => a.name === order.bill_to_address) ??
-        billList[0];
-      const shipMatch =
-        shipList.find((a: AddressOption) => a.value === order.ship_to_id) ??
-        shipList.find((a: AddressOption) => a.name === order.ship_to_address) ??
-        shipList[0];
-      if (billMatch) setSelectedBillTo(billMatch.value);
-      if (shipMatch) setSelectedShipTo(shipMatch.value);
+          const billMatch =
+            billList.find((a: AddressOption) => a.value === order.bill_to_id) ??
+            billList.find((a: AddressOption) => a.name === order.bill_to_address) ??
+            billList[0];
+          const shipMatch =
+            shipList.find((a: AddressOption) => a.value === order.ship_to_id) ??
+            shipList.find((a: AddressOption) => a.name === order.ship_to_address) ??
+            shipList[0];
+          if (billMatch) setSelectedBillTo(billMatch.value);
+          if (shipMatch) setSelectedShipTo(shipMatch.value);
+        }
+      } catch (e) {
+        console.log("Edit order: failed to load addresses", e);
+      }
 
-      // Products (needed if user wants to add more items)
-      const productsResponse = await orderService.getPartyProducts(
-        order.card_code,
-        selectedParty?.category || orderPartyCategory,
-      );
-      const allProducts = dedupePartyProducts(Array.isArray(productsResponse) ? productsResponse : []);
-      setPartyProducts(allProducts);
-      const uniqueCategories = [...new Set<string>(allProducts.map((p: any) => p.category).filter(Boolean))];
-      setCategories(uniqueCategories.sort().map((c) => ({ label: c, value: c })));
+      // Products (needed if user wants to add more items) — also best-effort.
+      try {
+        if (order.card_code) {
+          const productsResponse = await orderService.getPartyProducts(
+            order.card_code,
+            selectedParty?.category || orderPartyCategory,
+          );
+          const allProducts = dedupePartyProducts(Array.isArray(productsResponse) ? productsResponse : []);
+          setPartyProducts(allProducts);
+          const uniqueCategories = [...new Set<string>(allProducts.map((p: any) => p.category).filter(Boolean))];
+          setCategories(uniqueCategories.sort().map((c) => ({ label: c, value: c })));
+        }
+      } catch (e) {
+        console.log("Edit order: failed to load party products", e);
+      }
 
       const partyEntry =
         selectedParty ||
@@ -1164,15 +1177,20 @@ export function OrderEntryScreen({
       setAssignedStateCode(effectivePartyState);
 
       if (shouldAllowSchemes) {
-        const editSchemes = await schemeService.getSchemes(
-          effectivePartyState || "DEFAULT",
-        );
-        setAllSchemes(
-          editSchemes.map((scheme) => ({
-            label: scheme.scheme_name,
-            value: String(scheme.scheme_id),
-          })),
-        );
+        try {
+          const editSchemes = await schemeService.getSchemes(
+            effectivePartyState || "DEFAULT",
+          );
+          setAllSchemes(
+            editSchemes.map((scheme) => ({
+              label: scheme.scheme_name,
+              value: String(scheme.scheme_id),
+            })),
+          );
+        } catch (e) {
+          console.log("Edit order: failed to load schemes", e);
+          setAllSchemes([]);
+        }
       } else {
         setAllSchemes([]);
       }
@@ -1215,14 +1233,23 @@ export function OrderEntryScreen({
           id: Date.now() + idx,
         })),
       );
-      setEditOrderLoaded(true);
     } catch (err) {
       console.log("Failed to load order for edit:", err);
+      setError("Failed to load the order. Please check your connection and retry.");
+    } finally {
+      // Always clear the edit-loading state so the screen never hangs on the
+      // spinner, even if one of the fetches above failed.
+      setEditOrderLoaded(true);
     }
   };
 
   useEffect(() => {
-    if (!dataLoading && parties.length > 0 && isEditMode && !editOrderLoaded) {
+    // Load the order being edited once the master data has finished loading.
+    // We intentionally do NOT gate on `parties.length > 0`: some editors (e.g.
+    // billing users) have no parties assigned, and loadEditOrder already falls
+    // back to a synthetic party option when the order's party isn't in the list.
+    // Gating on parties left those screens stuck on the loading spinner forever.
+    if (!dataLoading && isEditMode && !editOrderLoaded) {
       loadEditOrder();
     }
   }, [dataLoading, parties.length, isEditMode, editOrderLoaded, shouldAllowSchemes]);

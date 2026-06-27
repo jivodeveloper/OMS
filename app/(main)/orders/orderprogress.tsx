@@ -85,6 +85,16 @@ const isApprovalAction = (statusName: string) => {
   return normalizedStatus === "approved" || normalizedStatus === "accepted";
 };
 
+// "order edited by billing" -> "Order Edited by Billing". Edit logs have a null
+// action (empty status_name), so their title is derived from the remark instead.
+const formatEditTitle = (remarks: string | null | undefined) => {
+  const text = normalizeText(remarks);
+  const match = text.match(/edited by\s+([a-z_]+)/);
+  const role = match ? match[1].charAt(0).toUpperCase() + match[1].slice(1) : "";
+  const base = text.includes("rejected") ? "Rejected Order Edited" : "Order Edited";
+  return role ? `${base} by ${role}` : base;
+};
+
 const getStageKey = (log: OrderLog, previousStageKey?: string | null) => {
   const normalizedStageName = normalizeText(log.stage_name);
   const normalizedStatus = normalizeText(log.status_name);
@@ -167,8 +177,11 @@ const buildProgressLogs = (logs: OrderLog[]): ProgressLog[] => {
       currentRound += 1;
     }
 
-    const stageKey = getStageKey(log, previousStageKey);
-    const displayStatusName = getDisplayStatusName(stageKey, log.status_name);
+    const isEditLogEntry = normalizeText(log.remarks).includes("edited by");
+    const stageKey = isEditLogEntry ? "edited" : getStageKey(log, previousStageKey);
+    const displayStatusName = isEditLogEntry
+      ? formatEditTitle(log.remarks)
+      : getDisplayStatusName(stageKey, log.status_name);
     const actionName =
       (stageKey === "rate_approval" && normalizedRawStatus !== "rate approval")
         || (stageKey === "billing" && normalizedRawStatus !== "billing")
