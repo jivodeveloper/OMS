@@ -400,6 +400,9 @@ export default function DashboardScreen() {
           `${order.status_display || ""} ${order.status_name || ""} ${order.status || ""}`,
         );
 
+        // Drafts aren't part of the order flow — don't count them as pending.
+        if (statusText.includes("draft")) return;
+
         if (statusText.includes("completed")) {
           counts.completed += 1;
         } else if (statusText.includes("rejected")) {
@@ -641,6 +644,13 @@ export default function DashboardScreen() {
       const orders = await productService.getOrders(0, undefined, false, false, true);
       const filteredOrders = (Array.isArray(orders) ? orders : [])
         .filter(isOrderInActiveChartPeriod)
+        // Drafts aren't in the order flow yet — keep them out of this popup.
+        .filter(
+          (order) =>
+            ![order.status_display, order.status_name, order.status].some(
+              (value) => String(value || "").trim().toLowerCase() === "draft",
+            ),
+        )
         .filter((order) => {
           if (statusFilter === "approved") return isAdminCompletedOrder(order);
           if (statusFilter === "rejected") return isAdminRejectedOrder(order);
