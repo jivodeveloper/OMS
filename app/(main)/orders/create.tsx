@@ -495,6 +495,7 @@ export function OrderEntryScreen({
     message: string;
     needsApproval: boolean;
     isUpdate?: boolean;
+    isDraft?: boolean;
   } | null>(null);
   const [dataLoading, setDataLoading] = useState(true);
   const [editOrderLoaded, setEditOrderLoaded] = useState(false);
@@ -925,6 +926,11 @@ export function OrderEntryScreen({
   };
 
   useEffect(() => {
+    // Wait until the auth user is available. AuthContext starts with user=null
+    // and sets the real user after its session check, so without this guard the
+    // effect fires twice (once with null, once with the user) and the screen
+    // loads the master data twice.
+    if (!user) return;
     const loadInitialData = async () => {
       try {
         setDataLoading(true);
@@ -1222,17 +1228,13 @@ export function OrderEntryScreen({
           priceListBasic: orderIsFoc ? FOC_PRICE_LIST_BASIC : Number(item.price_list_basic) || 0,
         };
       });
-      // Items that were never confirmed (no product picked) come back as editable
-      // rows so the user can finish them; fully-specified items stay confirmed.
-      const confirmedItems = items.filter((item) => item.itemCode);
-      const unconfirmedItems = items.filter((item) => !item.itemCode);
-      setOrderItems(confirmedItems);
-      setItemRows(
-        unconfirmedItems.map((item, idx) => ({
-          ...buildEditableRowFromItem(item),
-          id: Date.now() + idx,
-        })),
-      );
+      // Match the web (Add_Sales): show every saved draft item as a confirmed
+      // item, using the values the user actually entered — NOT as blank editable
+      // rows (which made the draft open with an empty "Confirm Item" form full of
+      // 0 defaults). Empty placeholder rows are already filtered out when the
+      // draft is saved. The user can add new items with the add-item button.
+      setOrderItems(items);
+      setItemRows([]);
     } catch (err) {
       console.log("Failed to load order for edit:", err);
       setError("Failed to load the order. Please check your connection and retry.");
@@ -2552,15 +2554,14 @@ export function OrderEntryScreen({
       const response = await orderService.saveDraft(payload, draftOrderId);
 
       if (response?.id || response?.order_number) {
-        handleClear();
-        Alert.alert("Draft saved", response.message || "Draft saved successfully", [
-          {
-            text: "View Drafts",
-            onPress: () =>
-              router.navigate({ pathname: "/(main)/orders/drafts" } as never),
-          },
-          { text: "OK" },
-        ]);
+        setOrderResult({
+          orderNumber: String(response.order_number || response.id || ""),
+          message: response.message || "Your draft has been saved successfully",
+          needsApproval: false,
+          isDraft: true,
+        });
+        setSuccessModal(true);
+        handleClear({ keepSuccessModal: true });
       } else {
         Alert.alert("Error", response?.message || "Failed to save draft");
       }
@@ -3375,7 +3376,13 @@ export function OrderEntryScreen({
             <Animated.View style={styles.modalBox}>
               {/* Gradient Header */}
               <LinearGradient
-                colors={orderResult?.needsApproval ? ["#F59E0B", "#D97706"] : ["#1E3A5F", "#2563EB"]}
+                colors={
+                  orderResult?.isDraft
+                    ? ["#FACC15", "#CA8A04"]
+                    : orderResult?.needsApproval
+                      ? ["#F59E0B", "#D97706"]
+                      : ["#1E3A5F", "#2563EB"]
+                }
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 1 }}
                 style={styles.modalHeader}
@@ -3387,25 +3394,35 @@ export function OrderEntryScreen({
                 {/* Icon badge */}
                 <View style={styles.modalIconBadge}>
                   <Ionicons
-                    name={orderResult?.needsApproval ? "time" : "checkmark-circle"}
+                    name={
+                      orderResult?.isDraft
+                        ? "document-text"
+                        : orderResult?.needsApproval
+                          ? "time"
+                          : "checkmark-circle"
+                    }
                     size={48}
                     color="#fff"
                   />
                 </View>
 
                 <Text style={styles.modalHeaderTitle}>
-                  {orderResult?.needsApproval
-                    ? "Pending Approval"
-                    : orderResult?.isUpdate
-                      ? "Order Updated!"
-                      : "Order Placed!"}
+                  {orderResult?.isDraft
+                    ? "Draft Saved!"
+                    : orderResult?.needsApproval
+                      ? "Pending Approval"
+                      : orderResult?.isUpdate
+                        ? "Order Updated!"
+                        : "Order Placed!"}
                 </Text>
                 <Text style={styles.modalHeaderSub}>
-                  {orderResult?.needsApproval
-                    ? "Your order is awaiting rate approval"
-                    : orderResult?.isUpdate
-                      ? "Your order has been updated successfully"
-                      : "Your order has been created successfully"}
+                  {orderResult?.isDraft
+                    ? "Your draft has been saved successfully"
+                    : orderResult?.needsApproval
+                      ? "Your order is awaiting rate approval"
+                      : orderResult?.isUpdate
+                        ? "Your order has been updated successfully"
+                        : "Your order has been created successfully"}
                 </Text>
               </LinearGradient>
 
@@ -3415,7 +3432,9 @@ export function OrderEntryScreen({
                   <View style={styles.modalOrderNumBox}>
                     <Ionicons name="receipt-outline" size={14} color={COLORS.textSecondary} />
                     <View style={{ marginLeft: 8 }}>
-                      <Text style={styles.modalOrderNumLabel}>Order Number</Text>
+                      <Text style={styles.modalOrderNumLabel}>
+                        {orderResult?.isDraft ? "Draft Number" : "Order Number"}
+                      </Text>
                       <Text style={styles.modalOrderNum}>{orderResult.orderNumber}</Text>
                     </View>
                   </View>
@@ -3429,17 +3448,33 @@ export function OrderEntryScreen({
                   onPress={() => {
                     setSuccessModal(false);
                     setOrderResult(null);
-                    router.back();
+                    if (orderResult?.isDraft) {
+                      router.navigate({ pathname: "/(main)/orders/drafts" } as never);
+                    } else {
+                      router.back();
+                    }
                   }}
                 >
                   <LinearGradient
-                    colors={orderResult?.needsApproval ? ["#F59E0B", "#D97706"] : ["#1E3A5F", "#2563EB"]}
+                    colors={
+                      orderResult?.isDraft
+                        ? ["#FACC15", "#CA8A04"]
+                        : orderResult?.needsApproval
+                          ? ["#F59E0B", "#D97706"]
+                          : ["#1E3A5F", "#2563EB"]
+                    }
                     start={{ x: 0, y: 0 }}
                     end={{ x: 1, y: 0 }}
                     style={styles.modalBtnGradient}
                   >
-                    <Ionicons name="arrow-back-outline" size={18} color="#fff" />
-                    <Text style={styles.modalBtnPrimaryText}>Go to Orders</Text>
+                    <Ionicons
+                      name={orderResult?.isDraft ? "documents-outline" : "arrow-back-outline"}
+                      size={18}
+                      color="#fff"
+                    />
+                    <Text style={styles.modalBtnPrimaryText}>
+                      {orderResult?.isDraft ? "View Drafts" : "Go to Orders"}
+                    </Text>
                   </LinearGradient>
                 </TouchableOpacity>
 

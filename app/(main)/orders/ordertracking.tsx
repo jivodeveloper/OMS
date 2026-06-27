@@ -66,6 +66,15 @@ const isCompletedOrder = (
     normalizeText(value).includes("complete"),
   );
 
+// Drafts are not part of the order flow yet, so they are excluded from the
+// Order Tracking list.
+const isDraftOrder = (
+  item: Pick<OrderItemList, "status" | "status_name" | "status_display">,
+) =>
+  [item.status_display, item.status_name, item.status].some(
+    (value) => normalizeText(value) === "draft",
+  );
+
 const isSettledOrder = (
   item: Pick<OrderItemList, "status" | "status_name" | "status_display">,
 ) => {
@@ -197,7 +206,9 @@ export default function OrderTrackingScreen() {
           : await orderService.getOrderbyuserid();
 
       console.log("datavalue" + JSON.stringify(data));
-      setOrders(Array.isArray(data) ? data : []);
+      // Hide drafts from Order Tracking — they aren't in the order flow yet.
+      const list = Array.isArray(data) ? data.filter((o) => !isDraftOrder(o)) : [];
+      setOrders(list);
     } catch (error) {
       console.log("Error loading orders:", error);
       setError("Failed to load orders. Please try again.");

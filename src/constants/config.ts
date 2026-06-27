@@ -5,5 +5,5 @@ export const API_CONFIG={
 
 export const APP_CONFIG={
      APP_NAME: 'Order Management',
-     VERSION: '1.0.0',
+     VERSION: '1.0.1',
 }
