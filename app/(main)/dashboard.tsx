@@ -760,11 +760,6 @@ export default function DashboardScreen() {
                   </View>
                   {pendingWith.length > 0 && (
                     <View style={styles.adminOrderPopupPendingRow}>
-                      <Ionicons
-                        name="person-circle-outline"
-                        size={13}
-                        color={COLORS.primary}
-                      />
                       <Text
                         style={styles.adminOrderPopupPendingText}
                         numberOfLines={2}
