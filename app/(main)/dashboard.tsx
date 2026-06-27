@@ -704,7 +704,28 @@ export default function DashboardScreen() {
               style={styles.adminOrdersModalScroll}
               showsVerticalScrollIndicator
             >
-              {ordersModalOrders.map((order) => (
+              {ordersModalOrders.map((order) => {
+                // Whom the order is currently lying with, per its stage:
+                // rate approval -> the pending approver(s); auditor -> the
+                // auditor(s); billing -> the billing user(s). Computed by the
+                // backend (`pending_with`); fall back to deriving the pending
+                // rate approvers locally if that field is absent.
+                const pendingWith: string[] = Array.isArray(
+                  (order as any).pending_with,
+                )
+                  ? (order as any).pending_with.filter(Boolean)
+                  : (Array.isArray((order as any).rate_approvals)
+                      ? (order as any).rate_approvals
+                      : []
+                    )
+                      .filter(
+                        (a: any) =>
+                          String(a?.status).toUpperCase() === "PENDING",
+                      )
+                      .map((a: any) => a?.approver_name)
+                      .filter(Boolean);
+
+                return (
                 <View style={styles.adminOrderPopupCard} key={order.id}>
                   <View style={styles.adminOrderPopupTop}>
                     <View style={styles.adminOrderPopupTitleWrap}>
@@ -727,6 +748,21 @@ export default function DashboardScreen() {
                       {formatOrderDate(order.created_at)}
                     </Text>
                   </View>
+                  {pendingWith.length > 0 && (
+                    <View style={styles.adminOrderPopupPendingRow}>
+                      <Ionicons
+                        name="person-circle-outline"
+                        size={13}
+                        color={COLORS.primary}
+                      />
+                      <Text
+                        style={styles.adminOrderPopupPendingText}
+                        numberOfLines={2}
+                      >
+                        Pending with: {pendingWith.join(", ")}
+                      </Text>
+                    </View>
+                  )}
                   {(() => {
                     const sap = ordersModalSapInfo[order.id];
                     const docEntry = sap?.sap_doc_entry ?? null;
@@ -770,7 +806,8 @@ export default function DashboardScreen() {
                     <Text style={styles.adminOrderPopupDetailsText}>View Details</Text>
                   </TouchableOpacity>
                 </View>
-              ))}
+                );
+              })}
             </ScrollView>
           ) : (
             <View style={styles.adminOrdersModalEmpty}>
@@ -2696,6 +2733,18 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: "700",
     color: COLORS.textMuted,
+  },
+  adminOrderPopupPendingRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    marginTop: 6,
+  },
+  adminOrderPopupPendingText: {
+    flexShrink: 1,
+    fontSize: 11,
+    fontWeight: "700",
+    color: COLORS.primary,
   },
   adminOrderPopupSapWrap: {
     flexDirection: "row",
