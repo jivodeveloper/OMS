@@ -296,7 +296,13 @@ export default function DailyReportScreen() {
         }),
       );
 
-      const nextOrders = mergeOrdersById(ordersByUser as OrderItemList[][]);
+      const nextOrders = mergeOrdersById(ordersByUser as OrderItemList[][]).filter(
+        // Drafts aren't part of the order flow — keep them out of the report.
+        (order) =>
+          ![order.status_display, order.status_name, order.status].some(
+            (value) => String(value || "").trim().toLowerCase() === "draft",
+          ),
+      );
       setOrders(await enrichDailyOrders(nextOrders));
       setUsers(allUsers);
       setMainGroups(Array.isArray(groupsResult) ? groupsResult : []);

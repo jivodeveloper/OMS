@@ -3486,16 +3486,18 @@ export function OrderEntryScreen({
                   </LinearGradient>
                 </TouchableOpacity>
 
-                <TouchableOpacity
-                  style={styles.modalBtnSecondary}
-                  onPress={() => {
-                    setSuccessModal(false);
-                    setOrderResult(null);
-                  }}
-                >
-                  <Ionicons name="add-circle-outline" size={18} color={COLORS.primary} />
-                  <Text style={styles.modalBtnSecondaryText}>Create New Order</Text>
-                </TouchableOpacity>
+                {!orderResult?.isDraft && (
+                  <TouchableOpacity
+                    style={styles.modalBtnSecondary}
+                    onPress={() => {
+                      setSuccessModal(false);
+                      setOrderResult(null);
+                    }}
+                  >
+                    <Ionicons name="add-circle-outline" size={18} color={COLORS.primary} />
+                    <Text style={styles.modalBtnSecondaryText}>Create New Order</Text>
+                  </TouchableOpacity>
+                )}
               </View>
             </Animated.View>
           </View>
