@@ -76,6 +76,30 @@ const getTimeoutForEndpoint = (endpoint: string): number => {
   return DEFAULT_REQUEST_TIMEOUT_MS;
 };
 
+// Turn a DRF/Django error payload into a readable, human-friendly message.
+// Handles strings, arrays of strings, { detail }, { message }, { errors } and
+// field-keyed dicts like { items: ["...", "..."], qty: ["..."] }.
+const extractErrorMessage = (data: any): string | null => {
+  if (data == null) return null;
+  if (typeof data === 'string') return data.trim() || null;
+  if (Array.isArray(data)) {
+    const parts = data.map(extractErrorMessage).filter(Boolean) as string[];
+    return parts.length ? parts.join('\n') : null;
+  }
+  if (typeof data === 'object') {
+    if (typeof data.message === 'string' && data.message.trim()) return data.message.trim();
+    if (typeof data.detail === 'string' && data.detail.trim()) return data.detail.trim();
+    const source = data.errors ?? data;
+    const parts: string[] = [];
+    for (const value of Object.values(source)) {
+      const msg = extractErrorMessage(value);
+      if (msg) parts.push(msg);
+    }
+    return parts.length ? parts.join('\n') : null;
+  }
+  return null;
+};
+
 const parseResponse = async (response: Response) => {
   const raw = await response.text();
   let data: any = null;
@@ -118,7 +142,10 @@ const requestWithFallback = async (
       console.log('API Error:', response.status, data || raw);
       return {
         success: false,
-        message: (data && data.message) || `Request failed (${response.status})`,
+        message:
+          (data && data.message) ||
+          extractErrorMessage(data) ||
+          `Request failed (${response.status})`,
         status: response.status,
         errors: data?.errors,
         data,

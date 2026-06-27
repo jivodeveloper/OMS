@@ -1228,13 +1228,21 @@ export function OrderEntryScreen({
           priceListBasic: orderIsFoc ? FOC_PRICE_LIST_BASIC : Number(item.price_list_basic) || 0,
         };
       });
-      // Match the web (Add_Sales): show every saved draft item as a confirmed
-      // item, using the values the user actually entered — NOT as blank editable
-      // rows (which made the draft open with an empty "Confirm Item" form full of
-      // 0 defaults). Empty placeholder rows are already filtered out when the
-      // draft is saved. The user can add new items with the add-item button.
-      setOrderItems(items);
-      setItemRows([]);
+      // A draft can contain incomplete items (no product picked yet). Mirror the
+      // web (Add_Sales), where every item is an editable row in edit mode:
+      //  - fully-specified items (have an item_code) stay as confirmed cards;
+      //  - incomplete items come back as editable rows PRE-FILLED with whatever
+      //    the user already entered, so they can be finished.
+      // The values come straight from the saved item, so the rows are not blank.
+      const confirmedItems = items.filter((item) => item.itemCode);
+      const unconfirmedItems = items.filter((item) => !item.itemCode);
+      setOrderItems(confirmedItems);
+      setItemRows(
+        unconfirmedItems.map((item, idx) => ({
+          ...buildEditableRowFromItem(item),
+          id: Date.now() + idx,
+        })),
+      );
     } catch (err) {
       console.log("Failed to load order for edit:", err);
       setError("Failed to load the order. Please check your connection and retry.");
