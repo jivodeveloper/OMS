@@ -109,21 +109,27 @@ type FixedLabelTextInputProps = Omit<
   "label"
 > & {
   label: string;
+  compact?: boolean;
 };
 
 function FixedLabelTextInput({
   label,
   style,
+  outlineStyle,
+  compact = false,
   ...props
 }: FixedLabelTextInputProps) {
   return (
-    <View style={styles.fixedInputWrap}>
-      <Text style={styles.fixedInputLabel}>{label}</Text>
+    <View style={[styles.fixedInputWrap, compact && styles.compactInputWrap]}>
+      <Text style={[styles.fixedInputLabel, compact && styles.compactInputLabel]}>
+        {label}
+      </Text>
       <TextInput
         {...props}
         label=""
         placeholder=""
-        style={[styles.fixedInput, style]}
+        style={[styles.fixedInput, compact && styles.compactInput, style]}
+        outlineStyle={[styles.fixedInputOutline, outlineStyle]}
       />
     </View>
   );
@@ -513,6 +519,8 @@ export function OrderEntryScreen({
   const [comment, setComment] = useState("");
   const [delivery, setDeliveryDate] = useState(getDefaultDeliveryDate());
   const [showPicker, setShowPicker] = useState(false);
+  const [showAdditionalOrderDetails, setShowAdditionalOrderDetails] =
+    useState(false);
 
   // ── Address dropdowns ─────────────────────────────────────────────────────
   const [billToAddresses, setBillToAddresses] = useState<
@@ -1353,7 +1361,10 @@ export function OrderEntryScreen({
       brands: uniqueBrands.sort().map((b) => ({ label: b, value: b })),
       varieties: [],
       types: [],
-      products: [],
+      products: filtered.map((p: any) => ({
+        label: `${p.item_name} (₹${p.basic_rate})`,
+        value: p.item_code,
+      })),
       schemes: [],
       pcs: "",
       salPackUnit: "",
@@ -1379,78 +1390,6 @@ export function OrderEntryScreen({
       handleRowCategoryChange(emptyCategoryRow.id, onlyCategory);
     }
   }, [categories, itemRows]);
-
-  const handleRowBrandChange = (rowId: number, brand: string, row: ItemRow) => {
-    const filtered = partyProducts.filter(
-      (p: any) => p.category === row.selectedCategory && p.brand === brand,
-    );
-    const uniqueVarieties = [
-      ...new Set<string>(filtered.map((p: any) => p.variety).filter(Boolean)),
-    ];
-    updateRow(rowId, {
-      selectedBrand: brand,
-      selectedVariety: null,
-      selectedType: null,
-      selectedProduct: null,
-      selectedScheme: null,
-      schemeSelections: [],
-      varieties: uniqueVarieties.sort().map((v) => ({ label: v, value: v })),
-      types: [],
-      products: [],
-      schemes: [],
-    });
-  };
-
-  const handleRowVarietyChange = (
-    rowId: number,
-    variety: string,
-    row: ItemRow,
-  ) => {
-    const filtered = partyProducts.filter(
-      (p: any) =>
-        p.category === row.selectedCategory &&
-        p.brand === row.selectedBrand &&
-        p.variety === variety,
-    );
-    const typesSet = new Set<string>();
-    filtered.forEach((p: any) => typesSet.add(extractType(p.item_name)));
-    const sortedTypes = [...typesSet].sort((a, b) => {
-      if (a === "Others") return 1;
-      if (b === "Others") return -1;
-      return parseFloat(a) - parseFloat(b);
-    });
-    updateRow(rowId, {
-      selectedVariety: variety,
-      selectedType: null,
-      selectedProduct: null,
-      selectedScheme: null,
-      schemeSelections: [],
-      types: sortedTypes.map((t) => ({ label: t, value: t })),
-      products: [],
-      schemes: [],
-    });
-  };
-
-  const handleRowTypeChange = (rowId: number, type: string, row: ItemRow) => {
-    const filtered = partyProducts.filter(
-      (p: any) =>
-        p.category === row.selectedCategory &&
-        p.brand === row.selectedBrand &&
-        p.variety === row.selectedVariety &&
-        extractType(p.item_name) === type,
-    );
-    updateRow(rowId, {
-      selectedType: type,
-      selectedProduct: null,
-      selectedScheme: null,
-      schemeSelections: [],
-      products: filtered.map((p: any) => ({
-        label: `${p.item_name} (₹${p.basic_rate})`,
-        value: p.item_code,
-      })),
-      schemes: [],
-    });
-  };
 
   const handleRowProductChange = async (rowId: number, productId: string) => {
     const product = partyProducts.find(
@@ -1480,6 +1419,9 @@ export function OrderEntryScreen({
 
       const focPriceListBasic = String(FOC_PRICE_LIST_BASIC);
       updateRow(rowId, {
+        selectedBrand: product.brand || null,
+        selectedVariety: product.variety || null,
+        selectedType: extractType(product.item_name),
         selectedProduct: productId,
         selectedScheme: shouldAllowSchemes ? comboSchemeId : null,
         schemeSelections: shouldAllowSchemes
@@ -2774,73 +2716,122 @@ export function OrderEntryScreen({
                 mode="modal"
                 leftIcon={null}
                 icon="storefront-outline"
+                floatingLabel
               />
             </View>
 
-            <View style={styles.row}>
-              <View style={styles.halfField}>
-                <Dropdown
-                  label="Dispatch From *"
-                  data={branches}
-                  value={branch}
-                  onChange={setBranch}
-                  placeholder="Select"
-                  mode="modal"
-                  leftIcon={null}
-                  icon="business-outline"
+            <View style={styles.additionalDetailsBox}>
+              <TouchableOpacity
+                style={[
+                  styles.additionalDetailsHeader,
+                  showAdditionalOrderDetails &&
+                    styles.additionalDetailsHeaderExpanded,
+                ]}
+                activeOpacity={0.75}
+                onPress={() =>
+                  setShowAdditionalOrderDetails((isVisible) => !isVisible)
+                }
+                accessibilityRole="button"
+                accessibilityState={{ expanded: showAdditionalOrderDetails }}
+                accessibilityLabel="Dispatch and address details"
+              >
+                <View style={styles.additionalDetailsIcon}>
+                  <Ionicons
+                    name="location-outline"
+                    size={18}
+                    color={COLORS.primary}
+                  />
+                </View>
+                <View style={styles.additionalDetailsHeading}>
+                  <Text style={styles.additionalDetailsTitle}>
+                    Dispatch &amp; Addresses
+                  </Text>
+                  <Text style={styles.additionalDetailsHint}>
+                    {showAdditionalOrderDetails ? "Tap to hide" : "Tap to view"}
+                  </Text>
+                </View>
+                <Ionicons
+                  name={
+                    showAdditionalOrderDetails ? "chevron-up" : "chevron-down"
+                  }
+                  size={20}
+                  color={COLORS.primary}
                 />
-              </View>
+              </TouchableOpacity>
 
-              <View style={styles.halfField}>
-                <Dropdown
-                  label="Company *"
-                  data={companies}
-                  value={company}
-                  onChange={setCompany}
-                  placeholder="Select"
-                  mode="modal"
-                  leftIcon={null}
-                  icon="briefcase-outline"
-                />
-              </View>
-            </View>
+              {showAdditionalOrderDetails && (
+                <View style={styles.additionalDetailsContent}>
+                  <View style={styles.row}>
+                    <View style={styles.halfField}>
+                      <Dropdown
+                        label="Dispatch From *"
+                        data={branches}
+                        value={branch}
+                        onChange={setBranch}
+                        placeholder="Select"
+                        mode="modal"
+                        leftIcon={null}
+                        icon="business-outline"
+                        floatingLabel
+                      />
+                    </View>
 
-            <View style={styles.field}>
-              <Dropdown
-                label="Bill To Address *"
-                data={billToAddresses}
-                value={selectedBillTo}
-                onChange={(value) => {
-                  setSelectedBillTo(value);
-                  setIsAddressDropdownOpen(false);
-                }}
-                placeholder="Select Bill To"
-                mode="modal"
-                onFocus={() => setIsAddressDropdownOpen(true)}
-                onBlur={() => setIsAddressDropdownOpen(false)}
-                inverted={false}
-                autoScroll={false}
-                dropdownPosition="bottom"
-              />
-            </View>
+                    <View style={styles.halfField}>
+                      <Dropdown
+                        label="Company *"
+                        data={companies}
+                        value={company}
+                        onChange={setCompany}
+                        placeholder="Select"
+                        mode="modal"
+                        leftIcon={null}
+                        icon="briefcase-outline"
+                        floatingLabel
+                      />
+                    </View>
+                  </View>
 
-            <View style={styles.field}>
-              <Dropdown
-                label="Ship To Address *"
-                data={shipToAddresses}
-                value={selectedShipTo}
-                onChange={(value) => {
-                  setSelectedShipTo(value);
-                  setIsAddressDropdownOpen(false);
-                }}
-                placeholder="Select Ship To"
-                mode="modal"
-                onFocus={() => setIsAddressDropdownOpen(true)}
-                onBlur={() => setIsAddressDropdownOpen(false)}
-                inverted={false}
-                autoScroll={false}
-                dropdownPosition="bottom"
-              />
+                  <View style={styles.field}>
+                    <Dropdown
+                      label="Bill To Address *"
+                      data={billToAddresses}
+                      value={selectedBillTo}
+                      onChange={(value) => {
+                        setSelectedBillTo(value);
+                        setIsAddressDropdownOpen(false);
+                      }}
+                      placeholder="Select Bill To"
+                      mode="modal"
+                      onFocus={() => setIsAddressDropdownOpen(true)}
+                      onBlur={() => setIsAddressDropdownOpen(false)}
+                      inverted={false}
+                      autoScroll={false}
+                      dropdownPosition="bottom"
+                      floatingLabel
+                    />
+                  </View>
+
+                  <View style={styles.additionalDetailsLastField}>
+                    <Dropdown
+                      label="Ship To Address *"
+                      data={shipToAddresses}
+                      value={selectedShipTo}
+                      onChange={(value) => {
+                        setSelectedShipTo(value);
+                        setIsAddressDropdownOpen(false);
+                      }}
+                      placeholder="Select Ship To"
+                      mode="modal"
+                      onFocus={() => setIsAddressDropdownOpen(true)}
+                      onBlur={() => setIsAddressDropdownOpen(false)}
+                      inverted={false}
+                      autoScroll={false}
+                      dropdownPosition="bottom"
+                      floatingLabel
+                    />
+                  </View>
+                </View>
+              )}
             </View>
 
             {shouldShowPoNumber && (
@@ -2938,18 +2929,14 @@ export function OrderEntryScreen({
             <View style={styles.cardHeader}>
               <Ionicons name="cube" size={20} color={COLORS.primary} />
               <Text style={styles.cardTitle}>Items</Text>
-              <TouchableOpacity style={styles.addBtn} onPress={addItem}>
-                <Ionicons name="add" size={18} color={COLORS.textLight} />
-                <Text style={styles.addBtnText}>New Item</Text>
-              </TouchableOpacity>
             </View>
 
             {itemRows.length === 0 ? (
               <View style={styles.emptyState}>
-                <Ionicons name="cube-outline" size={48} color={COLORS.primary} />
+                <Ionicons name="cube-outline" size={38} color={COLORS.primary} />
                 <Text style={styles.emptyText}>No items added</Text>
                 <Text style={styles.emptySubtext}>
-                  {'Tap "New Item" to add products'}
+                  Start by adding your first product
                 </Text>
               </View>
             ) : (
@@ -2977,57 +2964,11 @@ export function OrderEntryScreen({
                       mode="modal"
                       leftIcon={null}
                       icon="grid-outline"
+                      floatingLabel
                     />
                   </View>
 
-                  {/* Brand + Sub Group */}
-                  <View style={styles.row}>
-                    <View style={styles.halfField}>
-                      <Dropdown
-                        label="Brand"
-                        data={row.brands}
-                        value={row.selectedBrand}
-                        onChange={(val) => handleRowBrandChange(row.id, val, row)}
-                        placeholder="Select Brand"
-                        mode="modal"
-                        leftIcon={null}
-                        icon="pricetag-outline"
-                        disabled={!row.selectedCategory}
-                      />
-                    </View>
-                    <View style={styles.halfField}>
-                      <Dropdown
-                        label="Sub Group"
-                        data={row.varieties}
-                        value={row.selectedVariety}
-                        onChange={(val) =>
-                          handleRowVarietyChange(row.id, val, row)
-                        }
-                        placeholder="Select Sub Group"
-                        mode="modal"
-                        leftIcon={null}
-                        icon="layers-outline"
-                        disabled={!row.selectedBrand}
-                      />
-                    </View>
-                  </View>
-
-                  {/* Type */}
-                  <View style={styles.field}>
-                    <Dropdown
-                      label="Type"
-                      data={row.types}
-                      value={row.selectedType}
-                      onChange={(val) => handleRowTypeChange(row.id, val, row)}
-                      placeholder="Select Type"
-                      mode="modal"
-                      leftIcon={null}
-                      icon="grid-outline"
-                      disabled={!row.selectedVariety}
-                    />
-                  </View>
-
-                  {/* Item */}
+                  {/* Item: choosing it auto-fills brand, subgroup and type. */}
                   <View style={styles.field}>
                     <Dropdown
                       label="Item *"
@@ -3038,9 +2979,158 @@ export function OrderEntryScreen({
                       mode="modal"
                       leftIcon={null}
                       icon="cube-outline"
-                      disabled={!row.selectedType}
+                      disabled={!row.selectedCategory}
                       searchable={true}
+                      floatingLabel
                     />
+                  </View>
+
+                  {row.selectedProduct && (
+                    <View style={styles.itemMetaRow}>
+                      <View style={styles.thirdField}>
+                        <FixedLabelTextInput
+                          label="Brand"
+                          value={row.selectedBrand || "—"}
+                          editable={false}
+                          textColor={COLORS.black}
+                          mode="outlined"
+                          style={styles.input}
+                          outlineColor={COLORS.border}
+                          compact
+                        />
+                      </View>
+                      <View style={styles.thirdField}>
+                        <FixedLabelTextInput
+                          label="Sub Group"
+                          value={row.selectedVariety || "—"}
+                          editable={false}
+                          textColor={COLORS.black}
+                          mode="outlined"
+                          style={styles.input}
+                          outlineColor={COLORS.border}
+                          compact
+                        />
+                      </View>
+                      <View style={styles.thirdField}>
+                        <FixedLabelTextInput
+                          label="Type"
+                          value={row.selectedType || "—"}
+                          editable={false}
+                          textColor={COLORS.black}
+                          mode="outlined"
+                          style={styles.input}
+                          outlineColor={COLORS.border}
+                          compact
+                        />
+                      </View>
+                    </View>
+                  )}
+
+                  {/* Boxes + Basic Price */}
+                  <View style={[styles.row, styles.itemFieldRow]}>
+                    <View style={styles.halfField}>
+                      <FixedLabelTextInput
+                        label="Boxes *"
+                        textColor={COLORS.black}
+                        value={row.qty}
+                        onChangeText={(val) => handleRowQtyChange(row.id, val)}
+                        mode="outlined"
+                        keyboardType="numeric"
+                        style={styles.input}
+                        outlineColor={COLORS.border}
+                        activeOutlineColor={COLORS.primary}
+                      />
+                    </View>
+                    <View style={styles.halfField}>
+                      <FixedLabelTextInput
+                        label="Basic Price"
+                        textColor={COLORS.black}
+                        value={row.basicPrice}
+                        onChangeText={(val) =>
+                          handleRowBasicPriceChange(row.id, val)
+                        }
+                        mode="outlined"
+                        keyboardType="numeric"
+                        style={styles.input}
+                        outlineColor={COLORS.border}
+                        activeOutlineColor={COLORS.primary}
+                      />
+                    </View>
+                  </View>
+
+                  {/* Tax + Price List */}
+                  <View style={[styles.row, styles.itemFieldRow]}>
+                    <View style={styles.halfField}>
+                      <FixedLabelTextInput
+                        label="Tax %"
+                        value={row.tax}
+                        textColor={COLORS.black}
+                        editable={false}
+                        mode="outlined"
+                        style={styles.input}
+                        outlineColor={COLORS.border}
+                        activeOutlineColor={COLORS.primary}
+                      />
+                    </View>
+                    <View style={styles.halfField}>
+                      <FixedLabelTextInput
+                        label="Price List (Basic)"
+                        textColor={COLORS.black}
+                        value={row.priceListBasic}
+                        editable={false}
+                        mode="outlined"
+                        keyboardType="numeric"
+                        style={styles.input}
+                        outlineColor={COLORS.border}
+                        activeOutlineColor={COLORS.primary}
+                      />
+                    </View>
+                  </View>
+
+                  {/* Pcs/Case + Total Ltrs + Total Pcs */}
+                  <View style={[styles.row, styles.itemFieldRow]}>
+                    <View style={styles.thirdField}>
+                      <FixedLabelTextInput
+                        label="Pcs/Case"
+                        textColor={COLORS.black}
+                        value={row.pcs}
+                        editable={false}
+                        mode="outlined"
+                        keyboardType="numeric"
+                        style={styles.input}
+                        outlineColor={COLORS.border}
+                        activeOutlineColor={COLORS.primary}
+                      />
+                    </View>
+                    <View style={styles.thirdField}>
+                      <FixedLabelTextInput
+                        label="Total Ltrs"
+                        textColor={COLORS.black}
+                        value={row.ltrs}
+                        editable={false}
+                        mode="outlined"
+                        keyboardType="numeric"
+                        style={styles.input}
+                        outlineColor={COLORS.border}
+                        activeOutlineColor={COLORS.primary}
+                      />
+                    </View>
+                    <View style={styles.thirdField}>
+                      <FixedLabelTextInput
+                        label="Total Pcs"
+                        value={row.boxes}
+                        textColor={COLORS.black}
+                        onChangeText={(val) =>
+                          handleRowTotalPcsChange(row.id, val)
+                        }
+                        editable={!!row.selectedProduct}
+                        mode="outlined"
+                        keyboardType="numeric"
+                        style={styles.input}
+                        outlineColor={COLORS.border}
+                        activeOutlineColor={COLORS.primary}
+                      />
+                    </View>
                   </View>
 
                   {shouldAllowSchemes && row.selectedProduct && (
@@ -3053,17 +3143,12 @@ export function OrderEntryScreen({
                         <TouchableOpacity
                           activeOpacity={0.85}
                           onPress={() => handleRowIsSchemeToggle(row.id, !row.isScheme)}
-                          style={[
-                            styles.schemeSwitch,
-                            row.isScheme && styles.schemeSwitchOn,
-                          ]}
+                          style={[styles.schemeSwitch, row.isScheme && styles.schemeSwitchOn]}
                         >
-                          <View
-                            style={[
-                              styles.schemeSwitchThumb,
-                              row.isScheme && styles.schemeSwitchThumbOn,
-                            ]}
-                          />
+                          <View style={[
+                            styles.schemeSwitchThumb,
+                            row.isScheme && styles.schemeSwitchThumbOn,
+                          ]} />
                         </TouchableOpacity>
                       </View>
 
@@ -3080,6 +3165,8 @@ export function OrderEntryScreen({
                               leftIcon={null}
                               icon="gift-outline"
                               disabled={!row.isScheme}
+                              floatingLabel
+                              noBottomSpacing
                             />
                           </View>
                           <View style={styles.schemeQtyField}>
@@ -3093,7 +3180,7 @@ export function OrderEntryScreen({
                               style={styles.input}
                               outlineColor={COLORS.border}
                               activeOutlineColor={COLORS.primary}
-                              editable={true}
+                              editable
                             />
                           </View>
                           {getRowSchemeSelections(row).length > 1 ? (
@@ -3118,124 +3205,6 @@ export function OrderEntryScreen({
                       )}
                     </View>
                   )}
-
-                  {/* PCS per case / Ltrs / Total PCS */}
-                  <View style={styles.row}>
-                    <View style={styles.thirdField}>
-                      <FixedLabelTextInput
-                        label="Pcs/Case"
-                        textColor={COLORS.black}
-                        value={row.pcs}
-                        editable={false}
-                        mode="outlined"
-                        keyboardType="numeric"
-                        style={styles.input}
-                        outlineColor={COLORS.border}
-                        activeOutlineColor={COLORS.primary}
-                      />
-                    </View>
-
-                    <View style={styles.thirdField}>
-                      <FixedLabelTextInput
-                        label="Total Ltrs"
-                        textColor={COLORS.black}
-                        value={row.ltrs}
-                        editable={false}
-                        mode="outlined"
-                        keyboardType="numeric"
-                        style={styles.input}
-                        outlineColor={COLORS.border}
-                        activeOutlineColor={COLORS.primary}
-                      />
-                    </View>
-
-                    <View style={styles.thirdField}>
-                      <FixedLabelTextInput
-                        label="Total Pcs"
-                        value={row.boxes}
-                        textColor={COLORS.black}
-                        onChangeText={(val) =>
-                          handleRowTotalPcsChange(row.id, val)
-                        }
-                        editable={!!row.selectedProduct}
-                        mode="outlined"
-                        keyboardType="numeric"
-                        style={styles.input}
-                        outlineColor={COLORS.border}
-                        activeOutlineColor={COLORS.primary}
-                      />
-                    </View>
-
-                  </View>
-
-                  {/* QTY + TAX */}
-                  <View style={styles.row}>
-                    <View style={styles.thirdField}>
-                      <FixedLabelTextInput
-                        label="Boxes"
-                        textColor={COLORS.black}
-                        value={row.qty}
-                        onChangeText={(val) =>
-                          handleRowQtyChange(row.id, val)
-                        }
-                        mode="outlined"
-                        keyboardType="numeric"
-                        style={styles.input}
-                        outlineColor={COLORS.border}
-                        activeOutlineColor={COLORS.primary}
-                      />
-                    </View>
-                    <View style={styles.thirdField}>
-                      <FixedLabelTextInput
-                        label="Tax %"
-                        value={row.tax}
-                        textColor={COLORS.black}
-                        editable={false}
-                        mode="outlined"
-                        style={styles.input}
-                        outlineColor={COLORS.border}
-                        activeOutlineColor={COLORS.primary}
-                      />
-                    </View>
-                  </View>
-
-                  {/* {!!getRowLtrsBreakdown(row) && (
-                  <Text style={styles.calcBreakdownText}>
-                    {getRowLtrsBreakdown(row)}
-                  </Text>
-                )} */}
-
-                  {/* Base Price + Basic Price */}
-                  <View style={styles.row}>
-                    <View style={styles.thirdField}>
-                      <FixedLabelTextInput
-                        label="Price List (Basic)"
-                        textColor={COLORS.black}
-                        value={row.priceListBasic}
-                        editable={false}
-                        mode="outlined"
-                        keyboardType="numeric"
-                        style={styles.input}
-                        outlineColor={COLORS.border}
-                        activeOutlineColor={COLORS.primary}
-                      />
-                    </View>
-                    <View style={styles.thirdField}>
-                      <FixedLabelTextInput
-                        label="Basic Price"
-                        textColor={COLORS.black}
-                        value={row.basicPrice}
-                        onChangeText={(val) =>
-                          handleRowBasicPriceChange(row.id, val)
-                        }
-                        mode="outlined"
-                        keyboardType="numeric"
-                        style={styles.input}
-                        outlineColor={COLORS.border}
-                        activeOutlineColor={COLORS.primary}
-                      />
-                    </View>
-                  </View>
 
                   {/* Item subtotal */}
                   {!!(row.itemTotal && parseFloat(row.itemTotal) > 0) && (
@@ -3262,6 +3231,31 @@ export function OrderEntryScreen({
                 </View>
               ))
             )}
+
+            <TouchableOpacity
+              style={styles.bottomAddItemButton}
+              onPress={addItem}
+              activeOpacity={0.82}
+              accessibilityRole="button"
+              accessibilityLabel={
+                itemRows.length > 0 ? "Add another item" : "Add first item"
+              }
+            >
+              <View style={styles.bottomAddItemIcon}>
+                <Ionicons name="add" size={20} color={COLORS.primary} />
+              </View>
+              <View style={styles.bottomAddItemCopy}>
+                <Text style={styles.bottomAddItemTitle}>
+                  {itemRows.length > 0 ? "Add Another Item" : "Add First Item"}
+                </Text>
+                <Text style={styles.bottomAddItemHint}>
+                  {itemRows.length > 0
+                    ? "Finish the current item, then continue"
+                    : "Choose a category and product"}
+                </Text>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color={COLORS.primary} />
+            </TouchableOpacity>
           </Surface>
 
           {/* ── Confirmed Order Items ──────────────────────────────────────── */}
@@ -3686,11 +3680,56 @@ const styles = StyleSheet.create({
   row: { flexDirection: "row", gap: SPACING.sm },
   halfField: { flex: 1 },
   thirdField: { flex: 1 },
-  schemeRow: {
+  additionalDetailsBox: {
+    borderWidth: 1,
+    borderColor: COLORS.borderLight,
+    borderRadius: RADIUS.md,
+    backgroundColor: COLORS.inputBackground,
+    marginBottom: SPACING.sm,
+    overflow: "hidden",
+  },
+  additionalDetailsHeader: {
+    minHeight: 58,
     flexDirection: "row",
     alignItems: "center",
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.sm,
+  },
+  additionalDetailsHeaderExpanded: {
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.borderLight,
+  },
+  additionalDetailsIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: COLORS.primaryLighter,
+    marginRight: SPACING.sm,
+  },
+  additionalDetailsHeading: { flex: 1 },
+  additionalDetailsTitle: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: COLORS.text,
+  },
+  additionalDetailsHint: {
+    marginTop: 2,
+    fontSize: 11,
+    color: COLORS.textSecondary,
+  },
+  additionalDetailsContent: {
+    padding: SPACING.sm,
+    paddingBottom: 0,
+    backgroundColor: COLORS.surface,
+  },
+  additionalDetailsLastField: { marginBottom: SPACING.sm },
+  schemeRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
     gap: 8,
-    marginBottom: 8,
+    marginBottom: SPACING.sm,
   },
   schemeBox: {
     backgroundColor: COLORS.primaryLighter,
@@ -3746,12 +3785,13 @@ const styles = StyleSheet.create({
   schemeSwitchThumbOn: {
     alignSelf: "flex-end",
   },
-  schemeDropdownField: { flex: 2 },
-  schemeQtyField: { flex: 1 },
+  schemeDropdownField: { flex: 2, minWidth: 0 },
+  schemeQtyField: { flex: 1, minWidth: 0 },
   schemeRemoveBtn: {
-    width: 38,
-    height: 38,
-    borderRadius: RADIUS.sm,
+    width: 44,
+    height: 56,
+    marginTop: 8,
+    borderRadius: RADIUS.md,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: COLORS.surface,
@@ -3789,14 +3829,32 @@ const styles = StyleSheet.create({
     zIndex: 1,
     backgroundColor: COLORS.surface,
     paddingHorizontal: 4,
-    fontSize: 11,
+    fontSize: 12,
     color: COLORS.textSecondary,
-    fontWeight: "500",
+    fontWeight: "600",
   },
   fixedInput: {
     backgroundColor: COLORS.surface,
     color: COLORS.black,
-    height: 50,
+    height: 56,
+    fontSize: 15,
+    fontWeight: "500",
+  },
+  fixedInputOutline: {
+    borderRadius: RADIUS.md,
+    borderWidth: 1.5,
+  },
+  compactInputWrap: {
+    paddingTop: 6,
+  },
+  compactInputLabel: {
+    left: 10,
+    fontSize: 10,
+  },
+  compactInput: {
+    height: 46,
+    fontSize: 13,
+    fontWeight: "500",
   },
   commentInput: { minHeight: 80 },
   addBtn: {
@@ -3809,7 +3867,11 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   addBtnText: { color: COLORS.textLight, fontSize: 12, fontWeight: "600" },
-  emptyState: { alignItems: "center", paddingVertical: SPACING.xl },
+  emptyState: {
+    alignItems: "center",
+    paddingTop: SPACING.md,
+    paddingBottom: SPACING.sm,
+  },
   emptyText: {
     fontSize: 16,
     color: COLORS.textSecondary,
@@ -3831,6 +3893,14 @@ const styles = StyleSheet.create({
     marginBottom: SPACING.sm,
   },
   itemNumber: { fontSize: 14, fontWeight: "600", color: COLORS.primary },
+  itemMetaRow: {
+    flexDirection: "row",
+    gap: SPACING.xs,
+    marginBottom: SPACING.md,
+  },
+  itemFieldRow: {
+    marginBottom: SPACING.sm,
+  },
   addButton: {
     flexDirection: "row",
     alignItems: "center",
@@ -3843,6 +3913,37 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   addButtonText: { color: COLORS.textLight, fontSize: 12, fontWeight: "600" },
+  bottomAddItemButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderWidth: 1.5,
+    borderColor: COLORS.primaryLight,
+    borderRadius: RADIUS.md,
+    backgroundColor: COLORS.primaryLighter,
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.sm,
+    marginTop: SPACING.sm,
+    gap: SPACING.sm,
+  },
+  bottomAddItemIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: COLORS.surface,
+  },
+  bottomAddItemCopy: { flex: 1 },
+  bottomAddItemTitle: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: COLORS.primary,
+  },
+  bottomAddItemHint: {
+    fontSize: 11,
+    color: COLORS.textSecondary,
+    marginTop: 2,
+  },
   itemSubtotalRow: {
     flexDirection: "row",
     justifyContent: "flex-end",
