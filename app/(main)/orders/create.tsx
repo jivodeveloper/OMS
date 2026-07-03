@@ -2925,7 +2925,8 @@ export function OrderEntryScreen({
             </View>
           </Surface>
 
-          <Surface style={styles.card}>
+          {(itemRows.length > 0 || orderItems.length === 0) && (
+            <Surface style={styles.card}>
             <View style={styles.cardHeader}>
               <Ionicons name="cube" size={20} color={COLORS.primary} />
               <Text style={styles.cardTitle}>Items</Text>
@@ -3026,6 +3027,35 @@ export function OrderEntryScreen({
                     </View>
                   )}
 
+                  {/* Tax + Price List */}
+                  <View style={[styles.row, styles.itemFieldRow]}>
+                    <View style={styles.halfField}>
+                      <FixedLabelTextInput
+                        label="Tax %"
+                        value={row.tax}
+                        textColor={COLORS.black}
+                        editable={false}
+                        mode="outlined"
+                        style={styles.input}
+                        outlineColor={COLORS.border}
+                        activeOutlineColor={COLORS.primary}
+                      />
+                    </View>
+                    <View style={styles.halfField}>
+                      <FixedLabelTextInput
+                        label="Price List (Basic)"
+                        textColor={COLORS.black}
+                        value={row.priceListBasic}
+                        editable={false}
+                        mode="outlined"
+                        keyboardType="numeric"
+                        style={styles.input}
+                        outlineColor={COLORS.border}
+                        activeOutlineColor={COLORS.primary}
+                      />
+                    </View>
+                  </View>
+
                   {/* Boxes + Basic Price */}
                   <View style={[styles.row, styles.itemFieldRow]}>
                     <View style={styles.halfField}>
@@ -3049,35 +3079,6 @@ export function OrderEntryScreen({
                         onChangeText={(val) =>
                           handleRowBasicPriceChange(row.id, val)
                         }
-                        mode="outlined"
-                        keyboardType="numeric"
-                        style={styles.input}
-                        outlineColor={COLORS.border}
-                        activeOutlineColor={COLORS.primary}
-                      />
-                    </View>
-                  </View>
-
-                  {/* Tax + Price List */}
-                  <View style={[styles.row, styles.itemFieldRow]}>
-                    <View style={styles.halfField}>
-                      <FixedLabelTextInput
-                        label="Tax %"
-                        value={row.tax}
-                        textColor={COLORS.black}
-                        editable={false}
-                        mode="outlined"
-                        style={styles.input}
-                        outlineColor={COLORS.border}
-                        activeOutlineColor={COLORS.primary}
-                      />
-                    </View>
-                    <View style={styles.halfField}>
-                      <FixedLabelTextInput
-                        label="Price List (Basic)"
-                        textColor={COLORS.black}
-                        value={row.priceListBasic}
-                        editable={false}
                         mode="outlined"
                         keyboardType="numeric"
                         style={styles.input}
@@ -3232,13 +3233,14 @@ export function OrderEntryScreen({
               ))
             )}
 
+            {itemRows.length === 0 && (
             <TouchableOpacity
               style={styles.bottomAddItemButton}
               onPress={addItem}
               activeOpacity={0.82}
               accessibilityRole="button"
               accessibilityLabel={
-                itemRows.length > 0 ? "Add another item" : "Add first item"
+                "Add first item"
               }
             >
               <View style={styles.bottomAddItemIcon}>
@@ -3246,17 +3248,17 @@ export function OrderEntryScreen({
               </View>
               <View style={styles.bottomAddItemCopy}>
                 <Text style={styles.bottomAddItemTitle}>
-                  {itemRows.length > 0 ? "Add Another Item" : "Add First Item"}
+                  Add First Item
                 </Text>
                 <Text style={styles.bottomAddItemHint}>
-                  {itemRows.length > 0
-                    ? "Finish the current item, then continue"
-                    : "Choose a category and product"}
+                  Choose a category and product
                 </Text>
               </View>
               <Ionicons name="chevron-forward" size={20} color={COLORS.primary} />
             </TouchableOpacity>
+            )}
           </Surface>
+          )}
 
           {/* ── Confirmed Order Items ──────────────────────────────────────── */}
           {orderItems.length > 0 && (
@@ -3332,6 +3334,31 @@ export function OrderEntryScreen({
               ))}
 
               {/* ── FIX 5: Three-tier totals ─────────────────────────────── */}
+              {itemRows.length === 0 && (
+                <TouchableOpacity
+                  style={[styles.bottomAddItemButton, styles.orderItemsAddButton]}
+                  onPress={addItem}
+                  activeOpacity={0.82}
+                  accessibilityRole="button"
+                  accessibilityLabel="Add another item"
+                >
+                  <View style={styles.bottomAddItemIcon}>
+                    <Ionicons name="add" size={20} color={COLORS.primary} />
+                  </View>
+                  <View style={styles.bottomAddItemCopy}>
+                    <Text style={styles.bottomAddItemTitle}>Add Another Item</Text>
+                    <Text style={styles.bottomAddItemHint}>
+                      Add another product to this order
+                    </Text>
+                  </View>
+                  <Ionicons
+                    name="chevron-forward"
+                    size={20}
+                    color={COLORS.primary}
+                  />
+                </TouchableOpacity>
+              )}
+
               <View style={styles.totalsBox}>
                 <View style={styles.totalRow}>
                   <Text style={styles.totalLabel}>Total (Without Tax)</Text>
@@ -3943,6 +3970,10 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: COLORS.textSecondary,
     marginTop: 2,
+  },
+  orderItemsAddButton: {
+    marginTop: SPACING.xs,
+    marginBottom: SPACING.md,
   },
   itemSubtotalRow: {
     flexDirection: "row",
