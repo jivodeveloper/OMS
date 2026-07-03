@@ -1,5 +1,5 @@
 import React from "react";
-import { View, StyleSheet, TouchableOpacity } from "react-native";
+import { Alert, View, StyleSheet, TouchableOpacity } from "react-native";
 import {
   DrawerContentScrollView,
   DrawerItemList,
@@ -17,6 +17,25 @@ export default function CustomDrawer(props: DrawerContentComponentProps) {
   const performLogout = async () => {
     await logout();
     router.replace("/(auth)/login" as any);
+  };
+
+  const confirmLogout = () => {
+    Alert.alert(
+      "Sign Out",
+      "Are you sure you want to sign out of your account?",
+      [
+        {
+          text: "Cancel",
+          style: "cancel",
+        },
+        {
+          text: "Sign Out",
+          style: "destructive",
+          onPress: performLogout,
+        },
+      ],
+      { cancelable: true },
+    );
   };
 
   return (
@@ -76,7 +95,7 @@ export default function CustomDrawer(props: DrawerContentComponentProps) {
       <View style={styles.footer}>
         <Divider style={styles.divider} />
 
-        <TouchableOpacity style={styles.logoutButton} onPress={performLogout}>
+        <TouchableOpacity style={styles.logoutButton} onPress={confirmLogout}>
           <View style={styles.logoutIconContainer}>
             <Text style={styles.logoutIcon}>⎋</Text>
           </View>

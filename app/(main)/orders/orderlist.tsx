@@ -26,6 +26,7 @@ import { api } from "@/src/services/api";
 import { storage } from "@/src/utils/storage";
 import StateWrapper from "@/src/components/common/StateWrapper";
 import { useAuth } from "@/src/context/AuthContext";
+import Dropdown from "@/src/components/common/DropdownProps";
 
 type OrderListTab = "pending" | "others";
 type BillingDecisionFilter = "Billing Approved" | "Billing Rejected";
@@ -160,6 +161,10 @@ export default function BillingOrderList() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<OrderListTab>(tab === "others" ? "others" : "pending");
+  const [statusView, setStatusView] = useState<string>(
+    statusFilter === "approved" ? "approved" : statusFilter === "rejected" ? "rejected" : "pending",
+  );
+  const [searchQuery, setSearchQuery] = useState("");
   const [selectedFilter, setSelectedFilter] = useState<string | null>("ALL");
   const [isFilterModalVisible, setIsFilterModalVisible] = useState(false);
   const [parties, setParties] = useState<any[]>([]);
@@ -195,6 +200,7 @@ export default function BillingOrderList() {
   const [rejectModalVisible, setRejectModalVisible] = useState(false);
   const [selectedOrderId, setSelectedOrderId] = useState<number | null>(null);
   const [rejectReason, setRejectReason] = useState("");
+  const [decisionType, setDecisionType] = useState<"approve" | "reject">("reject");
 
   const [pendingModalVisible, setPendingModalVisible] = useState(false);
   const [pendingReason, setPendingReason] = useState("");
@@ -543,6 +549,11 @@ export default function BillingOrderList() {
     if (activeTab === "others" && !billingDecision) {
       return false;
     }
+    const normalizedSearch = searchQuery.trim().toUpperCase();
+    if (normalizedSearch) {
+      const searchableCustomer = `${item.card_name || ""} ${item.card_code || ""}`.toUpperCase();
+      if (!searchableCustomer.includes(normalizedSearch)) return false;
+    }
 
     if (selectedOrderDate) {
       const orderDate = getOrderDateValue(item.created_at);
@@ -704,14 +715,14 @@ export default function BillingOrderList() {
     return `${categories.slice(0, 2).join(", ")} +${categories.length - 2}`;
   };
 
-  const handleApprove = (order: OrderItemList) => {
+  const handleApprove = (order: OrderItemList, remarks = "") => {
     const approveAction = async () => {
       try {
         setActionLoading({ id: order.id, type: "approve" });
         const response: any = await productService.updatestatus(
           order.id,
           "10",
-          "Accepted by billing",
+          remarks.trim() || "Accepted by billing",
         );
         const copy = getBillingApprovalSuccessCopy(response?.status, response?.message);
         setApprovalResult({
@@ -737,11 +748,26 @@ export default function BillingOrderList() {
 
   const openRejectModal = (orderId: number) => {
     setSelectedOrderId(orderId);
+    setDecisionType("reject");
+    setRejectReason("");
+    setRejectModalVisible(true);
+  };
+
+  const openApproveModal = (orderId: number) => {
+    setSelectedOrderId(orderId);
+    setDecisionType("approve");
     setRejectReason("");
     setRejectModalVisible(true);
   };
 
   const handleReject = async () => {
+    if (decisionType === "approve") {
+      const order = orders.find((item) => item.id === selectedOrderId);
+      if (!order) return;
+      setRejectModalVisible(false);
+      handleApprove(order, rejectReason);
+      return;
+    }
     if (!rejectReason.trim()) {
       if (Platform.OS === "web") {
         window.alert("Please enter rejection reason");
@@ -925,7 +951,7 @@ export default function BillingOrderList() {
 
             <TouchableOpacity
               style={[styles.actionBtn, styles.approveBtn]}
-              onPress={() => handleApprove(item)}
+              onPress={() => openApproveModal(item.id)}
               disabled={actionLoading !== null}
             >
               {actionLoading?.id === item.id && actionLoading.type === "approve" ? (
@@ -933,7 +959,7 @@ export default function BillingOrderList() {
               ) : (
                 <>
                   <Ionicons name="checkmark-outline" size={18} color="#fff" />
-                  <Text style={styles.actionBtnText}>Accept</Text>
+                  <Text style={styles.actionBtnText}>Approve</Text>
                 </>
               )}
             </TouchableOpacity>
@@ -977,40 +1003,45 @@ export default function BillingOrderList() {
     >
     <View style={styles.container}>
       <View style={styles.tabContainer}>
-        <View style={styles.tabGroup}>
-          <TouchableOpacity
-            style={[styles.tab, activeTab === "pending" && styles.activePendingTab]}
-            onPress={() => {
-              setActiveTab("pending");
-              setSelectedFilter("ALL");
-              setSelectedParties([]);
-              setSelectedItems([]);
-              setSelectedStatuses([]);
+        <View style={styles.statusDropdownWrap}>
+          <Dropdown
+            label="Status"
+            data={[
+              { label: "Pending", value: "pending" },
+              { label: "Approved", value: "approved" },
+              { label: "Rejected", value: "rejected" },
+              { label: "All Processed", value: "all" },
+            ]}
+            value={statusView}
+            onChange={(value) => {
+              setStatusView(value);
+              setActiveTab(value === "pending" ? "pending" : "others");
+              setSelectedStatuses(
+                value === "approved" ? ["Billing Approved"] :
+                value === "rejected" ? ["Billing Rejected"] : [],
+              );
             }}
-          >
-            <Text
-              style={[styles.tabText, activeTab === "pending" && styles.activeTabText]}
-            >
-              Pending
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[styles.tab, activeTab === "others" && styles.activeOthersTab]}
-            onPress={() => {
-              setActiveTab("others");
-              setSelectedFilter("ALL");
-              setSelectedParties([]);
-              setSelectedItems([]);
-              setSelectedStatuses([]);
-            }}
-          >
-            <Text
-              style={[styles.tabText, activeTab === "others" && styles.activeTabText]}
-            >
-              Others
-            </Text>
-          </TouchableOpacity>
+            searchable={false}
+            floatingLabel
+            noBottomSpacing
+          />
+        </View>
+        <View style={styles.searchWrap}>
+          <Ionicons name="search-outline" size={18} color={COLORS.textSecondary} />
+          <TextInput
+            style={styles.searchInput}
+            value={searchQuery}
+            onChangeText={(value) => setSearchQuery(value.toUpperCase())}
+            placeholder="NAME / CODE"
+            placeholderTextColor={COLORS.textSecondary}
+            autoCapitalize="characters"
+            autoCorrect={false}
+          />
+          {!!searchQuery && (
+            <TouchableOpacity onPress={() => setSearchQuery("")}>
+              <Ionicons name="close-circle" size={18} color={COLORS.textSecondary} />
+            </TouchableOpacity>
+          )}
         </View>
         <View style={styles.tabActionGroup}>
           <InlineOrderDateFilter
@@ -1061,16 +1092,21 @@ export default function BillingOrderList() {
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Reject Order</Text>
+            <Text style={styles.modalTitle}>
+              {decisionType === "approve" ? "Approve Order" : "Reject Order"}
+            </Text>
             <Text style={styles.modalSubtitle}>
-              Please provide a reason for rejection:
+              {decisionType === "approve"
+                ? "Add remarks for the next approver (optional):"
+                : "Please provide a reason for rejection:"}
             </Text>
 
             <TextInput
               style={styles.reasonInput}
-              placeholder="Enter reason..."
+              placeholder={decisionType === "approve" ? "Enter optional remarks..." : "Enter reason..."}
               value={rejectReason}
-              onChangeText={setRejectReason}
+              onChangeText={(value) => setRejectReason(value.toUpperCase())}
+              autoCapitalize="characters"
               multiline
               numberOfLines={4}
               textAlignVertical="top"
@@ -1085,14 +1121,19 @@ export default function BillingOrderList() {
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={[styles.modalBtn, styles.confirmRejectBtn]}
+                style={[
+                  styles.modalBtn,
+                  decisionType === "approve" ? styles.confirmApproveBtn : styles.confirmRejectBtn,
+                ]}
                 onPress={() => handleReject()}
                 disabled={actionLoading !== null}
               >
                 {actionLoading?.type === "reject" ? (
                   <ActivityIndicator size="small" color="#fff" />
                 ) : (
-                  <Text style={styles.confirmRejectText}>Reject Order</Text>
+                  <Text style={styles.confirmRejectText}>
+                    {decisionType === "approve" ? "Approve Order" : "Reject Order"}
+                  </Text>
                 )}
               </TouchableOpacity>
             </View>
@@ -1466,6 +1507,29 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: 8,
   },
+  statusDropdownWrap: {
+    width: 126,
+  },
+  searchWrap: {
+    flex: 1,
+    minWidth: 110,
+    height: 56,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 10,
+    borderWidth: 1.5,
+    borderColor: COLORS.border,
+    borderRadius: 12,
+    backgroundColor: COLORS.background,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 12,
+    fontWeight: "600",
+    color: COLORS.text,
+    paddingVertical: 0,
+  },
   tabActionGroup: {
     flexDirection: "row",
     alignItems: "center",
@@ -1637,6 +1701,7 @@ const styles = StyleSheet.create({
     flexWrap: "wrap",
     justifyContent: "space-between",
     marginTop: 16,
+    gap: 10,
   },
   actionBtn: {
     flex: 1,
@@ -1644,7 +1709,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     paddingVertical: 12,
-    borderRadius: 8,
+    borderRadius: 10,
     gap: 6,
   },
 
@@ -1883,6 +1948,9 @@ const styles = StyleSheet.create({
 
   confirmRejectBtn: {
     backgroundColor: COLORS.error,
+  },
+  confirmApproveBtn: {
+    backgroundColor: COLORS.success,
   },
 
   confirmRejectText: {
