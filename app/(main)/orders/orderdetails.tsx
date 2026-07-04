@@ -10,12 +10,22 @@ import {
   ActivityIndicator,
   Alert,
   Modal,
+  Pressable,
+  KeyboardAvoidingView,
+  Platform,
   TextInput,
 } from "react-native";
 import { useLocalSearchParams, router } from "expo-router";
 import { useNavigation } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import Animated, {
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring,
+  withTiming,
+} from "react-native-reanimated";
 import { COLORS } from "@/constants/theme";
 import StateWrapper from "@/src/components/common/StateWrapper";
 import { orderService, productService } from "@/src/services/order.service";
@@ -131,6 +141,7 @@ export default function OrderDetailsScreen() {
   const { user } = useAuth();
   const userRole = user?.role?.toLowerCase() || "";
   const navigation = useNavigation();
+  const insets = useSafeAreaInsets();
 
   const { orderId, from, sourceTab } = useLocalSearchParams<{
     orderId?: string;
@@ -144,6 +155,8 @@ export default function OrderDetailsScreen() {
   const [actionLoading, setActionLoading] = useState<{ type: "approve" | "reject" } | null>(null);
   const [rejectModalVisible, setRejectModalVisible] = useState(false);
   const [rejectReason, setRejectReason] = useState("");
+  const [approveModalVisible, setApproveModalVisible] = useState(false);
+  const [approveRemark, setApproveRemark] = useState("");
 
   useEffect(() => {
     if (userRole !== "billing") return;
@@ -286,6 +299,7 @@ export default function OrderDetailsScreen() {
   };
 
   const handleApprove = async () => {
+    const remark = approveRemark.trim();
     try {
       setActionLoading({ type: "approve" });
       if (userRole === "auditor") {
@@ -300,17 +314,23 @@ export default function OrderDetailsScreen() {
           }
           throw new Error(msg);
         }
-        await productService.updatestatus(parsedOrderId, "9", "Sales quotation created by auditor");
+        await productService.updatestatus(parsedOrderId, "9", remark || "Sales quotation created by auditor");
+        setApproveModalVisible(false);
+        setApproveRemark("");
         showSuccessAndOpenPending("Sales quotation created successfully");
       } else if (userRole === "billing") {
         const response = await productService.updatestatus(
           parsedOrderId,
           "10",
-          "Accepted by billing",
+          remark || "Accepted by billing",
         );
+        setApproveModalVisible(false);
+        setApproveRemark("");
         showSuccessAndOpenPending(getBillingApprovalMessage(response));
       } else {
-        await productService.updatestatus(parsedOrderId, "6", "Approved");
+        await productService.updatestatus(parsedOrderId, "6", remark || "Approved");
+        setApproveModalVisible(false);
+        setApproveRemark("");
         showSuccessAndOpenPending("Order approved successfully");
       }
     } catch (err) {
@@ -351,6 +371,7 @@ export default function OrderDetailsScreen() {
         <View style={styles.screenWrap}>
           <ScrollView
             style={styles.container}
+            contentContainerStyle={{ paddingBottom: canActOnOrder ? 24 : insets.bottom + 24 }}
             refreshControl={
               <RefreshControl
                 refreshing={refreshing}
@@ -370,37 +391,34 @@ export default function OrderDetailsScreen() {
               <View style={styles.headerRow}>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.orderNo}>{order.order_number}</Text>
-                  <Text style={styles.party}>
-                    {order.card_name}
-                    {order.party_state ? `  ·  ${order.party_state}` : ""}
+                  <View style={styles.partyRow}>
+                    <Text style={styles.party}>{order.card_name}</Text>
+                    {!!order.party_state && (
+                      <>
+                        <View style={styles.greenDot} />
+                        <Text style={styles.party}>{order.party_state}</Text>
+                      </>
+                    )}
+                  </View>
+                </View>
+                <View style={[styles.statusPill, canActOnOrder && styles.statusPillPending]}>
+                  <Ionicons
+                    name={canActOnOrder ? "time-outline" : "checkmark-circle-outline"}
+                    size={14}
+                    color={canActOnOrder ? "#EA8C00" : COLORS.primary}
+                  />
+                  <Text
+                    style={[
+                      styles.statusPillText,
+                      { color: canActOnOrder ? "#EA8C00" : COLORS.primary },
+                    ]}
+                    numberOfLines={1}
+                  >
+                    {canActOnOrder
+                      ? "Pending Approval"
+                      : order.status_name || order.status_display || order.status || "Order"}
                   </Text>
                 </View>
-                {canActOnOrder && (
-                  <View style={styles.headerActions}>
-                    <TouchableOpacity
-                      onPress={() => setRejectModalVisible(true)}
-                      disabled={actionLoading !== null}
-                      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                    >
-                      {actionLoading?.type === "reject" ? (
-                        <ActivityIndicator size="small" color="#FCA5A5" />
-                      ) : (
-                        <Ionicons name="close-circle" size={32} color="#FCA5A5" />
-                      )}
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      onPress={handleApprove}
-                      disabled={actionLoading !== null}
-                      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                    >
-                      {actionLoading?.type === "approve" ? (
-                        <ActivityIndicator size="small" color="#86EFAC" />
-                      ) : (
-                        <Ionicons name="checkmark-circle" size={32} color="#86EFAC" />
-                      )}
-                    </TouchableOpacity>
-                  </View>
-                )}
               </View>
             </LinearGradient>
 
@@ -505,48 +523,63 @@ export default function OrderDetailsScreen() {
             </LinearGradient>
           </ScrollView>
 
-          {/* ===== Reject Reason Modal ===== */}
-          <Modal
-            visible={rejectModalVisible}
-            transparent
-            animationType="slide"
-            onRequestClose={() => setRejectModalVisible(false)}
-          >
-            <View style={styles.modalOverlay}>
-              <View style={styles.modalBox}>
-                <Text style={styles.modalTitle}>Reject Order</Text>
-                <TextInput
-                  style={styles.reasonInput}
-                  placeholder="Enter rejection reason..."
-                  value={rejectReason}
-                  onChangeText={setRejectReason}
-                  multiline
-                  numberOfLines={4}
-                  textAlignVertical="top"
-                />
-                <View style={styles.modalActions}>
-                  <TouchableOpacity
-                    style={[styles.modalBtn, styles.cancelModalBtn]}
-                    onPress={() => setRejectModalVisible(false)}
-                    disabled={actionLoading !== null}
-                  >
-                    <Text style={styles.cancelModalText}>Cancel</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.modalBtn, styles.confirmRejectModalBtn]}
-                    onPress={handleReject}
-                    disabled={actionLoading !== null}
-                  >
-                    {actionLoading?.type === "reject" ? (
-                      <ActivityIndicator size="small" color="#fff" />
-                    ) : (
-                      <Text style={styles.confirmRejectModalText}>Reject</Text>
-                    )}
-                  </TouchableOpacity>
+          {/* ===== Fixed bottom action bar ===== */}
+          {canActOnOrder && (
+            <View style={[styles.bottomBar, { paddingBottom: insets.bottom + 14 }]}>
+              <TouchableOpacity
+                style={[styles.actionBtn, styles.rejectBtn]}
+                onPress={() => setRejectModalVisible(true)}
+                disabled={actionLoading !== null}
+                activeOpacity={0.85}
+              >
+                <Ionicons name="close-circle-outline" size={26} color="#fff" />
+                <View>
+                  <Text style={styles.actionBtnTitle}>Reject</Text>
+                  <Text style={styles.actionBtnSub}>Decline this order</Text>
                 </View>
-              </View>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.actionBtn, styles.approveBtn]}
+                onPress={() => setApproveModalVisible(true)}
+                disabled={actionLoading !== null}
+                activeOpacity={0.85}
+              >
+                <Ionicons name="checkmark-circle-outline" size={26} color="#fff" />
+                <View>
+                  <Text style={styles.actionBtnTitle}>Approve</Text>
+                  <Text style={styles.actionBtnSub}>Approve this order</Text>
+                </View>
+              </TouchableOpacity>
             </View>
-          </Modal>
+          )}
+
+          {/* ===== Approve Dialog ===== */}
+          <ActionDialog
+            visible={approveModalVisible}
+            type="approve"
+            remark={approveRemark}
+            onChangeRemark={setApproveRemark}
+            loading={actionLoading?.type === "approve"}
+            onCancel={() => {
+              if (actionLoading !== null) return;
+              setApproveModalVisible(false);
+            }}
+            onConfirm={handleApprove}
+          />
+
+          {/* ===== Reject Dialog ===== */}
+          <ActionDialog
+            visible={rejectModalVisible}
+            type="reject"
+            remark={rejectReason}
+            onChangeRemark={setRejectReason}
+            loading={actionLoading?.type === "reject"}
+            onCancel={() => {
+              if (actionLoading !== null) return;
+              setRejectModalVisible(false);
+            }}
+            onConfirm={handleReject}
+          />
         </View>
       )}
     </StateWrapper>
@@ -577,6 +610,107 @@ const InfoRow = ({ label, value, highlight, bold }: any) =>
       </Text>
     </View>
   ) : null;
+
+type ActionDialogProps = {
+  visible: boolean;
+  type: "approve" | "reject";
+  remark: string;
+  onChangeRemark: (value: string) => void;
+  loading: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+};
+
+const ActionDialog = ({
+  visible,
+  type,
+  remark,
+  onChangeRemark,
+  loading,
+  onCancel,
+  onConfirm,
+}: ActionDialogProps) => {
+  const progress = useSharedValue(0);
+  const isApprove = type === "approve";
+  const accent = isApprove ? COLORS.success : COLORS.error;
+
+  useEffect(() => {
+    if (visible) {
+      progress.value = withSpring(1, { damping: 15, stiffness: 180, mass: 0.7 });
+    } else {
+      progress.value = withTiming(0, { duration: 140 });
+    }
+  }, [visible, progress]);
+
+  const overlayStyle = useAnimatedStyle(() => ({ opacity: progress.value }));
+  const cardStyle = useAnimatedStyle(() => ({
+    opacity: progress.value,
+    transform: [{ scale: 0.88 + progress.value * 0.12 }, { translateY: (1 - progress.value) * 24 }],
+  }));
+
+  return (
+    <Modal visible={visible} transparent animationType="none" statusBarTranslucent onRequestClose={onCancel}>
+      <Animated.View style={[styles.dialogOverlay, overlayStyle]}>
+        <Pressable style={StyleSheet.absoluteFill} onPress={onCancel} />
+        <KeyboardAvoidingView
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+          style={styles.dialogKav}
+          pointerEvents="box-none"
+        >
+          <Animated.View style={[styles.dialogCard, cardStyle]}>
+            <View style={[styles.dialogIconWrap, { backgroundColor: isApprove ? "#DCFCE7" : "#FEE2E2" }]}>
+              <Ionicons name={isApprove ? "checkmark-done" : "close"} size={30} color={accent} />
+            </View>
+            <Text style={styles.dialogTitle}>{isApprove ? "Approve Order" : "Reject Order"}</Text>
+            <Text style={styles.dialogMessage}>
+              {isApprove
+                ? "Confirm approval for this order. You can add an optional remark below."
+                : "Please provide a reason for rejecting this order."}
+            </Text>
+
+            <Text style={styles.dialogRemarkLabel}>
+              {isApprove ? "Remarks (optional)" : "Rejection reason"}
+            </Text>
+            <TextInput
+              style={styles.dialogInput}
+              placeholder={isApprove ? "Add a remark..." : "Enter reason..."}
+              placeholderTextColor="#94A3B8"
+              value={remark}
+              onChangeText={onChangeRemark}
+              multiline
+              numberOfLines={3}
+              textAlignVertical="top"
+              editable={!loading}
+            />
+
+            <View style={styles.dialogActions}>
+              <TouchableOpacity
+                style={[styles.dialogBtn, styles.dialogCancelBtn]}
+                onPress={onCancel}
+                disabled={loading}
+                activeOpacity={0.85}
+              >
+                <Text style={styles.dialogCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.dialogBtn, { backgroundColor: accent }]}
+                onPress={onConfirm}
+                disabled={loading}
+                activeOpacity={0.85}
+              >
+                {loading ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Text style={styles.dialogConfirmText}>{isApprove ? "Approve" : "Reject"}</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </Animated.View>
+        </KeyboardAvoidingView>
+      </Animated.View>
+    </Modal>
+  );
+};
 
 /* ---------------- Styles ---------------- */
 
@@ -616,24 +750,54 @@ const styles = StyleSheet.create({
   },
   headerRow: {
     flexDirection: "row",
-    alignItems: "flex-end",
+    alignItems: "flex-start",
     justifyContent: "space-between",
-  },
-  headerActions: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    paddingLeft: 12,
   },
   orderNo: {
     color: "#fff",
     fontSize: 20,
     fontWeight: "700",
   },
+  partyRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 6,
+    flexWrap: "wrap",
+  },
   party: {
     color: "#fff",
-    opacity: 0.9,
-    marginTop: 4,
+    opacity: 0.92,
+    fontSize: 13,
+  },
+  greenDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    backgroundColor: "#4ADE80",
+    marginHorizontal: 8,
+  },
+  statusPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    backgroundColor: "#fff",
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 20,
+    marginLeft: 12,
+    maxWidth: 150,
+    shadowColor: "#000",
+    shadowOpacity: 0.12,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 3,
+  },
+  statusPillPending: {
+    backgroundColor: "#FFF7ED",
+  },
+  statusPillText: {
+    fontSize: 12,
+    fontWeight: "700",
   },
   card: {
     backgroundColor: "#fff",
@@ -742,57 +906,141 @@ const styles = StyleSheet.create({
     color: "#7C3AED",
   },
 
-  // ===== Reject Modal =====
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.45)",
-    justifyContent: "flex-end",
-  },
-  modalBox: {
-    backgroundColor: "#fff",
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    padding: 24,
-    paddingBottom: 36,
-  },
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: "700",
-    color: COLORS.text,
-    marginBottom: 16,
-  },
-  reasonInput: {
-    borderWidth: 1,
-    borderColor: "#E2E8F0",
-    borderRadius: 12,
-    padding: 12,
-    fontSize: 14,
-    minHeight: 100,
-    color: COLORS.text,
-    marginBottom: 16,
-  },
-  modalActions: {
+  // ===== Fixed bottom action bar =====
+  bottomBar: {
     flexDirection: "row",
     gap: 12,
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    backgroundColor: "#fff",
+    borderTopWidth: 1,
+    borderTopColor: "#EEF1F6",
+    shadowColor: "#000",
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: -4 },
+    elevation: 12,
   },
-  modalBtn: {
+  actionBtn: {
     flex: 1,
-    paddingVertical: 13,
-    borderRadius: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+    paddingVertical: 12,
+    borderRadius: 16,
+    shadowOpacity: 0.22,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 4,
+  },
+  rejectBtn: {
+    backgroundColor: COLORS.error,
+    shadowColor: COLORS.error,
+  },
+  approveBtn: {
+    backgroundColor: COLORS.success,
+    shadowColor: COLORS.success,
+  },
+  actionBtnTitle: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "800",
+  },
+  actionBtnSub: {
+    color: "rgba(255,255,255,0.85)",
+    fontSize: 11,
+    marginTop: 1,
+  },
+
+  // ===== Approve / Reject Dialog =====
+  dialogOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(15,23,42,0.55)",
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 24,
+  },
+  dialogKav: {
+    width: "100%",
     alignItems: "center",
   },
-  cancelModalBtn: {
+  dialogCard: {
+    width: "100%",
+    maxWidth: 400,
+    backgroundColor: "#fff",
+    borderRadius: 24,
+    padding: 22,
+    alignItems: "center",
+    shadowColor: "#000",
+    shadowOpacity: 0.25,
+    shadowRadius: 24,
+    shadowOffset: { width: 0, height: 12 },
+    elevation: 12,
+  },
+  dialogIconWrap: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 14,
+  },
+  dialogTitle: {
+    fontSize: 19,
+    fontWeight: "800",
+    color: COLORS.text,
+    marginBottom: 6,
+  },
+  dialogMessage: {
+    fontSize: 13.5,
+    lineHeight: 20,
+    color: COLORS.textSecondary,
+    textAlign: "center",
+    marginBottom: 18,
+  },
+  dialogRemarkLabel: {
+    alignSelf: "flex-start",
+    fontSize: 13,
+    fontWeight: "700",
+    color: COLORS.text,
+    marginBottom: 8,
+  },
+  dialogInput: {
+    width: "100%",
+    borderWidth: 1.4,
+    borderColor: "#E2E8F0",
+    borderRadius: 14,
+    padding: 12,
+    fontSize: 14,
+    minHeight: 84,
+    color: COLORS.text,
+    backgroundColor: "#F8FAFC",
+    marginBottom: 18,
+  },
+  dialogActions: {
+    flexDirection: "row",
+    gap: 12,
+    width: "100%",
+  },
+  dialogBtn: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  dialogCancelBtn: {
     backgroundColor: "#F1F5F9",
   },
-  confirmRejectModalBtn: {
-    backgroundColor: COLORS.error,
-  },
-  cancelModalText: {
-    fontWeight: "600",
-    color: COLORS.text,
-  },
-  confirmRejectModalText: {
+  dialogCancelText: {
     fontWeight: "700",
+    color: COLORS.text,
+    fontSize: 15,
+  },
+  dialogConfirmText: {
+    fontWeight: "800",
     color: "#fff",
+    fontSize: 15,
   },
 });
