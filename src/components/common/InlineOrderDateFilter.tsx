@@ -260,11 +260,39 @@ export default function InlineOrderDateFilter({
     </TouchableOpacity>
   );
 
+  // --- Field-size button (matches 56px form fields) ---
+  const fieldButton = (
+    <TouchableOpacity
+      style={[styles.fieldButton, isActive && styles.fieldButtonActive]}
+      onPress={() => setShowModeMenu(true)}
+      activeOpacity={0.8}
+    >
+      <Ionicons
+        name="calendar-outline"
+        size={18}
+        color={isActive ? COLORS.primary : COLORS.textSecondary}
+      />
+      <Text
+        style={[styles.fieldText, !isActive && styles.fieldPlaceholder]}
+        numberOfLines={1}
+      >
+        {isActive ? displayLabel : "Date"}
+      </Text>
+      {isActive ? (
+        <Pressable onPress={handleClear} style={styles.fieldClear} hitSlop={8}>
+          <Ionicons name="close-circle" size={16} color={COLORS.textSecondary} />
+        </Pressable>
+      ) : null}
+    </TouchableOpacity>
+  );
+
+  const trigger = variant === "field" ? fieldButton : mainButton;
+
   // --- WEB ---
   if (Platform.OS === "web") {
     return (
       <View style={styles.row}>
-        {mainButton}
+        {trigger}
         {modeMenu}
         {monthModal}
         {/* Hidden date input for web */}
@@ -292,7 +320,7 @@ export default function InlineOrderDateFilter({
   // --- NATIVE ---
   return (
     <View style={styles.row}>
-      {mainButton}
+      {trigger}
       {modeMenu}
       {monthModal}
       {showDatePicker ? (
@@ -331,6 +359,34 @@ const styles = StyleSheet.create({
   filterButtonActive: {
     backgroundColor: COLORS.primaryLight,
     borderColor: COLORS.primary,
+  },
+  fieldButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    height: 56,
+    minWidth: 96,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.inputBackground,
+  },
+  fieldButtonActive: {
+    borderColor: COLORS.primary,
+    backgroundColor: COLORS.primaryLight,
+  },
+  fieldText: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: COLORS.primary,
+  },
+  fieldPlaceholder: {
+    color: COLORS.textSecondary,
+    fontWeight: "500",
+  },
+  fieldClear: {
+    marginLeft: 2,
   },
   filterLabel: {
     fontSize: 12,

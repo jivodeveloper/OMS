@@ -4,7 +4,6 @@ import {
   Text,
   StyleSheet,
   ScrollView,
-  FlatList,
   TouchableOpacity,
   RefreshControl,
   ActivityIndicator,
@@ -13,6 +12,8 @@ import {
   Pressable,
   KeyboardAvoidingView,
   Platform,
+  LayoutAnimation,
+  UIManager,
   TextInput,
 } from "react-native";
 import { useLocalSearchParams, router } from "expo-router";
@@ -32,8 +33,21 @@ import { orderService, productService } from "@/src/services/order.service";
 import { useAuth } from "@/src/context/AuthContext";
 import useAndroidBackOverride from "@/src/hooks/useAndroidBackOverride";
 
+if (
+  Platform.OS === "android" &&
+  UIManager.setLayoutAnimationEnabledExperimental
+) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
+
 const toNumber = (value: string | number | null | undefined): number =>
   typeof value === "number" ? value : parseFloat(String(value ?? "")) || 0;
+
+const stripCardCode = (name?: string, code?: string) => {
+  if (!name) return "";
+  if (!code) return name;
+  return name.replace(`(${code})`, "").replace(/\s{2,}/g, " ").trim();
+};
 
 const formatDisplayNumber = (value: string | number | null | undefined) => {
   const numericValue = toNumber(value);
@@ -157,6 +171,12 @@ export default function OrderDetailsScreen() {
   const [rejectReason, setRejectReason] = useState("");
   const [approveModalVisible, setApproveModalVisible] = useState(false);
   const [approveRemark, setApproveRemark] = useState("");
+  const [expandedItems, setExpandedItems] = useState<Record<string, boolean>>({});
+
+  const toggleItem = useCallback((key: string) => {
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    setExpandedItems((prev) => ({ ...prev, [key]: !prev[key] }));
+  }, []);
 
   useEffect(() => {
     if (userRole !== "billing") return;
@@ -388,43 +408,58 @@ export default function OrderDetailsScreen() {
               end={{ x: 1, y: 1 }}
               style={styles.header}
             >
-              <View style={styles.headerRow}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.orderNo}>{order.order_number}</Text>
-                  <View style={styles.partyRow}>
-                    <Text style={styles.party}>{order.card_name}</Text>
-                    {!!order.party_state && (
-                      <>
-                        <View style={styles.greenDot} />
-                        <Text style={styles.party}>{order.party_state}</Text>
-                      </>
-                    )}
+              <View style={styles.headerContent}>
+                <View style={styles.headerTopRow}>
+                  <Text style={styles.orderNo} numberOfLines={1}>
+                    {order.order_number}
+                  </Text>
+                  <View style={[styles.statusPill, canActOnOrder && styles.statusPillPending]}>
+                    <Ionicons
+                      name={canActOnOrder ? "time-outline" : "checkmark-circle-outline"}
+                      size={14}
+                      color={canActOnOrder ? "#EA8C00" : COLORS.primary}
+                    />
+                    <Text
+                      style={[
+                        styles.statusPillText,
+                        { color: canActOnOrder ? "#EA8C00" : COLORS.primary },
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {canActOnOrder
+                        ? "Pending Approval"
+                        : order.status_name || order.status_display || order.status || "Order"}
+                    </Text>
                   </View>
                 </View>
-                <View style={[styles.statusPill, canActOnOrder && styles.statusPillPending]}>
-                  <Ionicons
-                    name={canActOnOrder ? "time-outline" : "checkmark-circle-outline"}
-                    size={14}
-                    color={canActOnOrder ? "#EA8C00" : COLORS.primary}
-                  />
-                  <Text
-                    style={[
-                      styles.statusPillText,
-                      { color: canActOnOrder ? "#EA8C00" : COLORS.primary },
-                    ]}
-                    numberOfLines={1}
-                  >
-                    {canActOnOrder
-                      ? "Pending Approval"
-                      : order.status_name || order.status_display || order.status || "Order"}
+
+                <View style={styles.headerSecondRow}>
+                  <Text style={styles.partyName} numberOfLines={1}>
+                    {stripCardCode(order.card_name, order.card_code)}
                   </Text>
+                  {!!order.party_state && (
+                    <View style={styles.stateRow}>
+                      <Ionicons name="location" size={14} color="#4ADE80" />
+                      <Text style={styles.party} numberOfLines={1}>
+                        {order.party_state}
+                      </Text>
+                    </View>
+                  )}
                 </View>
               </View>
             </LinearGradient>
 
             {/* ===== Order Info ===== */}
             <View style={styles.card}>
-              <SectionTitle icon="information-circle-outline" title="Order Info" />
+              <SectionTitle
+                icon="information-circle-outline"
+                title="Order Info"
+                right={
+                  !!order.card_code && (
+                    <Text style={styles.sectionTitleCode}>{order.card_code}</Text>
+                  )
+                }
+              />
               <InfoRow label="Party State" value={order.party_state} />
               <InfoRow label="Punched By" value={order.created_by_name} />
               <InfoRow label="Delivery Date" value={order.delivery_date} />
@@ -440,68 +475,96 @@ export default function OrderDetailsScreen() {
                 icon="cube-outline"
                 title={`Items (${order.items_count || itemsList.length})`}
               />
-              <FlatList
-                data={itemsList}
-                keyExtractor={(i) => i.id.toString()}
-                scrollEnabled={false}
-                renderItem={({ item }) => {
-                  const bp = parseFloat(item.price_list_basic) || 0;
-                  const mp = parseFloat(item.basic_price) || 0;
-                  const isFlagged = mp > 0 && mp < bp;
-                  const itemLtrs = formatDisplayNumber(item.ltrs);
-                  const itemSchemes = getItemSchemes(item);
-                  const totalSchemeQty = itemSchemes.reduce(
-                    (sum: number, scheme: any) => sum + getSchemeQty(scheme),
-                    0,
-                  );
-                  const totalLtrs = formatDisplayNumber(
-                    toNumber(item.ltrs) + totalSchemeQty,
-                  );
+              {itemsList.map((item: any, index: number) => {
+                const bp = parseFloat(item.price_list_basic) || 0;
+                const mp = parseFloat(item.basic_price) || 0;
+                const isFlagged = mp > 0 && mp < bp;
+                const itemLtrs = formatDisplayNumber(item.ltrs);
+                const itemSchemes = getItemSchemes(item);
+                const totalSchemeQty = itemSchemes.reduce(
+                  (sum: number, scheme: any) => sum + getSchemeQty(scheme),
+                  0,
+                );
+                const totalLtrs = formatDisplayNumber(
+                  toNumber(item.ltrs) + totalSchemeQty,
+                );
+                const key = String(item.id ?? index);
+                const expanded = !!expandedItems[key];
 
-                  return (
-                    <View style={[styles.itemRow, isFlagged && styles.flaggedItem]}>
+                return (
+                  <View
+                    key={key}
+                    style={[styles.itemCard, isFlagged && styles.flaggedItemCard]}
+                  >
+                    <TouchableOpacity
+                      style={styles.itemHeader}
+                      activeOpacity={0.7}
+                      onPress={() => toggleItem(key)}
+                      accessibilityRole="button"
+                      accessibilityState={{ expanded }}
+                    >
+                      <View style={styles.itemIndexBadge}>
+                        <Text style={styles.itemIndexText}>{index + 1}</Text>
+                      </View>
                       <View style={{ flex: 1 }}>
-                        <InfoRow label="Item Name" value={item.item_name} />
-                        <InfoRow label="Item Code" value={item.item_code} />
-                        <InfoRow label="Price List (Basic)" value={`₹${item.price_list_basic}`} />
-                        <InfoRow label="Basic Price" value={`₹${item.basic_price}`} highlight={isFlagged} />
-                        <InfoRow label="Boxes" value={item.boxes} />
-                        <InfoRow label="PCS/Case" value={item.pcs} />
-                        <InfoRow label="Total PCS" value={item.qty} />
-                        <InfoRow label="Item Ltrs" value={itemLtrs} />
-                        <InfoRow label="Total Ltrs" value={totalLtrs} bold />
-                        <InfoRow label="Total" value={`₹${item.total}`} />
-                        {false && !!item.scheme_name && (
-                          <View style={styles.schemeBadge}>
-                            <Ionicons name="pricetag-outline" size={13} color="#7C3AED" />
-                            <Text style={styles.schemeBadgeText}>
-                              {item.scheme_name}
-                              {item.qty_scheme > 0 ? `  ·  Qty: ${item.qty_scheme}` : ""}
-                            </Text>
-                          </View>
+                        <Text style={styles.itemHeaderName} numberOfLines={expanded ? 3 : 2}>
+                          {item.item_name}
+                        </Text>
+                        {!!item.item_code && (
+                          <Text style={styles.itemHeaderCode}>{item.item_code}</Text>
                         )}
-                        {itemSchemes.map((scheme: any, index: number) => (
+                      </View>
+                      {isFlagged && (
+                        <Ionicons name="alert-circle" size={16} color={COLORS.error} style={{ marginRight: 6 }} />
+                      )}
+                      <Ionicons
+                        name={expanded ? "chevron-up" : "chevron-down"}
+                        size={20}
+                        color={COLORS.primary}
+                      />
+                    </TouchableOpacity>
+
+                    {expanded && (
+                      <View style={styles.itemBody}>
+                        <View style={styles.gridWrap}>
+                          <View style={styles.gridCol}>
+                            <GridCell label="Price List (Basic)" value={`₹${item.price_list_basic}`} />
+                            <GridCell label="Basic Price" value={`₹${item.basic_price}`} danger={isFlagged} />
+                            <GridCell label="Boxes" value={item.boxes} />
+                            <GridCell label="PCS/Case" value={item.pcs} />
+                          </View>
+                          <View style={styles.gridColDivider} />
+                          <View style={styles.gridCol}>
+                            <GridCell label="Total PCS" value={item.qty} />
+                            <GridCell label="Item Ltrs" value={itemLtrs} />
+                            <GridCell label="Total Ltrs" value={totalLtrs} accent />
+                            <GridCell label="Total" value={`₹${item.total}`} bold />
+                          </View>
+                        </View>
+
+                        {itemSchemes.map((scheme: any, sIndex: number) => (
                           <View
-                            key={`${scheme.id ?? scheme.scheme_id ?? scheme.scheme_name}-${index}`}
+                            key={`${scheme.id ?? scheme.scheme_id ?? scheme.scheme_name}-${sIndex}`}
                             style={styles.schemeBadge}
                           >
                             <Ionicons name="pricetag-outline" size={13} color="#7C3AED" />
                             <Text style={styles.schemeBadgeText}>
-                              {scheme.scheme_name || scheme.scheme_id || `Scheme ${index + 1}`}
+                              {scheme.scheme_name || scheme.scheme_id || `Scheme ${sIndex + 1}`}
                               {getSchemeQty(scheme) > 0 ? ` - Qty: ${formatDisplayNumber(getSchemeQty(scheme))}` : ""}
                             </Text>
                           </View>
                         ))}
                       </View>
-                    </View>
-                  );
-                }}
-              />
-              <View style={styles.subtotalRow}>
-                <InfoRow
-                  label="Subtotal"
-                  value={`Rs ${formatCurrencyAmount(subtotalAmount)}`}
-                />
+                    )}
+                  </View>
+                );
+              })}
+
+              <View style={styles.subtotalBox}>
+                <Text style={styles.subtotalLabel}>Subtotal</Text>
+                <Text style={styles.subtotalValue}>
+                  Rs {formatCurrencyAmount(subtotalAmount)}
+                </Text>
               </View>
             </View>
 
@@ -532,11 +595,8 @@ export default function OrderDetailsScreen() {
                 disabled={actionLoading !== null}
                 activeOpacity={0.85}
               >
-                <Ionicons name="close-circle-outline" size={26} color="#fff" />
-                <View>
-                  <Text style={styles.actionBtnTitle}>Reject</Text>
-                  <Text style={styles.actionBtnSub}>Decline this order</Text>
-                </View>
+                <Ionicons name="close-circle-outline" size={24} color="#fff" />
+                <Text style={styles.actionBtnTitle}>Reject</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.actionBtn, styles.approveBtn]}
@@ -544,11 +604,8 @@ export default function OrderDetailsScreen() {
                 disabled={actionLoading !== null}
                 activeOpacity={0.85}
               >
-                <Ionicons name="checkmark-circle-outline" size={26} color="#fff" />
-                <View>
-                  <Text style={styles.actionBtnTitle}>Approve</Text>
-                  <Text style={styles.actionBtnSub}>Approve this order</Text>
-                </View>
+                <Ionicons name="checkmark-circle-outline" size={24} color="#fff" />
+                <Text style={styles.actionBtnTitle}>Approve</Text>
               </TouchableOpacity>
             </View>
           )}
@@ -588,10 +645,12 @@ export default function OrderDetailsScreen() {
 
 /* ---------------- Components ---------------- */
 
-const SectionTitle = ({ icon, title }: any) => (
+const SectionTitle = ({ icon, title, right }: any) => (
   <View style={styles.sectionTitleRow}>
     <Ionicons name={icon} size={18} color={COLORS.primary} />
     <Text style={styles.sectionTitle}>{title}</Text>
+    <View style={styles.sectionTitleSpacer} />
+    {right}
   </View>
 );
 
@@ -610,6 +669,26 @@ const InfoRow = ({ label, value, highlight, bold }: any) =>
       </Text>
     </View>
   ) : null;
+
+const GridCell = ({ label, value, bold, accent, danger }: any) => {
+  const display =
+    value === undefined || value === null || value === "" ? "—" : String(value);
+  return (
+    <View style={styles.gridCell}>
+      <Text style={styles.gridLabel}>{label}</Text>
+      <Text
+        style={[
+          styles.gridValue,
+          bold && styles.gridValueBold,
+          accent && styles.gridValueAccent,
+          danger && styles.gridValueDanger,
+        ]}
+      >
+        {display}
+      </Text>
+    </View>
+  );
+};
 
 type ActionDialogProps = {
   visible: boolean;
@@ -744,37 +823,54 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#F4F6FA" },
   loader: { flex: 1, justifyContent: "center", alignItems: "center" },
   header: {
-    padding: 24,
-    borderBottomLeftRadius: 28,
-    borderBottomRightRadius: 28,
+    paddingHorizontal: 18,
+    paddingTop: 16,
+    paddingBottom: 18,
+    borderBottomLeftRadius: 24,
+    borderBottomRightRadius: 24,
   },
-  headerRow: {
+  headerContent: {
+    width: "100%",
+  },
+  headerTopRow: {
     flexDirection: "row",
-    alignItems: "flex-start",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 8,
+  },
+  partyName: {
+    flex: 1,
+    color: "#fff",
+    fontSize: 13,
+    fontWeight: "700",
+    letterSpacing: 0.2,
+    marginRight: 10,
+  },
+  headerSecondRow: {
+    flexDirection: "row",
+    alignItems: "center",
     justifyContent: "space-between",
   },
   orderNo: {
+    flex: 1,
     color: "#fff",
-    fontSize: 20,
+    opacity: 0.95,
+    fontSize: 14,
     fontWeight: "700",
+    letterSpacing: 0.3,
+    marginRight: 10,
   },
-  partyRow: {
+  stateRow: {
     flexDirection: "row",
     alignItems: "center",
-    marginTop: 6,
-    flexWrap: "wrap",
+    gap: 4,
+    marginLeft: 10,
   },
   party: {
     color: "#fff",
-    opacity: 0.92,
+    opacity: 0.95,
     fontSize: 13,
-  },
-  greenDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 4,
-    backgroundColor: "#4ADE80",
-    marginHorizontal: 8,
+    fontWeight: "600",
   },
   statusPill: {
     flexDirection: "row",
@@ -782,10 +878,9 @@ const styles = StyleSheet.create({
     gap: 5,
     backgroundColor: "#fff",
     paddingHorizontal: 12,
-    paddingVertical: 7,
+    paddingVertical: 6,
     borderRadius: 20,
-    marginLeft: 12,
-    maxWidth: 150,
+    maxWidth: 160,
     shadowColor: "#000",
     shadowOpacity: 0.12,
     shadowRadius: 6,
@@ -821,27 +916,126 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: COLORS.text,
   },
-  itemRow: {
+  sectionTitleSpacer: {
+    flex: 1,
+  },
+  sectionTitleCode: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: COLORS.primary,
+    backgroundColor: COLORS.primaryLight,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 8,
+    overflow: "hidden",
+  },
+  // ===== Item accordion =====
+  itemCard: {
+    borderWidth: 1,
+    borderColor: "#EAEEF5",
+    borderRadius: 14,
+    marginBottom: 10,
+    backgroundColor: "#FCFDFF",
+    overflow: "hidden",
+  },
+  flaggedItemCard: {
+    borderColor: "#FBD5D5",
+    backgroundColor: "#FFF7F7",
+  },
+  itemHeader: {
     flexDirection: "row",
-    paddingVertical: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: "#eee",
+    alignItems: "center",
+    gap: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
   },
-  flaggedItem: {
-    backgroundColor: "#FFF3F3",
-    borderLeftWidth: 3,
-    borderLeftColor: COLORS.error,
-    paddingLeft: 10,
-    borderRadius: 6,
+  itemIndexBadge: {
+    width: 26,
+    height: 26,
+    borderRadius: 8,
+    backgroundColor: COLORS.primaryLight,
+    alignItems: "center",
+    justifyContent: "center",
   },
-  itemName: { fontWeight: "700", fontSize: 14 },
-  itemCode: { fontSize: 12, color: COLORS.textLight },
-  itemQty: { fontSize: 12, color: COLORS.textLight, marginTop: 2 },
-  priceWrap: { alignItems: "flex-end" },
-  price: { fontWeight: "700", fontSize: 14 },
-  lineTotal: { fontSize: 12, color: COLORS.textLight },
-  subtotalRow: {
+  itemIndexText: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: COLORS.primary,
+  },
+  itemHeaderName: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: COLORS.text,
+  },
+  itemHeaderCode: {
+    fontSize: 12,
+    color: COLORS.textSecondary,
+    marginTop: 2,
+  },
+  itemBody: {
+    paddingHorizontal: 12,
+    paddingBottom: 14,
+    paddingTop: 4,
+    borderTopWidth: 1,
+    borderTopColor: "#EEF1F6",
+  },
+  gridWrap: {
+    flexDirection: "row",
     marginTop: 10,
+  },
+  gridCol: {
+    flex: 1,
+  },
+  gridColDivider: {
+    width: 1,
+    backgroundColor: "#EEF1F6",
+    marginHorizontal: 12,
+  },
+  gridCell: {
+    marginBottom: 12,
+  },
+  gridLabel: {
+    fontSize: 12,
+    color: COLORS.textSecondary,
+    marginBottom: 3,
+  },
+  gridValue: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: COLORS.text,
+  },
+  gridValueBold: {
+    fontWeight: "800",
+  },
+  gridValueAccent: {
+    color: "#7C3AED",
+    fontWeight: "800",
+  },
+  gridValueDanger: {
+    color: COLORS.error,
+    fontWeight: "800",
+  },
+  subtotalBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    backgroundColor: "#F5F3FF",
+    borderWidth: 1,
+    borderColor: "#DDD6FE",
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    marginTop: 4,
+  },
+  subtotalLabel: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#6D28D9",
+  },
+  subtotalValue: {
+    fontSize: 15,
+    fontWeight: "800",
+    color: "#6D28D9",
   },
   totalCard: {
     margin: 16,
@@ -926,8 +1120,8 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 10,
-    paddingVertical: 12,
+    gap: 8,
+    paddingVertical: 15,
     borderRadius: 16,
     shadowOpacity: 0.22,
     shadowRadius: 8,
@@ -946,11 +1140,6 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontSize: 16,
     fontWeight: "800",
-  },
-  actionBtnSub: {
-    color: "rgba(255,255,255,0.85)",
-    fontSize: 11,
-    marginTop: 1,
   },
 
   // ===== Approve / Reject Dialog =====
