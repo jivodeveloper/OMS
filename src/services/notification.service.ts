@@ -118,7 +118,42 @@ export const notificationService = {
     }
   },
 
-  async registerForPushNotifications() {
+  /**
+   * Read the current OS permission WITHOUT prompting. Returns the Expo
+   * permission status plus `canAskAgain` (false on iOS once denied → the app
+   * must send the user to system Settings).
+   */
+  async getPermissionStatus(): Promise<{
+    status: string;
+    canAskAgain: boolean;
+  }> {
+    try {
+      const current = await Notifications.getPermissionsAsync();
+      return {
+        status: current.status,
+        canAskAgain: current.canAskAgain ?? true,
+      };
+    } catch {
+      return { status: "undetermined", canAskAgain: true };
+    }
+  },
+
+  /**
+   * Explicitly ask the OS for permission. Call this ONLY after the user taps
+   * "Allow Notifications" in our own modal — never automatically.
+   */
+  async requestOSPermission(): Promise<string> {
+    try {
+      const result = await Notifications.requestPermissionsAsync();
+      return result.status;
+    } catch {
+      return "undetermined";
+    }
+  },
+
+  async registerForPushNotifications(options?: { requestIfNeeded?: boolean }) {
+    const requestIfNeeded = options?.requestIfNeeded ?? false;
+
     if (Platform.OS === "web") {
       console.log("Skipping push notification registration on web.");
       return null;
@@ -131,16 +166,17 @@ export const notificationService = {
       return null;
     }
 
-    const currentPermission = await Notifications.getPermissionsAsync();
-    let status = currentPermission.status;
+    let status: string = (await Notifications.getPermissionsAsync()).status;
 
-    if (status !== "granted") {
-      const requestedPermission = await Notifications.requestPermissionsAsync();
-      status = requestedPermission.status;
+    // Only prompt the OS when explicitly allowed (i.e. from our custom modal's
+    // "Allow" button). The default auto-registration path never prompts — it
+    // registers silently if permission was already granted, otherwise no-ops.
+    if (status !== "granted" && requestIfNeeded) {
+      status = await this.requestOSPermission();
     }
 
     if (status !== "granted") {
-      console.log("Push notification permission was not granted.");
+      console.log("Push notification permission not granted; skipping token.");
       return null;
     }
 
@@ -252,6 +288,20 @@ export const notificationService = {
 
     // Non-retryable 4xx (e.g. 400) or attempts exhausted.
     return response ?? null;
+  },
+
+  /**
+   * User-initiated flow (from our "Allow Notifications" modal): prompt the OS,
+   * and if granted, register the Expo token exactly once. Returns the resulting
+   * OS status so the caller can persist granted/denied.
+   */
+  async requestPermissionAndRegister(): Promise<string> {
+    const status = await this.requestOSPermission();
+    if (status === "granted") {
+      await this.ensureAndroidChannel();
+      await this.registerDeviceToken();
+    }
+    return status;
   },
 
   /**

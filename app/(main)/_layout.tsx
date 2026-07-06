@@ -18,6 +18,8 @@ import {
   resolveNotificationRoute,
   type OMSNotificationData,
 } from "@/src/utils/notificationRouting";
+import { shouldShowPermissionPrompt } from "@/src/utils/notificationPermission";
+import NotificationPermissionModal from "@/src/components/NotificationPermissionModal";
 
 const HEADER_ICON_HIT_SLOP = { top: 12, right: 12, bottom: 12, left: 12 };
 
@@ -27,6 +29,8 @@ export default function MainLayout() {
   const userRole = user?.role?.toLowerCase() || "";
   const grantedScreens = screensFromExtraPages(user?.extra_pages || []);
   const [unreadNotificationCount, setUnreadNotificationCount] = useState(0);
+  const [showPermissionModal, setShowPermissionModal] = useState(false);
+  const [permissionSubmitting, setPermissionSubmitting] = useState(false);
 
   const loadUnreadNotificationCount = useCallback(async () => {
     if (!user) {
@@ -70,6 +74,76 @@ export default function MainLayout() {
       tokenRefreshSubscription.remove();
     };
   }, [user]);
+
+  // Custom "explain first" permission prompt. Never fires during splash/login;
+  // waits ~2.5s after the user reaches Home, and only shows when appropriate
+  // (never asked, or 7 days since the last dismissal). If the OS permission is
+  // already granted, we just record it and stay silent (existing users).
+  useEffect(() => {
+    if (!user) {
+      return;
+    }
+
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      try {
+        const [{ status, canAskAgain }, promptState] = await Promise.all([
+          notificationService.getPermissionStatus(),
+          storage.getNotificationPromptState(),
+        ]);
+        if (cancelled) return;
+
+        if (status === "granted") {
+          // Already granted (incl. existing users) — record and never prompt.
+          if (promptState.status !== "granted") {
+            await storage.saveNotificationPromptState({ status: "granted" });
+          }
+          return;
+        }
+
+        if (shouldShowPermissionPrompt(status, canAskAgain, promptState)) {
+          setShowPermissionModal(true);
+        }
+      } catch (error) {
+        console.log("Permission prompt check failed:", error);
+      }
+    }, 2500);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [user]);
+
+  const handleAllowNotifications = useCallback(async () => {
+    setPermissionSubmitting(true);
+    try {
+      const status = await notificationService.requestPermissionAndRegister();
+      await storage.saveNotificationPromptState({
+        status: status === "granted" ? "granted" : "denied",
+        lastPromptAt: Date.now(),
+      });
+    } catch (error) {
+      console.log("Permission request failed:", error);
+    } finally {
+      setPermissionSubmitting(false);
+      setShowPermissionModal(false);
+    }
+  }, []);
+
+  const handleDismissPermission = useCallback(async () => {
+    setShowPermissionModal(false);
+    try {
+      const current = await storage.getNotificationPromptState();
+      await storage.saveNotificationPromptState({
+        status: "dismissed",
+        lastPromptAt: Date.now(),
+        dismissCount: current.dismissCount + 1,
+      });
+    } catch (error) {
+      console.log("Failed to persist permission dismissal:", error);
+    }
+  }, []);
 
   // Re-pull the profile (incl. extra_pages grants) when the app returns to the
   // foreground, so permissions granted elsewhere — e.g. from the web admin —
@@ -593,6 +667,13 @@ export default function MainLayout() {
           }}
         />
       </Drawer>
+
+      <NotificationPermissionModal
+        visible={showPermissionModal}
+        onAllow={handleAllowNotifications}
+        onDismiss={handleDismissPermission}
+        submitting={permissionSubmitting}
+      />
     </GestureHandlerRootView>
   );
 }

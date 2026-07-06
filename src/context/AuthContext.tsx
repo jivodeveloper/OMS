@@ -1,7 +1,13 @@
 import React, { createContext, useContext, useState, useEffect } from "react";
+import { Alert, AppState } from "react-native";
+import { router } from "expo-router";
 import { storage } from "../utils/storage";
 import { authService, User, LoginRequest } from "../services/auth.service";
 import { notificationService } from "../services/notification.service";
+import {
+  ensureFreshAccessToken,
+  setSessionExpiredHandler,
+} from "../services/api";
 
 interface AuthContextType {
   user: User | null;
@@ -59,8 +65,38 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     checkAuth();
   }, []);
 
+  // When a refresh ultimately fails, the API layer hands off here to end the
+  // session cleanly (tokens are already cleared): drop the user and route to
+  // login with a single message. Guarded so it never loops.
+  useEffect(() => {
+    setSessionExpiredHandler(() => {
+      setUser(null);
+      router.replace("/(auth)/login" as never);
+      Alert.alert(
+        "Session expired",
+        "Your session has expired. Please login again.",
+      );
+    });
+    return () => setSessionExpiredHandler(null);
+  }, []);
+
+  // Background resume (Task 8): if the access token expired while the app was
+  // backgrounded, refresh proactively so the user isn't hit by failing APIs.
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (next) => {
+      if (next === "active") {
+        ensureFreshAccessToken();
+      }
+    });
+    return () => subscription.remove();
+  }, []);
+
   const checkAuth = async () => {
     try {
+      // Startup (Task 7): if the access token is expired but the refresh token
+      // is still valid, refresh silently so no login screen appears.
+      await ensureFreshAccessToken();
+
       const token = await storage.getAccessToken();
       const savedUser = await storage.getUser();
 

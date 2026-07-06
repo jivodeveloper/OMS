@@ -6,6 +6,7 @@ import {
   TouchableOpacity,
   Switch,
   Text,
+  Linking,
 } from "react-native";
 import {
   DrawerContentScrollView,
@@ -19,6 +20,7 @@ import { useAuth } from "@/src/context/AuthContext";
 import { COLORS } from "@/src/constants/theme";
 import { orderService } from "@/src/services/order.service";
 import { storage } from "@/src/utils/storage";
+import { notificationService } from "@/src/services/notification.service";
 
 /** Per-route accent colour for the icon tile. */
 const ACCENTS: Record<string, string> = {
@@ -64,6 +66,20 @@ export default function CustomDrawer(props: DrawerContentComponentProps) {
   const insets = useSafeAreaInsets();
   const [unreadCount, setUnreadCount] = useState(0);
   const [darkMode, setDarkMode] = useState(false);
+  const [notificationsEnabled, setNotificationsEnabled] = useState<boolean | null>(
+    null,
+  );
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      const { status } = await notificationService.getPermissionStatus();
+      if (active) setNotificationsEnabled(status === "granted");
+    })();
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -254,6 +270,40 @@ export default function CustomDrawer(props: DrawerContentComponentProps) {
 
       {/* ===== Footer ===== */}
       <View style={[styles.footer, { paddingBottom: insets.bottom + 16 }]}>
+        {/* Notifications status + enable (Task 4) */}
+        <View style={styles.notifRow}>
+          <View style={styles.notifIconBox}>
+            <Ionicons
+              name={
+                notificationsEnabled
+                  ? "notifications"
+                  : "notifications-off-outline"
+              }
+              size={18}
+              color={notificationsEnabled ? COLORS.primary : COLORS.textSecondary}
+            />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.notifTitle}>Notifications</Text>
+            <Text style={styles.notifStatus}>
+              {notificationsEnabled === null
+                ? "Checking…"
+                : notificationsEnabled
+                  ? "Enabled"
+                  : "Disabled"}
+            </Text>
+          </View>
+          {notificationsEnabled === false ? (
+            <TouchableOpacity
+              style={styles.notifEnableBtn}
+              activeOpacity={0.85}
+              onPress={() => Linking.openSettings()}
+            >
+              <Text style={styles.notifEnableText}>Enable</Text>
+            </TouchableOpacity>
+          ) : null}
+        </View>
+
         <TouchableOpacity
           style={styles.signOut}
           activeOpacity={0.8}
@@ -491,6 +541,47 @@ const styles = StyleSheet.create({
     paddingTop: 12,
     borderTopWidth: 1,
     borderTopColor: "#EAEDF2",
+  },
+  notifRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    backgroundColor: "#F8FAFC",
+    borderWidth: 1,
+    borderColor: "#EAEDF2",
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 10,
+  },
+  notifIconBox: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    backgroundColor: "#EFF6FF",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  notifTitle: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: COLORS.text,
+  },
+  notifStatus: {
+    fontSize: 12,
+    color: COLORS.textSecondary,
+    marginTop: 1,
+  },
+  notifEnableBtn: {
+    backgroundColor: COLORS.primary,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  notifEnableText: {
+    color: "#fff",
+    fontSize: 12.5,
+    fontWeight: "700",
   },
   signOut: {
     flexDirection: "row",
