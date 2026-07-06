@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Drawer } from "expo-router/drawer";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { Ionicons } from "@expo/vector-icons";
@@ -12,6 +12,12 @@ import { orderService } from "@/src/services/order.service";
 import { notificationService } from "@/src/services/notification.service";
 import { storage } from "@/src/utils/storage";
 import { screensFromExtraPages } from "@/src/constants/pages";
+import {
+  getNotificationDedupeKey,
+  originScreenForRole,
+  resolveNotificationRoute,
+  type OMSNotificationData,
+} from "@/src/utils/notificationRouting";
 
 const HEADER_ICON_HIT_SLOP = { top: 12, right: 12, bottom: 12, left: 12 };
 
@@ -47,9 +53,22 @@ export default function MainLayout() {
   }, [loadUnreadNotificationCount, pathname]);
 
   useEffect(() => {
-    if (user) {
-      notificationService.registerDeviceToken();
+    if (!user) {
+      return;
     }
+
+    // Make sure the Android channel exists with production settings before any
+    // push arrives, then register this device's token.
+    notificationService.ensureAndroidChannel();
+    notificationService.registerDeviceToken();
+
+    // Keep the backend token current if Expo rotates it while logged in.
+    const tokenRefreshSubscription =
+      notificationService.subscribeToTokenRefresh();
+
+    return () => {
+      tokenRefreshSubscription.remove();
+    };
   }, [user]);
 
   // Re-pull the profile (incl. extra_pages grants) when the app returns to the
@@ -73,6 +92,8 @@ export default function MainLayout() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pathname]);
 
+  // Foreground receipts only refresh the unread badge — the OS itself renders
+  // the banner/sound (see setNotificationHandler in notification.service).
   useEffect(() => {
     if (!user) {
       return;
@@ -84,21 +105,48 @@ export default function MainLayout() {
       },
     );
 
-    const responseSubscription =
-      Notifications.addNotificationResponseReceivedListener((response) => {
-        loadUnreadNotificationCount();
-
-        const screen = response.notification.request.content.data?.screen;
-        if (screen === "notifications") {
-          router.push("/notifications");
-        }
-      });
-
     return () => {
       receivedSubscription.remove();
-      responseSubscription.remove();
     };
   }, [loadUnreadNotificationCount, user]);
+
+  // Single authoritative tap handler for EVERY entry point:
+  //   - app already open   (foreground tap)
+  //   - app in background   (resumed via tap)
+  //   - app terminated      (cold-started via tap)
+  // `useLastNotificationResponse` surfaces the launch notification on cold
+  // start as well as subsequent taps; a ref-based dedupe guarantees each
+  // notification navigates exactly once, avoiding duplicate navigation/races.
+  const lastNotificationResponse = Notifications.useLastNotificationResponse();
+  const handledNotificationKeys = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (!user || !lastNotificationResponse) {
+      return;
+    }
+
+    const request = lastNotificationResponse.notification.request;
+    const data = (request.content.data || {}) as OMSNotificationData;
+    const dedupeKey = getNotificationDedupeKey(request.identifier, data);
+
+    if (handledNotificationKeys.current.has(dedupeKey)) {
+      return;
+    }
+    handledNotificationKeys.current.add(dedupeKey);
+
+    loadUnreadNotificationCount();
+
+    // Remember which list this user belongs to, so Back from the order returns
+    // there instead of Home. Prefer an explicit origin_role in the payload (if
+    // a newer backend sends one), else use the logged-in user's role.
+    const originRole =
+      (data as { origin_role?: string | null }).origin_role || user.role;
+    const originScreen = originScreenForRole(originRole);
+    const route = resolveNotificationRoute(data, originScreen);
+    if (route) {
+      router.push(route);
+    }
+  }, [lastNotificationResponse, loadUnreadNotificationCount, user]);
 
   const canSee: Record<string, string[]> = {
     dashboard: ["admin", "manager", "approver"],

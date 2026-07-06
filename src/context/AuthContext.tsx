@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from "react";
 import { storage } from "../utils/storage";
 import { authService, User, LoginRequest } from "../services/auth.service";
+import { notificationService } from "../services/notification.service";
 
 interface AuthContextType {
   user: User | null;
@@ -148,6 +149,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
   };
 
   const logout = async () => {
+    // Deactivate this device's push token BEFORE clearing storage, while the
+    // auth token is still available to authorise the request. Non-fatal: a
+    // failure here must never block sign-out.
+    try {
+      await notificationService.deactivateDeviceToken();
+    } catch (error) {
+      console.log("Failed to deactivate push token on logout:", error);
+    }
+
     await storage.clear();
     setUser(null);
   };

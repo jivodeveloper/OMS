@@ -14,6 +14,7 @@ import {
 import { PieChart } from "react-native-gifted-charts";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Dropdown } from "react-native-element-dropdown";
 import { useAuth } from "@/src/context/AuthContext";
 import { COLORS, SPACING, RADIUS } from "@/src/constants/theme";
@@ -123,6 +124,7 @@ const isWithinSelectedPeriod = (value: string | undefined, year: number, month: 
 export default function DashboardScreen() {
   const router = useRouter();
   const { user } = useAuth();
+  const insets = useSafeAreaInsets();
   const { width: screenWidth } = useWindowDimensions();
   const isNarrow = screenWidth < 400;
   const [data, setData] = useState<DashboardData | null>(null);
@@ -181,6 +183,7 @@ export default function DashboardScreen() {
   const [completedVarietyMetric, setCompletedVarietyMetric] =
     useState<CompletedVarietyMetric>("orders");
   const [allAssignedParties, setAllAssignedParties] = useState<any[]>([]);
+  const [recentOrders, setRecentOrders] = useState<OrderItemList[]>([]);
 
   const [error, setError] = useState<string | null>(null);
   const [retryCount, setRetryCount] = useState(0);
@@ -227,6 +230,25 @@ export default function DashboardScreen() {
       deriveCompletedDataFromCharts(chartData);
     }
   }, [user?.role, chartData]);
+
+  // Recent orders for the billing dashboard hero list.
+  useEffect(() => {
+    if (user?.role !== "billing") return;
+    let active = true;
+    (async () => {
+      try {
+        const orders = await productService.getOrders(0, undefined, true);
+        if (active) {
+          setRecentOrders((Array.isArray(orders) ? orders : []).slice(0, 4));
+        }
+      } catch (err) {
+        console.log("Recent orders fetch error:", err);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [user?.role, retryCount]);
 
   const fetchUserParties = async () => {
     try {
@@ -1690,53 +1712,316 @@ export default function DashboardScreen() {
     );
   }
   else if (user?.role === "billing") {
+    const hour = new Date().getHours();
+    const greeting =
+      hour < 12 ? "Good Morning" : hour < 17 ? "Good Afternoon" : "Good Evening";
+    const displayName = user?.name || user?.username || "User";
+    const initial = displayName.charAt(0).toUpperCase();
+    const roleLabel = user?.role
+      ? `${user.role.charAt(0).toUpperCase()}${user.role.slice(1)} Executive`
+      : "Member";
+    const memberSinceDate = user?.created_at ? new Date(user.created_at) : null;
+    const memberSince =
+      memberSinceDate && !Number.isNaN(memberSinceDate.getTime())
+        ? memberSinceDate.toLocaleDateString("en-US", { month: "short", year: "numeric" })
+        : "—";
+
+    const bTotal = Number(data?.total_orders ?? 0);
+    const bPending = Number(data?.pending_review_orders ?? 0);
+    const bApproved = Number(data?.accepted_orders ?? 0);
+    const bRejected = Number(data?.rejected_orders ?? 0);
+    const approvalRate =
+      bApproved + bRejected > 0
+        ? Math.round((bApproved / (bApproved + bRejected)) * 100)
+        : bApproved > 0
+          ? 100
+          : 0;
+    const avgOrderValue =
+      bTotal > 0 ? Math.round(Number(data?.total_revenue ?? 0) / bTotal) : 0;
+
+    const goOrders = (
+      statusFilter?: "approved" | "rejected" | "pending",
+      tab: "pending" | "others" = "others",
+    ) =>
+      router.push({
+        pathname: "/orders/orderlist" as any,
+        params: {
+          tab,
+          ...(statusFilter ? { statusFilter } : {}),
+          year: String(audYear),
+          month: String(audMonth),
+          _t: String(Date.now()),
+        },
+      });
+
+    const activityCards = [
+      { title: "Total Assigned", value: bTotal, icon: "document-text", color: "#2563EB", bg: "#EEF4FF", onPress: () => goOrders() },
+      { title: "Pending", value: bPending, icon: "time", color: "#F59E0B", bg: "#FFF7EC", onPress: () => goOrders("pending", "pending") },
+      { title: "Approved", value: bApproved, icon: "checkmark-circle", color: "#16A34A", bg: "#ECFDF3", onPress: () => goOrders("approved") },
+      { title: "Rejected", value: bRejected, icon: "close-circle", color: "#EF4444", bg: "#FEF2F2", onPress: () => goOrders("rejected") },
+    ];
+
     return (
       <StateWrapper loading={loading || chartLoading} error={error} onRetry={handleRetry}>
+       <View style={bStyles.screen}>
         <ScrollView
           style={styles.container}
           showsVerticalScrollIndicator={false}
           refreshControl={refreshControl}
+          contentContainerStyle={{ paddingBottom: 24 }}
         >
-
+          {/* ===== Hero ===== */}
           <LinearGradient
-            colors={[COLORS.primaryDark, COLORS.primary]}
+            colors={["#2563EB", "#1E3A8A"]}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
-            style={styles.welcomeCard}
+            style={bStyles.hero}
           >
-            <View style={styles.decorCircle1} />
-            <View style={styles.decorCircle2} />
+            <View style={bStyles.heroDecor} />
+            <View style={bStyles.heroTopRow}>
+              <View style={bStyles.heroAvatar}>
+                <Text style={bStyles.heroAvatarText}>{initial}</Text>
+                <View style={bStyles.heroAvatarDot} />
+              </View>
+              <View style={{ flex: 1, marginLeft: 14 }}>
+                <Text style={bStyles.heroGreeting}>{greeting},</Text>
+                <Text style={bStyles.heroName} numberOfLines={1}>
+                  {displayName}! 👋
+                </Text>
+                <View style={bStyles.heroChip}>
+                  <Text style={bStyles.heroChipText}>{roleLabel}</Text>
+                </View>
+                {!!user?.company?.name && (
+                  <View style={[bStyles.heroChip, bStyles.heroChipCompany]}>
+                    <Ionicons name="business" size={12} color="#fff" />
+                    <Text style={bStyles.heroChipText}>{user.company.name}</Text>
+                  </View>
+                )}
+              </View>
+              <View style={bStyles.heroIllustration}>
+                <Ionicons name="clipboard" size={52} color="rgba(255,255,255,0.92)" />
+                <View style={bStyles.heroIllustrationBadge}>
+                  <Ionicons name="checkmark" size={13} color="#16A34A" />
+                </View>
+              </View>
+            </View>
 
-            <Text style={styles.welcomeText}>Welcome back,</Text>
-            <Text style={styles.userName}>
-              {user?.name || user?.username}!
-            </Text>
-
-            <Text style={styles.welcomeSubtext}>
-              Review pending orders, approve or reject them, and track your monthly activity.
-            </Text>
+            <View style={bStyles.heroStatsRow}>
+              <View style={bStyles.heroStat}>
+                <Ionicons name="calendar-outline" size={16} color="rgba(255,255,255,0.85)" />
+                <View style={{ marginLeft: 8 }}>
+                  <Text style={bStyles.heroStatLabel}>Member Since</Text>
+                  <Text style={bStyles.heroStatValue}>{memberSince}</Text>
+                </View>
+              </View>
+              <View style={bStyles.heroStatDivider} />
+              <View style={bStyles.heroStat}>
+                <Ionicons name="document-text-outline" size={16} color="rgba(255,255,255,0.85)" />
+                <View style={{ marginLeft: 8 }}>
+                  <Text style={bStyles.heroStatLabel}>Total Orders</Text>
+                  <Text style={bStyles.heroStatValue}>{bTotal}</Text>
+                </View>
+              </View>
+              <View style={bStyles.heroStatDivider} />
+              <View style={bStyles.heroStat}>
+                <Ionicons name="ribbon-outline" size={16} color="rgba(255,255,255,0.85)" />
+                <View style={{ marginLeft: 8 }}>
+                  <Text style={bStyles.heroStatLabel}>Approval Rate</Text>
+                  <Text style={bStyles.heroStatValue}>{approvalRate}%</Text>
+                </View>
+              </View>
+            </View>
           </LinearGradient>
 
-          {/* Analytics Section */}
-          <View style={styles.roleActivityHeader}>
-            <Text style={[styles.sectionTitle, styles.roleActivityTitle]}>
-              Your Activity
-            </Text>
-          </View>
-
-          <View style={styles.roleActivityControls}>
+          {/* ===== Your Activity ===== */}
+          <View style={bStyles.sectionHeaderRow}>
+            <Text style={bStyles.sectionTitle}>Your Activity</Text>
             <MonthPicker
               year={audYear}
               month={audMonth}
               onChangeYear={setAudYear}
               onChangeMonth={setaudMonth}
             />
-            {renderRoleStats()}
           </View>
 
+          <View style={bStyles.activityGrid}>
+            {activityCards.map((c) => (
+              <TouchableOpacity
+                key={c.title}
+                activeOpacity={0.85}
+                onPress={c.onPress}
+                style={[bStyles.activityCard, { backgroundColor: c.bg, borderColor: `${c.color}22` }]}
+              >
+                <View style={[bStyles.activityIcon, { backgroundColor: `${c.color}1F` }]}>
+                  <Ionicons name={c.icon as any} size={20} color={c.color} />
+                </View>
+                <Text style={bStyles.activityValue}>{c.value}</Text>
+                <Text style={bStyles.activityLabel}>{c.title}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
 
+          {/* ===== Insights ===== */}
+          <View style={bStyles.card}>
+            <View style={bStyles.cardHeaderRow}>
+              <Text style={bStyles.cardTitle}>Insights</Text>
+              <TouchableOpacity
+                style={bStyles.linkRow}
+                onPress={() => router.push("/reports/daily-report" as any)}
+              >
+                <Text style={bStyles.linkText}>View full report</Text>
+                <Ionicons name="chevron-forward" size={16} color={COLORS.primary} />
+              </TouchableOpacity>
+            </View>
+            <View style={bStyles.insightsRow}>
+              <View style={bStyles.insightBox}>
+                <Text style={bStyles.insightLabel}>Approval Rate</Text>
+                <View style={bStyles.insightBody}>
+                  <Text style={bStyles.insightValue}>{approvalRate}%</Text>
+                  <PieChart
+                    donut
+                    radius={30}
+                    innerRadius={20}
+                    innerCircleColor="#fff"
+                    data={[
+                      { value: Math.max(approvalRate, 0.001), color: "#16A34A" },
+                      { value: Math.max(100 - approvalRate, 0.001), color: "#E5E7EB" },
+                    ]}
+                    centerLabelComponent={() => (
+                      <Ionicons name="checkmark" size={16} color="#16A34A" />
+                    )}
+                  />
+                </View>
+              </View>
+              <View style={bStyles.insightBox}>
+                <Text style={bStyles.insightLabel}>Avg. Order Value</Text>
+                <View style={bStyles.insightBody}>
+                  <Text style={bStyles.insightValue}>
+                    ₹{avgOrderValue.toLocaleString("en-IN")}
+                  </Text>
+                  <View style={bStyles.sparkline}>
+                    {[7, 11, 8, 13, 10, 15, 12, 17].map((h, i) => (
+                      <View key={i} style={[bStyles.sparkBar, { height: h }]} />
+                    ))}
+                  </View>
+                </View>
+              </View>
+            </View>
+          </View>
 
+          {/* ===== Recent Orders ===== */}
+          <View style={bStyles.card}>
+            <View style={bStyles.cardHeaderRow}>
+              <Text style={bStyles.cardTitle}>Recent Orders</Text>
+              <TouchableOpacity style={bStyles.linkRow} onPress={() => goOrders()}>
+                <Text style={bStyles.linkText}>View all</Text>
+                <Ionicons name="chevron-forward" size={16} color={COLORS.primary} />
+              </TouchableOpacity>
+            </View>
+            {recentOrders.length === 0 ? (
+              <Text style={bStyles.emptyText}>No recent orders</Text>
+            ) : (
+              recentOrders.map((o, i) => {
+                const s = `${o.status_display || o.status_name || o.status || ""}`.toLowerCase();
+                const pill = s.includes("reject")
+                  ? { label: "Rejected", color: "#DC2626", bg: "#FEF2F2", icon: "close-circle-outline" }
+                  : s.includes("approv") || s.includes("complete") || s.includes("accept")
+                    ? { label: "Approved", color: "#16A34A", bg: "#ECFDF3", icon: "checkmark-circle-outline" }
+                    : { label: "Pending Approval", color: "#EA8C00", bg: "#FFF7ED", icon: "time-outline" };
+                return (
+                  <TouchableOpacity
+                    key={o.id}
+                    activeOpacity={0.8}
+                    style={[bStyles.recentRow, i > 0 && bStyles.recentRowBordered]}
+                    onPress={() =>
+                      router.push({
+                        pathname: "/orders/orderdetails",
+                        params: { orderId: o.id, from: "dashboard" },
+                      })
+                    }
+                  >
+                    <View style={bStyles.recentIcon}>
+                      <Ionicons name="document-text-outline" size={18} color={COLORS.primary} />
+                    </View>
+                    <View style={bStyles.recentTextWrap}>
+                      <Text style={bStyles.recentNumber} numberOfLines={1}>
+                        {o.order_number}
+                      </Text>
+                      <Text style={bStyles.recentParty} numberOfLines={1}>
+                        {o.card_name}
+                      </Text>
+                    </View>
+                    <View style={[bStyles.recentPill, { backgroundColor: pill.bg }]}>
+                      <Ionicons name={pill.icon as any} size={12} color={pill.color} />
+                      <Text style={[bStyles.recentPillText, { color: pill.color }]} numberOfLines={1}>
+                        {pill.label}
+                      </Text>
+                    </View>
+                    <Text style={bStyles.recentAmount}>
+                      ₹{Number(o.total_amount || 0).toLocaleString("en-IN")}
+                    </Text>
+                    <Ionicons name="chevron-forward" size={16} color="#9CA3AF" />
+                  </TouchableOpacity>
+                );
+              })
+            )}
+          </View>
         </ScrollView>
+
+        {/* ===== Bottom navigation ===== */}
+        <View style={[bStyles.bottomBar, { paddingBottom: insets.bottom + 8 }]}>
+          <TouchableOpacity style={bStyles.tabItem} activeOpacity={0.7} onPress={() => {}}>
+            <Ionicons name="home" size={22} color={COLORS.primary} />
+            <Text style={[bStyles.tabLabel, { color: COLORS.primary }]}>Home</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={bStyles.tabItem} activeOpacity={0.7} onPress={() => goOrders()}>
+            <View>
+              <Ionicons name="clipboard-outline" size={22} color="#64748B" />
+              {bTotal > 0 && (
+                <View style={bStyles.tabBadge}>
+                  <Text style={bStyles.tabBadgeText}>{bTotal > 99 ? "99+" : bTotal}</Text>
+                </View>
+              )}
+            </View>
+            <Text style={bStyles.tabLabel}>Orders</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={bStyles.tabItem}
+            activeOpacity={0.85}
+            onPress={() =>
+              router.push({
+                pathname: "/orders/create",
+                params: { openMode: "create", openedAt: String(Date.now()) },
+              })
+            }
+          >
+            <View style={bStyles.fab}>
+              <Ionicons name="add" size={28} color="#fff" />
+            </View>
+            <Text style={bStyles.tabLabel}>Create</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={bStyles.tabItem}
+            activeOpacity={0.7}
+            onPress={() => router.push("/orders/drafts" as any)}
+          >
+            <Ionicons name="document-text-outline" size={22} color="#7C3AED" />
+            <Text style={bStyles.tabLabel}>Drafts</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={bStyles.tabItem}
+            activeOpacity={0.7}
+            onPress={() => router.push("/reports/daily-report" as any)}
+          >
+            <Ionicons name="bar-chart-outline" size={22} color="#F59E0B" />
+            <Text style={bStyles.tabLabel}>Reports</Text>
+          </TouchableOpacity>
+        </View>
+       </View>
       </StateWrapper>
     );
   }
@@ -3341,5 +3626,392 @@ const styles = StyleSheet.create({
   },
   toggleTextActive: {
     color: COLORS.primary,
+  },
+});
+
+const bStyles = StyleSheet.create({
+  screen: {
+    flex: 1,
+    backgroundColor: COLORS.background,
+  },
+
+  // Bottom navigation
+  bottomBar: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    justifyContent: "space-between",
+    backgroundColor: "#fff",
+    borderTopWidth: 1,
+    borderTopColor: "#EEF1F6",
+    paddingTop: 8,
+    paddingHorizontal: 6,
+    shadowColor: "#1E3A5F",
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.06,
+    shadowRadius: 12,
+    elevation: 12,
+  },
+  tabItem: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "flex-end",
+    gap: 3,
+    paddingVertical: 2,
+  },
+  tabLabel: {
+    fontSize: 11,
+    fontWeight: "600",
+    color: "#64748B",
+  },
+  tabBadge: {
+    position: "absolute",
+    top: -6,
+    right: -10,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    paddingHorizontal: 4,
+    backgroundColor: COLORS.error,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1.5,
+    borderColor: "#fff",
+  },
+  tabBadgeText: {
+    color: "#fff",
+    fontSize: 9,
+    fontWeight: "800",
+  },
+  fab: {
+    width: 54,
+    height: 54,
+    borderRadius: 27,
+    backgroundColor: COLORS.primary,
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: -26,
+    borderWidth: 4,
+    borderColor: "#fff",
+    shadowColor: COLORS.primary,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.35,
+    shadowRadius: 10,
+    elevation: 8,
+  },
+
+  // Hero
+  hero: {
+    margin: 16,
+    borderRadius: 22,
+    padding: 18,
+    overflow: "hidden",
+    position: "relative",
+    shadowColor: "#1E3A8A",
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.22,
+    shadowRadius: 16,
+    elevation: 8,
+  },
+  heroDecor: {
+    position: "absolute",
+    top: -40,
+    right: -20,
+    width: 150,
+    height: 150,
+    borderRadius: 75,
+    backgroundColor: "rgba(255,255,255,0.08)",
+  },
+  heroTopRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+  },
+  heroAvatar: {
+    width: 58,
+    height: 58,
+    borderRadius: 29,
+    backgroundColor: "rgba(255,255,255,0.22)",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 2,
+    borderColor: "rgba(255,255,255,0.4)",
+    position: "relative",
+  },
+  heroAvatarText: {
+    fontSize: 24,
+    fontWeight: "800",
+    color: "#fff",
+  },
+  heroAvatarDot: {
+    position: "absolute",
+    bottom: 0,
+    right: 2,
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    backgroundColor: "#22C55E",
+    borderWidth: 2,
+    borderColor: "#1E3A8A",
+  },
+  heroGreeting: {
+    fontSize: 14,
+    color: "rgba(255,255,255,0.88)",
+  },
+  heroName: {
+    fontSize: 21,
+    fontWeight: "800",
+    color: "#fff",
+    marginTop: 1,
+  },
+  heroChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    alignSelf: "flex-start",
+    backgroundColor: "rgba(255,255,255,0.16)",
+    borderRadius: 14,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    marginTop: 8,
+  },
+  heroChipCompany: {
+    marginTop: 8,
+  },
+  heroChipText: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#fff",
+  },
+  heroIllustration: {
+    width: 66,
+    height: 66,
+    alignItems: "center",
+    justifyContent: "center",
+    position: "relative",
+  },
+  heroIllustrationBadge: {
+    position: "absolute",
+    bottom: 2,
+    left: 0,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: "#fff",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  heroStatsRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 16,
+    paddingTop: 14,
+    borderTopWidth: 1,
+    borderTopColor: "rgba(255,255,255,0.2)",
+  },
+  heroStat: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  heroStatDivider: {
+    width: 1,
+    height: 30,
+    backgroundColor: "rgba(255,255,255,0.2)",
+    marginHorizontal: 6,
+  },
+  heroStatLabel: {
+    fontSize: 10.5,
+    color: "rgba(255,255,255,0.8)",
+  },
+  heroStatValue: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: "#fff",
+    marginTop: 1,
+  },
+
+  // Section header
+  sectionHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+    marginTop: 18,
+    marginBottom: 12,
+    gap: 10,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: "#0F172A",
+  },
+
+  // Activity grid
+  activityGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    paddingHorizontal: 16,
+    gap: 12,
+    justifyContent: "space-between",
+  },
+  activityCard: {
+    width: "47.5%",
+    borderRadius: 16,
+    padding: 14,
+    borderWidth: 1,
+  },
+  activityIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 12,
+  },
+  activityValue: {
+    fontSize: 26,
+    fontWeight: "800",
+    color: "#0F172A",
+  },
+  activityLabel: {
+    fontSize: 13,
+    color: "#64748B",
+    marginTop: 2,
+    fontWeight: "500",
+  },
+
+  // Generic card
+  card: {
+    backgroundColor: "#fff",
+    marginHorizontal: 16,
+    marginTop: 16,
+    borderRadius: 18,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: "#EEF1F6",
+    shadowColor: "#1E3A5F",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.05,
+    shadowRadius: 12,
+    elevation: 2,
+  },
+  cardHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 14,
+  },
+  cardTitle: {
+    fontSize: 17,
+    fontWeight: "800",
+    color: "#0F172A",
+  },
+  linkRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 2,
+  },
+  linkText: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: COLORS.primary,
+  },
+
+  // Insights
+  insightsRow: {
+    flexDirection: "row",
+    gap: 12,
+  },
+  insightBox: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: "#EEF1F6",
+    borderRadius: 14,
+    padding: 12,
+  },
+  insightLabel: {
+    fontSize: 12,
+    color: "#64748B",
+    fontWeight: "600",
+  },
+  insightBody: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginTop: 10,
+  },
+  insightValue: {
+    fontSize: 20,
+    fontWeight: "800",
+    color: "#0F172A",
+    flexShrink: 1,
+  },
+  sparkline: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    gap: 3,
+    height: 22,
+  },
+  sparkBar: {
+    width: 4,
+    borderRadius: 2,
+    backgroundColor: "#8B5CF6",
+  },
+
+  // Recent orders
+  recentRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingVertical: 11,
+  },
+  recentRowBordered: {
+    borderTopWidth: 1,
+    borderTopColor: "#F1F5F9",
+  },
+  recentIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: 10,
+    backgroundColor: COLORS.primaryLight,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  recentTextWrap: {
+    flex: 1,
+    minWidth: 0,
+  },
+  recentNumber: {
+    fontSize: 13.5,
+    fontWeight: "700",
+    color: "#0F172A",
+  },
+  recentParty: {
+    fontSize: 12,
+    color: "#64748B",
+    marginTop: 2,
+  },
+  recentPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    maxWidth: 128,
+  },
+  recentPillText: {
+    fontSize: 10.5,
+    fontWeight: "700",
+  },
+  recentAmount: {
+    fontSize: 13.5,
+    fontWeight: "800",
+    color: COLORS.primary,
+  },
+  emptyText: {
+    fontSize: 13,
+    color: "#94A3B8",
+    textAlign: "center",
+    paddingVertical: 16,
   },
 });
