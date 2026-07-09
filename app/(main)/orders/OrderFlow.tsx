@@ -5,6 +5,7 @@ import {
   StyleSheet,
   FlatList,
   ActivityIndicator,
+  RefreshControl,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { orderService } from "@/src/services/order.service";
@@ -33,10 +34,19 @@ export default function OrderFlowScreen() {
   const [logs, setLogs] = useState<OrderLog[]>([]);
   const [rateApprovals, setRateApprovals] = useState<RateApprovalEntry[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
     fetchData();
   }, []);
+
+  // Pull-to-refresh: re-fetch the latest logs/approvals without the full-screen
+  // loader.
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await fetchData();
+    setRefreshing(false);
+  };
 
   const fetchData = async () => {
     try {
@@ -197,6 +207,9 @@ export default function OrderFlowScreen() {
           keyExtractor={(item) => item.id.toString()}
           renderItem={renderItem}
           contentContainerStyle={{ paddingBottom: 40 }}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          }
         />
       </View>
     </View>

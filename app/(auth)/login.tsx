@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   Image,
   KeyboardAvoidingView,
@@ -128,6 +128,8 @@ export default function LoginScreen() {
   const [usernameFocused, setUsernameFocused] = useState(false);
   const [passwordFocused, setPasswordFocused] = useState(false);
   const [loading, setLoading] = useState(false);
+  // Hard guard so rapid double-taps can never fire two login requests.
+  const submittingRef = useRef(false);
   const [errors, setErrors] = useState({ username: "", password: "" });
   const [dialogVisible, setDialogVisible] = useState(false);
   const [dialogMessage, setDialogMessage] = useState("");
@@ -232,7 +234,9 @@ export default function LoginScreen() {
     return !next.username && !next.password;
   };
   const handleLogin = async () => {
+    if (submittingRef.current) return; // one request at a time (Task 5)
     if (!validate()) return;
+    submittingRef.current = true;
     const values = credentials();
     setUsername(values.username);
     setPassword(values.password);
@@ -251,6 +255,7 @@ export default function LoginScreen() {
       setDialogVisible(true);
     } finally {
       setLoading(false);
+      submittingRef.current = false;
     }
   };
 
@@ -362,6 +367,7 @@ export default function LoginScreen() {
                 onFocus={() => setUsernameFocused(true)}
                 onBlur={() => { setUsernameFocused(false); setUsername((value) => value.trim()); }}
                 mode="outlined"
+                editable={!loading}
                 placeholder="Enter your username"
                 textColor={COLORS.text}
                 style={styles.input}
@@ -391,6 +397,7 @@ export default function LoginScreen() {
                 onFocus={() => setPasswordFocused(true)}
                 onBlur={() => { setPasswordFocused(false); setPassword((value) => value.trim()); }}
                 mode="outlined"
+                editable={!loading}
                 placeholder="Enter your password"
                 secureTextEntry={!showPassword}
                 textColor={COLORS.text}
@@ -425,7 +432,12 @@ export default function LoginScreen() {
                   onPressIn={() => { buttonScale.value = withTiming(0.98, { duration: 100 }); }}
                   onPressOut={() => { buttonScale.value = withTiming(1, { duration: 140 }); }}
                   loading={loading}
-                  disabled={loading}
+                  // NOTE: intentionally NOT `disabled` — Paper's disabled state
+                  // paints an opaque surface colour that hides the gradient
+                  // (the "white button" during loading). The gradient + spinner
+                  // stay visible; the submittingRef guard in handleLogin blocks
+                  // duplicate taps, and inputs use editable={!loading}.
+                  accessibilityState={{ busy: loading }}
                   buttonColor="transparent"
                   contentStyle={styles.buttonContent}
                   labelStyle={styles.buttonLabel}

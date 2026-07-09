@@ -271,7 +271,15 @@ export default function BillingOrderList() {
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<OrderListTab>(tab === "others" ? "others" : "pending");
   const [statusView, setStatusView] = useState<string>(
-    statusFilter === "approved" ? "approved" : statusFilter === "rejected" ? "rejected" : "pending",
+    statusFilter === "approved"
+      ? "approved"
+      : statusFilter === "rejected"
+        ? "rejected"
+        : statusFilter === "pending"
+          ? "pending"
+          : tab === "others"
+            ? "all"
+            : "pending",
   );
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedFilter, setSelectedFilter] = useState<string | null>("ALL");
@@ -368,15 +376,30 @@ export default function BillingOrderList() {
       const hasNewParams = _t !== undefined && _t !== lastConsumedT.current;
       if (hasNewParams) lastConsumedT.current = _t;
 
-      setActiveTab(hasNewParams && tab === "others" ? "others" : "pending");
+      // Keep the Status dropdown, the active tab and the billing-status filter
+      // all in sync with the incoming navigation (e.g. tapping "Pending" on the
+      // home dashboard must select "Pending" here and show pending data).
+      const nextStatusView = hasNewParams
+        ? statusFilter === "approved"
+          ? "approved"
+          : statusFilter === "rejected"
+            ? "rejected"
+            : statusFilter === "pending"
+              ? "pending"
+              : tab === "others"
+                ? "all"
+                : "pending"
+        : "pending";
+      setStatusView(nextStatusView);
+      setActiveTab(nextStatusView === "pending" ? "pending" : "others");
       setSelectedFilter("ALL");
       setSelectedParties([]);
       setTempSelectedParties([]);
       setSelectedItems([]);
       setTempSelectedItems([]);
       setSelectedStatuses(
-        hasNewParams && statusFilter === "approved" ? ["Billing Approved"] :
-        hasNewParams && statusFilter === "rejected" ? ["Billing Rejected"] : []
+        nextStatusView === "approved" ? ["Billing Approved"] :
+        nextStatusView === "rejected" ? ["Billing Rejected"] : []
       );
       setTempSelectedStatuses([]);
       if (hasNewParams && year && month) {
@@ -1130,7 +1153,7 @@ export default function BillingOrderList() {
               { label: "Pending", value: "pending" },
               { label: "Approved", value: "approved" },
               { label: "Rejected", value: "rejected" },
-              { label: "All Process", value: "all" },
+              { label: "All", value: "all" },
             ]}
             value={statusView}
             onChange={(value) => {

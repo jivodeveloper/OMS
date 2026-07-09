@@ -11,7 +11,7 @@ import { COLORS, RADIUS } from "@/src/constants/theme";
 import { orderService } from "@/src/services/order.service";
 import { notificationService } from "@/src/services/notification.service";
 import { storage } from "@/src/utils/storage";
-import { screensFromExtraPages } from "@/src/constants/pages";
+import { screensFromExtraPages, SCREEN_ROLES } from "@/src/constants/pages";
 import {
   getNotificationDedupeKey,
   originScreenForRole,
@@ -19,7 +19,9 @@ import {
   type OMSNotificationData,
 } from "@/src/utils/notificationRouting";
 import { shouldShowPermissionPrompt } from "@/src/utils/notificationPermission";
+import { isNotificationSuppressed } from "@/src/utils/notificationGate";
 import NotificationPermissionModal from "@/src/components/NotificationPermissionModal";
+import BottomBar from "@/src/components/common/BottomBar";
 
 const HEADER_ICON_HIT_SLOP = { top: 12, right: 12, bottom: 12, left: 12 };
 
@@ -208,6 +210,13 @@ export default function MainLayout() {
     }
     handledNotificationKeys.current.add(dedupeKey);
 
+    // A notification that launched the app while the user was NOT authenticated
+    // must not deep-link after they log in (CASE 4). It was recorded at startup;
+    // consume it silently so the user stays on Home.
+    if (isNotificationSuppressed(dedupeKey)) {
+      return;
+    }
+
     loadUnreadNotificationCount();
 
     // Remember which list this user belongs to, so Back from the order returns
@@ -222,26 +231,8 @@ export default function MainLayout() {
     }
   }, [lastNotificationResponse, loadUnreadNotificationCount, user]);
 
-  const canSee: Record<string, string[]> = {
-    dashboard: ["admin", "manager", "approver"],
-    "orders/create": ["manager", "billing"],
-    "orders/drafts": ["manager", "billing"],
-    "orders/foc": ["manager", "billing"],
-    "orders/orderlist": ["billing"],
-    "reports/daily-report": ["admin", "billing"],
-    "admin/order-flow": ["admin"],
-    "admin/sales-quotation": ["admin"],
-    "users/create": ["admin"],
-    "users/allUsers": ["admin"],
-    "users/pagePermissions": ["admin"],
-    "users/addScheme": ["admin"],
-    "sap/sap-sync": ["admin"],
-    "sap/party-assignment": ["admin"],
-    "sap/party-product-assignment": ["admin"],
-    "approver/pending_approval": ["approver"],
-    "orders/ordertracking": ["manager", "billing"],
-    "orders/auditorapproval": ["auditor"],
-  };
+  // Single source of truth shared with the bottom bar (see constants/pages).
+  const canSee = SCREEN_ROLES;
 
   const visibleStyle = {
     borderRadius: RADIUS.md,
@@ -276,13 +267,13 @@ export default function MainLayout() {
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
+      {/* Drawer content sits above the persistent global bottom bar. */}
+      <View style={{ flex: 1 }}>
       <Drawer
         drawerContent={(props) => <CustomDrawer {...props} />}
         screenOptions={({ navigation, route }) => {
           const isDashboard = route.name === "dashboard";
           const isNotifications = route.name === "notifications";
-          const canCreateOrderFromDashboard =
-            isDashboard && ["manager", "billing"].includes(userRole);
 
           return {
             headerShown: true,
@@ -337,25 +328,8 @@ export default function MainLayout() {
 
               return (
                 <View style={styles.headerActions}>
-                  {canCreateOrderFromDashboard ? (
-                    <TouchableOpacity
-                      hitSlop={HEADER_ICON_HIT_SLOP}
-                      onPress={() =>
-                        (navigation as any).navigate("orders/create", {
-                          openMode: "create",
-                          from: "dashboard",
-                          openedAt: String(Date.now()),
-                        })
-                      }
-                      style={styles.headerIconButton}
-                    >
-                      <Ionicons
-                        name="add"
-                        size={20}
-                        color={COLORS.text}
-                      />
-                    </TouchableOpacity>
-                  ) : null}
+                  {/* Top "+" create shortcut removed — the bottom bar's centre
+                      Create button is the single entry point for new orders. */}
                   <TouchableOpacity
                     hitSlop={HEADER_ICON_HIT_SLOP}
                     onPress={() => navigation.navigate("notifications" as never)}
@@ -378,6 +352,14 @@ export default function MainLayout() {
                   </TouchableOpacity>
                 </View>
               );
+            },
+            // Centre every screen's title for a consistent header across pages.
+            headerTitleAlign: "center" as const,
+            headerTitleStyle: {
+              fontSize: 19,
+              fontWeight: "800" as const,
+              color: COLORS.text,
+              letterSpacing: 0.2,
             },
           };
         }}
@@ -667,6 +649,9 @@ export default function MainLayout() {
           }}
         />
       </Drawer>
+        {/* Persistent bottom navigation, shown on every screen. */}
+        <BottomBar />
+      </View>
 
       <NotificationPermissionModal
         visible={showPermissionModal}

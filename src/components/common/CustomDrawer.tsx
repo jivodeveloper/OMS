@@ -1,17 +1,18 @@
 import React, { useEffect, useState } from "react";
 import {
-  Alert,
   View,
   StyleSheet,
   TouchableOpacity,
   Switch,
   Text,
-  Linking,
+  Modal,
 } from "react-native";
 import {
   DrawerContentScrollView,
   DrawerContentComponentProps,
+  useDrawerStatus,
 } from "@react-navigation/drawer";
+import { setDrawerOpen } from "@/src/utils/drawerState";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -20,7 +21,6 @@ import { useAuth } from "@/src/context/AuthContext";
 import { COLORS } from "@/src/constants/theme";
 import { orderService } from "@/src/services/order.service";
 import { storage } from "@/src/utils/storage";
-import { notificationService } from "@/src/services/notification.service";
 
 /** Per-route accent colour for the icon tile. */
 const ACCENTS: Record<string, string> = {
@@ -45,6 +45,21 @@ const ACCENTS: Record<string, string> = {
   "orders/auditorapproval": "#16A34A",
 };
 
+// These routes already live in the persistent bottom bar (Home / Orders /
+// Create / Drafts / Reports), so they're hidden from the drawer to avoid the
+// same page appearing in two places. The Orders tab is role-specific, so every
+// role's order screen is listed here.
+const BOTTOM_BAR_ROUTES = new Set<string>([
+  "dashboard", // Home
+  "orders/orderlist", // Orders (billing)
+  "orders/ordertracking", // Orders (manager)
+  "approver/pending_approval", // Orders (approver)
+  "orders/auditorapproval", // Orders (auditor)
+  "orders/create", // Create
+  "orders/drafts", // Drafts
+  "reports/daily-report", // Reports
+]);
+
 /** Routes grouped after the primary block get a divider before them. */
 const GROUP: Record<string, number> = {
   "sap/sap-sync": 1,
@@ -61,25 +76,23 @@ const tint = (hex: string, alpha: number) => {
   return `rgba(${r},${g},${b},${alpha})`;
 };
 
+// Theme toggle temporarily hidden. Flip to `true` to re-enable the Dark Mode
+// card once the dark theme is implemented.
+const SHOW_DARK_MODE = false;
+
 export default function CustomDrawer(props: DrawerContentComponentProps) {
   const { user, logout } = useAuth();
   const insets = useSafeAreaInsets();
   const [unreadCount, setUnreadCount] = useState(0);
   const [darkMode, setDarkMode] = useState(false);
-  const [notificationsEnabled, setNotificationsEnabled] = useState<boolean | null>(
-    null,
-  );
+  const [showLogoutModal, setShowLogoutModal] = useState(false);
 
+  // Report open/closed to the shared store so the global BottomBar can hide
+  // while the sidebar is open (and reappear when it closes).
+  const drawerStatus = useDrawerStatus();
   useEffect(() => {
-    let active = true;
-    (async () => {
-      const { status } = await notificationService.getPermissionStatus();
-      if (active) setNotificationsEnabled(status === "granted");
-    })();
-    return () => {
-      active = false;
-    };
-  }, []);
+    setDrawerOpen(drawerStatus === "open");
+  }, [drawerStatus]);
 
   useEffect(() => {
     let active = true;
@@ -102,22 +115,16 @@ export default function CustomDrawer(props: DrawerContentComponentProps) {
     };
   }, []);
 
-  const performLogout = async () => {
-    await logout();
+  const performLogout = () => {
+    // Instant: close the dialog and navigate to Login immediately. The actual
+    // sign-out cleanup (token revoke, push deactivate, storage clear) runs in
+    // the background inside logout(), so the user never waits.
+    setShowLogoutModal(false);
     router.replace("/(auth)/login" as any);
+    logout();
   };
 
-  const confirmLogout = () => {
-    Alert.alert(
-      "Sign Out",
-      "Are you sure you want to sign out of your account?",
-      [
-        { text: "Cancel", style: "cancel" },
-        { text: "Sign Out", style: "destructive", onPress: performLogout },
-      ],
-      { cancelable: true },
-    );
-  };
+  const confirmLogout = () => setShowLogoutModal(true);
 
   const initial =
     user?.name?.charAt(0)?.toUpperCase() ||
@@ -132,7 +139,13 @@ export default function CustomDrawer(props: DrawerContentComponentProps) {
   const visibleItems = props.state.routes
     .map((route) => ({ route, options: props.descriptors[route.key].options }))
     .filter(
-      ({ options }) =>
+      ({ route, options }) =>
+        // "notifications" now lives as a bell in the profile header, so keep it
+        // out of the menu list to avoid duplication.
+        route.name !== "notifications" &&
+        // Pages that already live in the bottom bar are hidden here so the same
+        // page isn't offered in two places.
+        !BOTTOM_BAR_ROUTES.has(route.name) &&
         (options.drawerItemStyle as any)?.display !== "none" &&
         !!options.drawerIcon,
     );
@@ -167,7 +180,6 @@ export default function CustomDrawer(props: DrawerContentComponentProps) {
           >
             <Text style={styles.avatarText}>{initial}</Text>
           </LinearGradient>
-          <View style={styles.onlineDot} />
         </View>
 
         <View style={styles.nameRow}>
@@ -199,23 +211,25 @@ export default function CustomDrawer(props: DrawerContentComponentProps) {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        {/* Dark Mode card (UI only for now) */}
-        <View style={styles.darkCard}>
-          <View style={styles.darkIconBox}>
-            <Ionicons name="moon-outline" size={20} color={COLORS.primary} />
+        {/* Dark Mode card (hidden until the dark theme ships — flip SHOW_DARK_MODE) */}
+        {SHOW_DARK_MODE && (
+          <View style={styles.darkCard}>
+            <View style={styles.darkIconBox}>
+              <Ionicons name="moon-outline" size={20} color={COLORS.primary} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.darkTitle}>Dark Mode</Text>
+              <Text style={styles.darkSub}>Switch between light and dark theme</Text>
+            </View>
+            <Switch
+              value={darkMode}
+              onValueChange={setDarkMode}
+              trackColor={{ false: "#CBD5E1", true: COLORS.primary }}
+              thumbColor="#ffffff"
+              ios_backgroundColor="#CBD5E1"
+            />
           </View>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.darkTitle}>Dark Mode</Text>
-            <Text style={styles.darkSub}>Switch between light and dark theme</Text>
-          </View>
-          <Switch
-            value={darkMode}
-            onValueChange={setDarkMode}
-            trackColor={{ false: "#CBD5E1", true: COLORS.primary }}
-            thumbColor="#ffffff"
-            ios_backgroundColor="#CBD5E1"
-          />
-        </View>
+        )}
 
         {/* Menu items */}
         {visibleItems.map(({ route, options }, index) => {
@@ -270,40 +284,6 @@ export default function CustomDrawer(props: DrawerContentComponentProps) {
 
       {/* ===== Footer ===== */}
       <View style={[styles.footer, { paddingBottom: insets.bottom + 16 }]}>
-        {/* Notifications status + enable (Task 4) */}
-        <View style={styles.notifRow}>
-          <View style={styles.notifIconBox}>
-            <Ionicons
-              name={
-                notificationsEnabled
-                  ? "notifications"
-                  : "notifications-off-outline"
-              }
-              size={18}
-              color={notificationsEnabled ? COLORS.primary : COLORS.textSecondary}
-            />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.notifTitle}>Notifications</Text>
-            <Text style={styles.notifStatus}>
-              {notificationsEnabled === null
-                ? "Checking…"
-                : notificationsEnabled
-                  ? "Enabled"
-                  : "Disabled"}
-            </Text>
-          </View>
-          {notificationsEnabled === false ? (
-            <TouchableOpacity
-              style={styles.notifEnableBtn}
-              activeOpacity={0.85}
-              onPress={() => Linking.openSettings()}
-            >
-              <Text style={styles.notifEnableText}>Enable</Text>
-            </TouchableOpacity>
-          ) : null}
-        </View>
-
         <TouchableOpacity
           style={styles.signOut}
           activeOpacity={0.8}
@@ -318,6 +298,51 @@ export default function CustomDrawer(props: DrawerContentComponentProps) {
 
         <Text style={styles.version}>Version 1.0.0</Text>
       </View>
+
+      {/* Custom branded sign-out confirmation (replaces the system Alert). */}
+      <Modal
+        visible={showLogoutModal}
+        transparent
+        animationType="fade"
+        statusBarTranslucent
+        onRequestClose={() => setShowLogoutModal(false)}
+      >
+        <TouchableOpacity
+          style={styles.logoutBackdrop}
+          activeOpacity={1}
+          onPress={() => setShowLogoutModal(false)}
+        >
+          <TouchableOpacity
+            style={styles.logoutCard}
+            activeOpacity={1}
+            onPress={() => {}}
+          >
+            <View style={styles.logoutIconCircle}>
+              <Ionicons name="log-out-outline" size={28} color={COLORS.error} />
+            </View>
+            <Text style={styles.logoutTitle}>Sign Out</Text>
+            <Text style={styles.logoutMessage}>
+              Are you sure you want to sign out of your account?
+            </Text>
+            <View style={styles.logoutActions}>
+              <TouchableOpacity
+                style={[styles.logoutBtn, styles.logoutCancelBtn]}
+                activeOpacity={0.85}
+                onPress={() => setShowLogoutModal(false)}
+              >
+                <Text style={styles.logoutCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.logoutBtn, styles.logoutConfirmBtn]}
+                activeOpacity={0.85}
+                onPress={performLogout}
+              >
+                <Text style={styles.logoutConfirmText}>Sign Out</Text>
+              </TouchableOpacity>
+            </View>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
     </View>
   );
 }
@@ -326,6 +351,104 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: "#F7F9FC",
+  },
+
+  // Header notification bell
+  headerBell: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: "rgba(255,255,255,0.16)",
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 8,
+  },
+  headerBellBadge: {
+    position: "absolute",
+    top: 4,
+    right: 4,
+    minWidth: 16,
+    height: 16,
+    paddingHorizontal: 3,
+    borderRadius: 8,
+    backgroundColor: "#EF4444",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1.5,
+    borderColor: "#1E3A8A",
+  },
+  headerBellBadgeText: {
+    color: "#fff",
+    fontSize: 9,
+    fontWeight: "800",
+    lineHeight: 11,
+  },
+
+  // Sign-out confirmation modal
+  logoutBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(15,23,42,0.55)",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 24,
+  },
+  logoutCard: {
+    width: "100%",
+    maxWidth: 360,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 20,
+    padding: 22,
+    alignItems: "center",
+  },
+  logoutIconCircle: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: "#FEF2F2",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 14,
+  },
+  logoutTitle: {
+    fontSize: 19,
+    fontWeight: "800",
+    color: COLORS.text,
+  },
+  logoutMessage: {
+    fontSize: 14,
+    color: COLORS.textSecondary,
+    textAlign: "center",
+    lineHeight: 20,
+    marginTop: 6,
+    marginBottom: 20,
+  },
+  logoutActions: {
+    flexDirection: "row",
+    gap: 12,
+    alignSelf: "stretch",
+  },
+  logoutBtn: {
+    flex: 1,
+    paddingVertical: 13,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  logoutCancelBtn: {
+    backgroundColor: "#F1F5F9",
+  },
+  logoutCancelText: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: COLORS.textSecondary,
+  },
+  logoutConfirmBtn: {
+    backgroundColor: COLORS.error,
+  },
+  logoutConfirmText: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: "#FFFFFF",
   },
 
   // Header

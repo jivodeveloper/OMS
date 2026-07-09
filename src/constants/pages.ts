@@ -30,3 +30,44 @@ export const screensFromExtraPages = (keys: string[] = []): Set<string> => {
   }
   return unlocked;
 };
+
+// Which roles may reach each mobile screen by default. Single source of truth
+// shared by the Drawer (visibility) and the bottom bar (tap gating). extra_pages
+// grants add access on top of this.
+export const SCREEN_ROLES: Record<string, string[]> = {
+  dashboard: ["admin", "manager", "approver"],
+  "orders/create": ["manager", "billing"],
+  "orders/drafts": ["manager", "billing"],
+  "orders/foc": ["manager", "billing"],
+  "orders/orderlist": ["billing"],
+  "reports/daily-report": ["admin", "billing"],
+  "admin/order-flow": ["admin"],
+  "admin/sales-quotation": ["admin"],
+  "users/create": ["admin"],
+  "users/allUsers": ["admin"],
+  "users/pagePermissions": ["admin"],
+  "users/addScheme": ["admin"],
+  "sap/sap-sync": ["admin"],
+  "sap/party-assignment": ["admin"],
+  "sap/party-product-assignment": ["admin"],
+  "approver/pending_approval": ["approver"],
+  "orders/ordertracking": ["manager", "billing"],
+  "orders/auditorapproval": ["auditor"],
+};
+
+/**
+ * Whether a user (by role + extra_pages) may access a mobile screen. The Home
+ * dashboard is always reachable (it's the landing screen); everything else is
+ * granted by role (SCREEN_ROLES) or by an explicit extra_pages grant.
+ */
+export const canAccessScreen = (
+  screen: string,
+  role: string | null | undefined,
+  extraPages: string[] = [],
+): boolean => {
+  if (screen === "dashboard") return true;
+  const normalizedRole = (role || "").toLowerCase();
+  if (screensFromExtraPages(extraPages).has(screen)) return true;
+  const roles = SCREEN_ROLES[screen];
+  return !!roles && roles.includes(normalizedRole);
+};

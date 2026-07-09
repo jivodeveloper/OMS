@@ -7,6 +7,7 @@ import {
   useWindowDimensions,
   TouchableOpacity,
   Text,
+  Image,
   RefreshControl,
   Modal,
   ActivityIndicator,
@@ -21,7 +22,7 @@ import { COLORS, SPACING, RADIUS } from "@/src/constants/theme";
 import { api } from "@/src/services/api";
 import { storage } from "@/src/utils/storage";
 import { DashboardChartsData, TopPartyEntry } from "@/src/types/dashboard";
-import MonthPicker from "@/src/components/dashboard/MonthPicker";
+import CompactMonthPicker from "@/src/components/dashboard/CompactMonthPicker";
 import SalesLineChart from "@/src/components/dashboard/SalesLineChart";
 import TopPartiesChart from "@/src/components/dashboard/TopPartiesChart";
 import StatusPieChart from "@/src/components/dashboard/StatusPieChart";
@@ -184,6 +185,15 @@ export default function DashboardScreen() {
     useState<CompletedVarietyMetric>("orders");
   const [allAssignedParties, setAllAssignedParties] = useState<any[]>([]);
   const [recentOrders, setRecentOrders] = useState<OrderItemList[]>([]);
+  // Previous-month counts, used for the real month-over-month deltas on the
+  // "Your Activity" cards (null when a specific month isn't selected).
+  const [prevCounts, setPrevCounts] = useState<{
+    total: number;
+    pending: number;
+    approved: number;
+    rejected: number;
+    label: string;
+  } | null>(null);
 
   const [error, setError] = useState<string | null>(null);
   const [retryCount, setRetryCount] = useState(0);
@@ -231,15 +241,14 @@ export default function DashboardScreen() {
     }
   }, [user?.role, chartData]);
 
-  // Recent orders for the billing dashboard hero list.
+  // Recent orders shown in every role's dashboard hero list.
   useEffect(() => {
-    if (user?.role !== "billing") return;
     let active = true;
     (async () => {
       try {
         const orders = await productService.getOrders(0, undefined, true);
         if (active) {
-          setRecentOrders((Array.isArray(orders) ? orders : []).slice(0, 4));
+          setRecentOrders((Array.isArray(orders) ? orders : []).slice(0, 5));
         }
       } catch (err) {
         console.log("Recent orders fetch error:", err);
@@ -1318,7 +1327,7 @@ export default function DashboardScreen() {
     );
   };
 
-  const renderRoleStats = () => {
+  const getRoleCounts = () => {
     let pending = 0;
     let approved = 0;
     let rejected = 0;
@@ -1384,967 +1393,438 @@ export default function DashboardScreen() {
         pending = Math.max(total - approved - rejected, 0);
       }
     }
-    const getScreenForRole = () => {
-      if (user?.role === "approver") return "/approver/pending_approval";
-      if (user?.role === "auditor") return "/orders/auditorapproval";
-      if (user?.role === "billing") return "/orders/orderlist";
-      if (user?.role === "manager") return "/orders/ordertracking";
-      return "/orders/orderlist";
-    };
 
-    const cardYear = user?.role === "manager" ? mgrYear
-      : (user?.role === "auditor" || user?.role === "approver" || user?.role === "billing") ? audYear
-      : undefined;
-    const cardMonth = user?.role === "manager" ? mgrMonth
-      : (user?.role === "auditor" || user?.role === "approver" || user?.role === "billing") ? audMonth
-      : undefined;
-
-    const navigateTo = (tabParam: "pending" | "others", statusFilterParam?: "approved" | "rejected" | "pending") => {
-      const screen = getScreenForRole();
-      router.push({
-        pathname: screen as any,
-        params: {
-          tab: tabParam,
-          ...(statusFilterParam ? { statusFilter: statusFilterParam } : {}),
-          ...(cardYear ? { year: String(cardYear) } : {}),
-          ...(cardMonth ? { month: String(cardMonth) } : {}),
-          _t: String(Date.now()),
-        },
-      });
-    };
-
-    const statsList = [
-      { title: user?.role === "manager" ? "Total Orders" : "Total Assigned", value: total, icon: "document-text", color: "#2563EB", onPress: user?.role === "manager" ? () => navigateTo("others") : undefined },
-      { title: "Pending", value: pending, icon: "time", color: "#F59E0B", onPress: () => navigateTo("pending", "pending") },
-      { title: "Approved", value: approved, icon: "checkmark-circle", color: "#10B981", onPress: () => navigateTo("others", "approved") },
-      { title: "Rejected", value: rejected, icon: "close-circle", color: "#EF4444", onPress: () => navigateTo("others", "rejected") },
-    ];
-
-    return (
-      <View style={[styles.statsGrid, styles.statsGridWrap, { marginTop: SPACING.xs, paddingHorizontal: 0 }]}>
-        {statsList.map((stat, index) => (
-          <AnimatedCard
-            key={index}
-            onPress={stat.onPress}
-            style={[
-              styles.statCard,
-              styles.statCardHalf,
-              { borderColor: `${stat.color}55` },
-            ]}
-          >
-            <LinearGradient
-              colors={[`${stat.color}12`, COLORS.surface]}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={styles.statGradient}
-            >
-              <View style={styles.statTopRow}>
-                <View
-                  style={[
-                    styles.statIcon,
-                    {
-                      backgroundColor: `${stat.color}18`,
-                      borderColor: `${stat.color}24`,
-                    },
-                  ]}
-                >
-                  <Ionicons name={stat.icon as any} size={20} color={stat.color} />
-                </View>
-                <View style={[styles.statAccent, { backgroundColor: stat.color }]} />
-              </View>
-              <View style={styles.statTextBlock}>
-                <AnimatedNumber value={String(stat.value)} style={styles.statValue} />
-                <Text style={styles.statTitle}>{stat.title}</Text>
-              </View>
-            </LinearGradient>
-          </AnimatedCard>
-        ))}
-      </View>
-    );
+    return { total, pending, approved, rejected };
   };
 
-  if (user?.role === "manager") {
-    return (
-      <StateWrapper loading={loading || chartLoading} error={error} onRetry={handleRetry}>
-        <ScrollView
-          style={styles.container}
-          showsVerticalScrollIndicator={false}
-          refreshControl={refreshControl}
+  // ---------------------------------------------------------------------------
+  // Universal home dashboard: identical design for every role. Access to other
+  // screens is gated by permission, but the home layout never changes by role.
+  // Data comes from the shared /orders/dashboardW payload; counts are made
+  // role-correct by getRoleCounts(). Only the month period and the "orders"
+  // destination differ per role -- never the look.
+  // ---------------------------------------------------------------------------
+  const roleKey = (user?.role || "").toLowerCase();
+  const isManager = roleKey === "manager";
+  // Greeting is based on India time (IST = UTC+5:30, no DST) regardless of the
+  // device's timezone, so morning/afternoon/evening/night is always correct.
+  const nowLocal = new Date();
+  const istHour = new Date(
+    nowLocal.getTime() + nowLocal.getTimezoneOffset() * 60000 + 5.5 * 3600000,
+  ).getHours();
+  const greeting =
+    istHour < 5
+      ? "Good Night"
+      : istHour < 12
+        ? "Good Morning"
+        : istHour < 17
+          ? "Good Afternoon"
+          : istHour < 21
+            ? "Good Evening"
+            : "Good Night";
+  const displayName = user?.name || user?.username || "User";
+  const initial = displayName.charAt(0).toUpperCase();
+  const ROLE_LABELS: Record<string, string> = {
+    manager: "Manager",
+    auditor: "Auditor",
+    approver: "Approver",
+    billing: "Billing Executive",
+    admin: "Administrator",
+  };
+  const roleLabel =
+    ROLE_LABELS[roleKey] ||
+    (user?.role
+      ? `${user.role.charAt(0).toUpperCase()}${user.role.slice(1)}`
+      : "Member");
+  // Member Since uses the account's created_at, shown as a plain date (no time).
+  const memberSinceDate = user?.created_at ? new Date(user.created_at) : null;
+  const memberSince =
+    memberSinceDate && !Number.isNaN(memberSinceDate.getTime())
+      ? memberSinceDate.toLocaleDateString("en-GB", {
+          day: "2-digit",
+          month: "short",
+          year: "numeric",
+        })
+      : "—";
+
+  const {
+    total: bTotal,
+    pending: bPending,
+    approved: bApproved,
+    rejected: bRejected,
+  } = getRoleCounts();
+  const approvalRate =
+    bApproved + bRejected > 0
+      ? Math.round((bApproved / (bApproved + bRejected)) * 100)
+      : bApproved > 0
+        ? 100
+        : 0;
+  const avgOrderValue =
+    bTotal > 0 ? Math.round(Number(data?.total_revenue ?? 0) / bTotal) : 0;
+
+  // Real Avg. Order Value trend for the Insights sparkline: average order value
+  // (revenue / count) per month from the charts endpoint, last 8 months,
+  // normalised to bar heights. No dummy data — empty when there's nothing yet.
+  const avgValueSeries = (chartData?.monthly_sales || [])
+    .map((m) => (Number(m.count) > 0 ? Number(m.revenue) / Number(m.count) : 0))
+    .slice(-8);
+  const avgValueMax = Math.max(...avgValueSeries, 1);
+  const sparkHeights = avgValueSeries.map((v) =>
+    Math.max(6, Math.round((v / avgValueMax) * 22)),
+  );
+  // Month-over-month change in avg order value (real), used as the trend chip.
+  const avgValueTrend =
+    avgValueSeries.length >= 2 && avgValueSeries[avgValueSeries.length - 2] > 0
+      ? Math.round(
+          ((avgValueSeries[avgValueSeries.length - 1] -
+            avgValueSeries[avgValueSeries.length - 2]) /
+            avgValueSeries[avgValueSeries.length - 2]) *
+            100,
+        )
+      : null;
+
+  // Role-appropriate month period + orders destination (look stays identical).
+  const periodYear = isManager ? mgrYear : audYear;
+  const periodMonth = isManager ? mgrMonth : audMonth;
+  const setPeriodYear = isManager ? setMgrYear : setAudYear;
+  const setPeriodMonth = isManager ? setMgrMonth : setaudMonth;
+
+  // Real month-over-month deltas for the activity cards: fetch the previous
+  // month's counts. Skipped when "All / year to date" (month 0) is selected.
+  const prevPeriod =
+    periodMonth >= 1
+      ? periodMonth === 1
+        ? { year: periodYear - 1, month: 12 }
+        : { year: periodYear, month: periodMonth - 1 }
+      : null;
+  useEffect(() => {
+    if (!prevPeriod) {
+      setPrevCounts(null);
+      return;
+    }
+    let active = true;
+    (async () => {
+      try {
+        const token = await storage.getAccessToken();
+        const res = await api.get(
+          `/orders/dashboardW/?year=${prevPeriod.year}&month=${prevPeriod.month}`,
+          token || undefined,
+        );
+        const p = res?.data ?? res;
+        if (active && p && !p.error && p.total_orders !== undefined) {
+          const ABBR = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+          setPrevCounts({
+            total: Number(p.total_orders ?? 0),
+            pending: Number(p.pending_review_orders ?? 0),
+            approved: Number(p.accepted_orders ?? 0),
+            rejected: Number(p.rejected_orders ?? 0),
+            label: ABBR[prevPeriod.month],
+          });
+        }
+      } catch {
+        // Deltas are optional; ignore fetch failures silently.
+      }
+    })();
+    return () => {
+      active = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prevPeriod?.year, prevPeriod?.month, user?.role, retryCount]);
+
+  const pctDelta = (cur: number, prev: number | undefined) =>
+    prev !== undefined && prev > 0 ? Math.round(((cur - prev) / prev) * 100) : null;
+
+  const ordersRoute =
+    roleKey === "approver"
+      ? "/approver/pending_approval"
+      : roleKey === "auditor"
+        ? "/orders/auditorapproval"
+        : isManager
+          ? "/orders/ordertracking"
+          : "/orders/orderlist";
+
+  const goOrders = (
+    statusFilter?: "approved" | "rejected" | "pending",
+    tab: "pending" | "others" = "others",
+  ) =>
+    router.push({
+      pathname: ordersRoute as any,
+      params: {
+        tab,
+        ...(statusFilter ? { statusFilter } : {}),
+        year: String(periodYear),
+        month: String(periodMonth),
+        _t: String(Date.now()),
+      },
+    });
+
+  const activityCards = [
+    { title: isManager ? "Total Orders" : "Total Assigned", value: bTotal, icon: "document-text", color: "#2563EB", bg: "#EEF4FF", onPress: () => goOrders(), delta: pctDelta(bTotal, prevCounts?.total) },
+    { title: "Pending", value: bPending, icon: "time", color: "#F59E0B", bg: "#FFF7EC", onPress: () => goOrders("pending", "pending"), delta: pctDelta(bPending, prevCounts?.pending) },
+    { title: "Approved", value: bApproved, icon: "checkmark-circle", color: "#16A34A", bg: "#ECFDF3", onPress: () => goOrders("approved"), delta: pctDelta(bApproved, prevCounts?.approved) },
+    { title: "Rejected", value: bRejected, icon: "close-circle", color: "#EF4444", bg: "#FEF2F2", onPress: () => goOrders("rejected"), delta: pctDelta(bRejected, prevCounts?.rejected) },
+  ];
+
+  return (
+    <StateWrapper loading={loading || chartLoading} error={error} onRetry={handleRetry}>
+     <View style={bStyles.screen}>
+      <ScrollView
+        style={styles.container}
+        showsVerticalScrollIndicator={false}
+        refreshControl={refreshControl}
+        contentContainerStyle={{ paddingBottom: 24 }}
+      >
+        {/* ===== Hero ===== */}
+        <LinearGradient
+          colors={["#2563EB", "#1E3A8A"]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={bStyles.hero}
         >
-          <LinearGradient
-            colors={[COLORS.primaryDark, COLORS.primary]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={styles.welcomeCard}
-          >
-            <View style={styles.decorCircle1} />
-            <View style={styles.decorCircle2} />
-            <Text style={styles.welcomeText}>Welcome back,</Text>
-            <Text style={styles.userName}>{user?.name || user?.username}!</Text>
-            <Text style={styles.welcomeSubtext}>
-              Here is what is happening with your orders today.
-            </Text>
-          </LinearGradient>
-
-          {/* Analytics Section */}
-          <View style={styles.analyticsHeader}>
-            <Text style={[styles.sectionTitle, styles.analyticsTitle]}>Analytics</Text>
-          </View>
-          <View style={styles.analyticsControlsSection}>
-
-            <MonthPicker
-              year={mgrYear}
-              month={mgrMonth}
-              onChangeYear={setMgrYear}
-              onChangeMonth={setMgrMonth}
-            />
-            {renderRoleStats()}
-          </View>
-
-          <View style={styles.revenueTrendSection}>
-            <View style={styles.lineChartHeader}>
-              <Text style={styles.chartSectionLabel}>Monthly Sales</Text>
-
-              <Dropdown
-                data={YEAR_OPTIONS}
-                labelField="label"
-                valueField="value"
-                value={lineYear}
-                onChange={(item) => setLineYear(item.value)}
-                style={styles.yearDropdown}
-                selectedTextStyle={styles.yearDropdownText}
-              />
+          <View style={bStyles.heroDecor} />
+          <View style={bStyles.heroTopRow}>
+            <View style={bStyles.heroAvatar}>
+              <Text style={bStyles.heroAvatarText}>{initial}</Text>
+              <View style={bStyles.heroAvatarDot} />
             </View>
-
-            {chartData && (
-              <SalesLineChart data={chartData.monthly_sales || []} />
-            )}
-          </View>
-
-          {/* My Parties Section */}
-          <View style={styles.section}>
-            <View style={styles.partyHeader}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                <Text style={styles.sectionTitle}>My Parties</Text>
-                {/* <View style={styles.badge}>
- <Text style={styles.badgeText}>{topParties.length}</Text>
- </View> */}
-                <View style={styles.badge}>
-                  <Text style={styles.badgeText}>{activePartiesCount}</Text>
-                </View>
-              </View>
-
-              <View style={[styles.toggleBtn, styles.toggleBtnActive]}>
-                <Text style={[styles.toggleText, styles.toggleTextActive]}>Top 5</Text>
-              </View>
-            </View>
-
-            <View style={styles.partyChartCard}>
-
-              <View style={{ width: 150, alignItems: 'center' }}>
-                <PieChart
-                  data={partyPieData}
-                  donut
-                  radius={65}
-                  innerRadius={45}
-                  centerLabelComponent={() => {
-                    const revenue =
-                      selectedIndex !== null && partyPieData[selectedIndex] && hasPartyRevenue
-                        ? partyPieData[selectedIndex]?.actualRevenue
-                        : totalRevenue;
-
-                    const label =
-                      selectedIndex !== null && partyPieData[selectedIndex] && hasPartyRevenue
-                        ? partyPieData[selectedIndex]?.text.split(" (")[0]
-                        : "Total Revenue";
-
-                    return (
-                      <View style={{ alignItems: "center", justifyContent: "center", width: 78 }}>
-                        <Text style={{ fontSize: 13, fontWeight: "bold", textAlign: "center", color: COLORS.text }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>
-                          ₹{Number(revenue).toLocaleString("en-IN")}
-                        </Text>
-                        <Text style={{ fontSize: 9, color: COLORS.textSecondary, textAlign: "center", marginTop: 2, lineHeight: 12 }} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.7}>
-                          {label}
-                        </Text>
-                      </View>
-                    );
-                  }}
-                />
-              </View>
-
-              <ScrollView style={styles.partyLegendContainer} nestedScrollEnabled={true} showsVerticalScrollIndicator={true}>
-                {displayedParties.length > 0 ? displayedParties.map((party, index) => (
-                  <View key={index} style={[styles.partyLegendItem, { marginBottom: 8 }]}>
-                    <View
-                      style={[
-                        styles.partyDot,
-                        {
-                          backgroundColor: CHART_COLORS[index % CHART_COLORS.length],
-                        },
-                      ]}
-                    />
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.partyLegendText} numberOfLines={2}>
-                        {party.card_name} (₹{Number(party.revenue || 0).toLocaleString("en-IN")})
-                      </Text>
-                      {formatCategory(party.category) ? (
-                        <View style={styles.partyCategoryChip}>
-                          <Text style={styles.partyCategoryChipText}>
-                            {formatCategory(party.category)}
-                          </Text>
-                        </View>
-                      ) : null}
-                    </View>
-                  </View>
-                )) : (
-                  <Text style={styles.partyLegendText}>No parties found.</Text>
-                )}
-              </ScrollView>
-            </View>
-          </View>
-
-
-
-        </ScrollView>
-      </StateWrapper>
-    );
-  }
-  else if (user?.role === "auditor") {
-    return (
-      <StateWrapper loading={loading || chartLoading} error={error} onRetry={handleRetry}>
-        <ScrollView
-          style={styles.container}
-          showsVerticalScrollIndicator={false}
-          refreshControl={refreshControl}
-        >
-
-          <LinearGradient
-            colors={[COLORS.primaryDark, COLORS.primary]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={styles.welcomeCard}
-          >
-            <View style={styles.decorCircle1} />
-            <View style={styles.decorCircle2} />
-
-            <Text style={styles.welcomeText}>Welcome back,</Text>
-            <Text style={styles.userName}>
-              {user?.name || user?.username}!
-            </Text>
-
-            <Text style={styles.welcomeSubtext}>
-              Review pending orders, approve or reject them, and track your monthly activity.
-            </Text>
-          </LinearGradient>
-
-          {/* Analytics Section */}
-          <View style={styles.roleActivityHeader}>
-            <Text style={[styles.sectionTitle, styles.roleActivityTitle]}>
-              Your Activity
-            </Text>
-          </View>
-
-          <View style={styles.roleActivityControls}>
-            <MonthPicker
-              year={audYear}
-              month={audMonth}
-              onChangeYear={setAudYear}
-              onChangeMonth={setaudMonth}
-            />
-            {renderRoleStats()}
-          </View>
-
-
-
-
-        </ScrollView>
-      </StateWrapper>
-    );
-  }
-  else if (user?.role === "approver") {
-    return (
-      <StateWrapper loading={loading || chartLoading} error={error} onRetry={handleRetry}>
-        <ScrollView
-          style={styles.container}
-          showsVerticalScrollIndicator={false}
-          refreshControl={refreshControl}
-        >
-
-          <LinearGradient
-            colors={[COLORS.primaryDark, COLORS.primary]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={styles.welcomeCard}
-          >
-            <View style={styles.decorCircle1} />
-            <View style={styles.decorCircle2} />
-
-            <Text style={styles.welcomeText}>Welcome back,</Text>
-            <Text style={styles.userName}>
-              {user?.name || user?.username}!
-            </Text>
-
-            <Text style={styles.welcomeSubtext}>
-              Review pending orders, approve or reject them, and track your monthly activity.
-            </Text>
-          </LinearGradient>
-
-          {/* Analytics Section */}
-          <View style={styles.roleActivityHeader}>
-            <Text style={[styles.sectionTitle, styles.roleActivityTitle]}>
-              Your Activity
-            </Text>
-          </View>
-
-          <View style={styles.roleActivityControls}>
-            <MonthPicker
-              year={audYear}
-              month={audMonth}
-              onChangeYear={setAudYear}
-              onChangeMonth={setaudMonth}
-            />
-            {renderRoleStats()}
-          </View>
-
-
-        </ScrollView>
-      </StateWrapper>
-    );
-  }
-  else if (user?.role === "billing") {
-    const hour = new Date().getHours();
-    const greeting =
-      hour < 12 ? "Good Morning" : hour < 17 ? "Good Afternoon" : "Good Evening";
-    const displayName = user?.name || user?.username || "User";
-    const initial = displayName.charAt(0).toUpperCase();
-    const roleLabel = user?.role
-      ? `${user.role.charAt(0).toUpperCase()}${user.role.slice(1)} Executive`
-      : "Member";
-    const memberSinceDate = user?.created_at ? new Date(user.created_at) : null;
-    const memberSince =
-      memberSinceDate && !Number.isNaN(memberSinceDate.getTime())
-        ? memberSinceDate.toLocaleDateString("en-US", { month: "short", year: "numeric" })
-        : "—";
-
-    const bTotal = Number(data?.total_orders ?? 0);
-    const bPending = Number(data?.pending_review_orders ?? 0);
-    const bApproved = Number(data?.accepted_orders ?? 0);
-    const bRejected = Number(data?.rejected_orders ?? 0);
-    const approvalRate =
-      bApproved + bRejected > 0
-        ? Math.round((bApproved / (bApproved + bRejected)) * 100)
-        : bApproved > 0
-          ? 100
-          : 0;
-    const avgOrderValue =
-      bTotal > 0 ? Math.round(Number(data?.total_revenue ?? 0) / bTotal) : 0;
-
-    const goOrders = (
-      statusFilter?: "approved" | "rejected" | "pending",
-      tab: "pending" | "others" = "others",
-    ) =>
-      router.push({
-        pathname: "/orders/orderlist" as any,
-        params: {
-          tab,
-          ...(statusFilter ? { statusFilter } : {}),
-          year: String(audYear),
-          month: String(audMonth),
-          _t: String(Date.now()),
-        },
-      });
-
-    const activityCards = [
-      { title: "Total Assigned", value: bTotal, icon: "document-text", color: "#2563EB", bg: "#EEF4FF", onPress: () => goOrders() },
-      { title: "Pending", value: bPending, icon: "time", color: "#F59E0B", bg: "#FFF7EC", onPress: () => goOrders("pending", "pending") },
-      { title: "Approved", value: bApproved, icon: "checkmark-circle", color: "#16A34A", bg: "#ECFDF3", onPress: () => goOrders("approved") },
-      { title: "Rejected", value: bRejected, icon: "close-circle", color: "#EF4444", bg: "#FEF2F2", onPress: () => goOrders("rejected") },
-    ];
-
-    return (
-      <StateWrapper loading={loading || chartLoading} error={error} onRetry={handleRetry}>
-       <View style={bStyles.screen}>
-        <ScrollView
-          style={styles.container}
-          showsVerticalScrollIndicator={false}
-          refreshControl={refreshControl}
-          contentContainerStyle={{ paddingBottom: 24 }}
-        >
-          {/* ===== Hero ===== */}
-          <LinearGradient
-            colors={["#2563EB", "#1E3A8A"]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={bStyles.hero}
-          >
-            <View style={bStyles.heroDecor} />
-            <View style={bStyles.heroTopRow}>
-              <View style={bStyles.heroAvatar}>
-                <Text style={bStyles.heroAvatarText}>{initial}</Text>
-                <View style={bStyles.heroAvatarDot} />
-              </View>
-              <View style={{ flex: 1, marginLeft: 14 }}>
-                <Text style={bStyles.heroGreeting}>{greeting},</Text>
-                <Text style={bStyles.heroName} numberOfLines={1}>
-                  {displayName}! 👋
-                </Text>
+            <View style={{ flex: 1, marginLeft: 14 }}>
+              <Text style={bStyles.heroGreeting}>{greeting},</Text>
+              <Text style={bStyles.heroName} numberOfLines={1}>
+                {displayName}! 👋
+              </Text>
+              <View style={bStyles.heroChipRow}>
                 <View style={bStyles.heroChip}>
                   <Text style={bStyles.heroChipText}>{roleLabel}</Text>
                 </View>
                 {!!user?.company?.name && (
-                  <View style={[bStyles.heroChip, bStyles.heroChipCompany]}>
+                  <View style={bStyles.heroChip}>
                     <Ionicons name="business" size={12} color="#fff" />
-                    <Text style={bStyles.heroChipText}>{user.company.name}</Text>
+                    <Text style={bStyles.heroChipText} numberOfLines={1}>
+                      {user.company.name}
+                    </Text>
                   </View>
                 )}
               </View>
-              <View style={bStyles.heroIllustration}>
-                <Ionicons name="clipboard" size={52} color="rgba(255,255,255,0.92)" />
-                <View style={bStyles.heroIllustrationBadge}>
-                  <Ionicons name="checkmark" size={13} color="#16A34A" />
-                </View>
-              </View>
             </View>
-
-            <View style={bStyles.heroStatsRow}>
-              <View style={bStyles.heroStat}>
-                <Ionicons name="calendar-outline" size={16} color="rgba(255,255,255,0.85)" />
-                <View style={{ marginLeft: 8 }}>
-                  <Text style={bStyles.heroStatLabel}>Member Since</Text>
-                  <Text style={bStyles.heroStatValue}>{memberSince}</Text>
-                </View>
-              </View>
-              <View style={bStyles.heroStatDivider} />
-              <View style={bStyles.heroStat}>
-                <Ionicons name="document-text-outline" size={16} color="rgba(255,255,255,0.85)" />
-                <View style={{ marginLeft: 8 }}>
-                  <Text style={bStyles.heroStatLabel}>Total Orders</Text>
-                  <Text style={bStyles.heroStatValue}>{bTotal}</Text>
-                </View>
-              </View>
-              <View style={bStyles.heroStatDivider} />
-              <View style={bStyles.heroStat}>
-                <Ionicons name="ribbon-outline" size={16} color="rgba(255,255,255,0.85)" />
-                <View style={{ marginLeft: 8 }}>
-                  <Text style={bStyles.heroStatLabel}>Approval Rate</Text>
-                  <Text style={bStyles.heroStatValue}>{approvalRate}%</Text>
-                </View>
-              </View>
+            <View style={bStyles.heroLogoWrap}>
+              <Image
+                source={require("../../assets/images/jivo-official-logo.png")}
+                style={bStyles.heroLogo}
+                resizeMode="contain"
+              />
             </View>
-          </LinearGradient>
-
-          {/* ===== Your Activity ===== */}
-          <View style={bStyles.sectionHeaderRow}>
-            <Text style={bStyles.sectionTitle}>Your Activity</Text>
-            <MonthPicker
-              year={audYear}
-              month={audMonth}
-              onChangeYear={setAudYear}
-              onChangeMonth={setaudMonth}
-            />
           </View>
 
-          <View style={bStyles.activityGrid}>
-            {activityCards.map((c) => (
-              <TouchableOpacity
-                key={c.title}
-                activeOpacity={0.85}
-                onPress={c.onPress}
-                style={[bStyles.activityCard, { backgroundColor: c.bg, borderColor: `${c.color}22` }]}
-              >
-                <View style={[bStyles.activityIcon, { backgroundColor: `${c.color}1F` }]}>
-                  <Ionicons name={c.icon as any} size={20} color={c.color} />
-                </View>
-                <Text style={bStyles.activityValue}>{c.value}</Text>
-                <Text style={bStyles.activityLabel}>{c.title}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-
-          {/* ===== Insights ===== */}
-          <View style={bStyles.card}>
-            <View style={bStyles.cardHeaderRow}>
-              <Text style={bStyles.cardTitle}>Insights</Text>
-              <TouchableOpacity
-                style={bStyles.linkRow}
-                onPress={() => router.push("/reports/daily-report" as any)}
-              >
-                <Text style={bStyles.linkText}>View full report</Text>
-                <Ionicons name="chevron-forward" size={16} color={COLORS.primary} />
-              </TouchableOpacity>
+          <View style={bStyles.heroStatsRow}>
+            <View style={bStyles.heroStat}>
+              <Ionicons name="calendar-outline" size={16} color="rgba(255,255,255,0.85)" />
+              <View style={{ marginLeft: 8 }}>
+                <Text style={bStyles.heroStatLabel}>Member Since</Text>
+                <Text style={bStyles.heroStatValue}>{memberSince}</Text>
+              </View>
             </View>
-            <View style={bStyles.insightsRow}>
-              <View style={bStyles.insightBox}>
-                <Text style={bStyles.insightLabel}>Approval Rate</Text>
-                <View style={bStyles.insightBody}>
-                  <Text style={bStyles.insightValue}>{approvalRate}%</Text>
-                  <PieChart
-                    donut
-                    radius={30}
-                    innerRadius={20}
-                    innerCircleColor="#fff"
-                    data={[
-                      { value: Math.max(approvalRate, 0.001), color: "#16A34A" },
-                      { value: Math.max(100 - approvalRate, 0.001), color: "#E5E7EB" },
+            <View style={bStyles.heroStatDivider} />
+            <View style={bStyles.heroStat}>
+              <Ionicons name="document-text-outline" size={16} color="rgba(255,255,255,0.85)" />
+              <View style={{ marginLeft: 8 }}>
+                <Text style={bStyles.heroStatLabel}>Total Orders</Text>
+                <Text style={bStyles.heroStatValue}>{bTotal}</Text>
+              </View>
+            </View>
+            <View style={bStyles.heroStatDivider} />
+            <View style={bStyles.heroStat}>
+              <Ionicons name="ribbon-outline" size={16} color="rgba(255,255,255,0.85)" />
+              <View style={{ marginLeft: 8 }}>
+                <Text style={bStyles.heroStatLabel}>Approval Rate</Text>
+                <Text style={bStyles.heroStatValue}>{approvalRate}%</Text>
+              </View>
+            </View>
+          </View>
+        </LinearGradient>
+
+        {/* ===== Your Activity ===== */}
+        <View style={bStyles.sectionHeaderRow}>
+          <Text style={bStyles.sectionTitle}>Your Activity</Text>
+          <CompactMonthPicker
+            year={periodYear}
+            month={periodMonth}
+            onChangeYear={setPeriodYear}
+            onChangeMonth={setPeriodMonth}
+          />
+        </View>
+
+        <View style={bStyles.activityGrid}>
+          {activityCards.map((c) => (
+            <TouchableOpacity
+              key={c.title}
+              activeOpacity={0.85}
+              onPress={c.onPress}
+              style={[bStyles.activityCard, { backgroundColor: c.bg, borderColor: `${c.color}22` }]}
+            >
+              <View style={[bStyles.activityIcon, { backgroundColor: `${c.color}1F` }]}>
+                <Ionicons name={c.icon as any} size={18} color={c.color} />
+              </View>
+              <Text style={bStyles.activityValue}>{c.value}</Text>
+              <Text style={bStyles.activityLabel}>{c.title}</Text>
+              {c.delta !== null && prevCounts && (
+                <View style={bStyles.deltaRow}>
+                  <View
+                    style={[
+                      bStyles.deltaChip,
+                      { backgroundColor: c.delta >= 0 ? "#DCFCE7" : "#FEE2E2" },
                     ]}
-                    centerLabelComponent={() => (
-                      <Ionicons name="checkmark" size={16} color="#16A34A" />
-                    )}
-                  />
+                  >
+                    <Ionicons
+                      name={c.delta >= 0 ? "arrow-up" : "arrow-down"}
+                      size={9}
+                      color={c.delta >= 0 ? "#16A34A" : "#DC2626"}
+                    />
+                    <Text
+                      style={[
+                        bStyles.deltaChipText,
+                        { color: c.delta >= 0 ? "#16A34A" : "#DC2626" },
+                      ]}
+                    >
+                      {Math.abs(c.delta)}%
+                    </Text>
+                  </View>
+                  <Text style={bStyles.deltaVs}>vs {prevCounts.label}</Text>
                 </View>
+              )}
+            </TouchableOpacity>
+          ))}
+        </View>
+
+        {/* ===== Insights ===== */}
+        <View style={bStyles.card}>
+          <View style={bStyles.cardHeaderRow}>
+            <Text style={bStyles.cardTitle}>Insights</Text>
+            <TouchableOpacity
+              style={bStyles.linkRow}
+              onPress={() => router.push("/reports/daily-report" as any)}
+            >
+              <Text style={bStyles.linkText}>View full report</Text>
+              <Ionicons name="chevron-forward" size={16} color={COLORS.primary} />
+            </TouchableOpacity>
+          </View>
+          <View style={bStyles.insightsRow}>
+            <View style={bStyles.insightBox}>
+              <Text style={bStyles.insightLabel}>Approval Rate</Text>
+              <View style={bStyles.insightBody}>
+                <Text style={bStyles.insightValue}>{approvalRate}%</Text>
+                <PieChart
+                  donut
+                  radius={30}
+                  innerRadius={20}
+                  innerCircleColor="#fff"
+                  data={[
+                    { value: Math.max(approvalRate, 0.001), color: "#16A34A" },
+                    { value: Math.max(100 - approvalRate, 0.001), color: "#E5E7EB" },
+                  ]}
+                  centerLabelComponent={() => (
+                    <Ionicons name="checkmark" size={16} color="#16A34A" />
+                  )}
+                />
               </View>
-              <View style={bStyles.insightBox}>
-                <Text style={bStyles.insightLabel}>Avg. Order Value</Text>
-                <View style={bStyles.insightBody}>
+            </View>
+            <View style={bStyles.insightBox}>
+              <Text style={bStyles.insightLabel}>Avg. Order Value</Text>
+              <View style={bStyles.insightBody}>
+                <View style={{ flex: 1 }}>
                   <Text style={bStyles.insightValue}>
                     ₹{avgOrderValue.toLocaleString("en-IN")}
                   </Text>
+                  {avgValueTrend !== null && (
+                    <View style={bStyles.trendChip}>
+                      <Ionicons
+                        name={avgValueTrend >= 0 ? "arrow-up" : "arrow-down"}
+                        size={11}
+                        color={avgValueTrend >= 0 ? "#16A34A" : "#DC2626"}
+                      />
+                      <Text
+                        style={[
+                          bStyles.trendChipText,
+                          { color: avgValueTrend >= 0 ? "#16A34A" : "#DC2626" },
+                        ]}
+                      >
+                        {Math.abs(avgValueTrend)}% vs last month
+                      </Text>
+                    </View>
+                  )}
+                </View>
+                {sparkHeights.length > 0 ? (
                   <View style={bStyles.sparkline}>
-                    {[7, 11, 8, 13, 10, 15, 12, 17].map((h, i) => (
+                    {sparkHeights.map((h, i) => (
                       <View key={i} style={[bStyles.sparkBar, { height: h }]} />
                     ))}
                   </View>
-                </View>
+                ) : null}
               </View>
             </View>
           </View>
-
-          {/* ===== Recent Orders ===== */}
-          <View style={bStyles.card}>
-            <View style={bStyles.cardHeaderRow}>
-              <Text style={bStyles.cardTitle}>Recent Orders</Text>
-              <TouchableOpacity style={bStyles.linkRow} onPress={() => goOrders()}>
-                <Text style={bStyles.linkText}>View all</Text>
-                <Ionicons name="chevron-forward" size={16} color={COLORS.primary} />
-              </TouchableOpacity>
-            </View>
-            {recentOrders.length === 0 ? (
-              <Text style={bStyles.emptyText}>No recent orders</Text>
-            ) : (
-              recentOrders.map((o, i) => {
-                const s = `${o.status_display || o.status_name || o.status || ""}`.toLowerCase();
-                const pill = s.includes("reject")
-                  ? { label: "Rejected", color: "#DC2626", bg: "#FEF2F2", icon: "close-circle-outline" }
-                  : s.includes("approv") || s.includes("complete") || s.includes("accept")
-                    ? { label: "Approved", color: "#16A34A", bg: "#ECFDF3", icon: "checkmark-circle-outline" }
-                    : { label: "Pending Approval", color: "#EA8C00", bg: "#FFF7ED", icon: "time-outline" };
-                return (
-                  <TouchableOpacity
-                    key={o.id}
-                    activeOpacity={0.8}
-                    style={[bStyles.recentRow, i > 0 && bStyles.recentRowBordered]}
-                    onPress={() =>
-                      router.push({
-                        pathname: "/orders/orderdetails",
-                        params: { orderId: o.id, from: "dashboard" },
-                      })
-                    }
-                  >
-                    <View style={bStyles.recentIcon}>
-                      <Ionicons name="document-text-outline" size={18} color={COLORS.primary} />
-                    </View>
-                    <View style={bStyles.recentTextWrap}>
-                      <Text style={bStyles.recentNumber} numberOfLines={1}>
-                        {o.order_number}
-                      </Text>
-                      <Text style={bStyles.recentParty} numberOfLines={1}>
-                        {o.card_name}
-                      </Text>
-                    </View>
-                    <View style={[bStyles.recentPill, { backgroundColor: pill.bg }]}>
-                      <Ionicons name={pill.icon as any} size={12} color={pill.color} />
-                      <Text style={[bStyles.recentPillText, { color: pill.color }]} numberOfLines={1}>
-                        {pill.label}
-                      </Text>
-                    </View>
-                    <Text style={bStyles.recentAmount}>
-                      ₹{Number(o.total_amount || 0).toLocaleString("en-IN")}
-                    </Text>
-                    <Ionicons name="chevron-forward" size={16} color="#9CA3AF" />
-                  </TouchableOpacity>
-                );
-              })
-            )}
-          </View>
-        </ScrollView>
-
-        {/* ===== Bottom navigation ===== */}
-        <View style={[bStyles.bottomBar, { paddingBottom: insets.bottom + 8 }]}>
-          <TouchableOpacity style={bStyles.tabItem} activeOpacity={0.7} onPress={() => {}}>
-            <Ionicons name="home" size={22} color={COLORS.primary} />
-            <Text style={[bStyles.tabLabel, { color: COLORS.primary }]}>Home</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={bStyles.tabItem} activeOpacity={0.7} onPress={() => goOrders()}>
-            <View>
-              <Ionicons name="clipboard-outline" size={22} color="#64748B" />
-              {bTotal > 0 && (
-                <View style={bStyles.tabBadge}>
-                  <Text style={bStyles.tabBadgeText}>{bTotal > 99 ? "99+" : bTotal}</Text>
-                </View>
-              )}
-            </View>
-            <Text style={bStyles.tabLabel}>Orders</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={bStyles.tabItem}
-            activeOpacity={0.85}
-            onPress={() =>
-              router.push({
-                pathname: "/orders/create",
-                params: { openMode: "create", openedAt: String(Date.now()) },
-              })
-            }
-          >
-            <View style={bStyles.fab}>
-              <Ionicons name="add" size={28} color="#fff" />
-            </View>
-            <Text style={bStyles.tabLabel}>Create</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={bStyles.tabItem}
-            activeOpacity={0.7}
-            onPress={() => router.push("/orders/drafts" as any)}
-          >
-            <Ionicons name="document-text-outline" size={22} color="#7C3AED" />
-            <Text style={bStyles.tabLabel}>Drafts</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={bStyles.tabItem}
-            activeOpacity={0.7}
-            onPress={() => router.push("/reports/daily-report" as any)}
-          >
-            <Ionicons name="bar-chart-outline" size={22} color="#F59E0B" />
-            <Text style={bStyles.tabLabel}>Reports</Text>
-          </TouchableOpacity>
         </View>
-       </View>
-      </StateWrapper>
-    );
-  }
-  else {
-    return (
 
-      <StateWrapper
-        loading={loading || chartLoading}
-        error={error}
-        onRetry={handleRetry}
-      >
-        <ScrollView
-          style={styles.container}
-          showsVerticalScrollIndicator={false}
-          refreshControl={refreshControl}
-        >
-          <LinearGradient
-            colors={[COLORS.primaryDark, COLORS.primary]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={styles.welcomeCard}
-          >
-            <View style={styles.decorCircle1} />
-            <View style={styles.decorCircle2} />
-            <Text style={styles.welcomeText}>Welcome back,</Text>
-            <Text style={styles.userName}>{user?.name || user?.username}!</Text>
-            <Text style={styles.welcomeSubtext}>
-              Here is what is happening with your orders today.
-            </Text>
-          </LinearGradient>
-
-          {/* Analytics Section */}
-          <View style={[styles.analyticsSection, styles.adminAnalyticsSection]}>
-            <Text style={styles.sectionTitle}>Analytics</Text>
+        {/* ===== Recent Orders ===== */}
+        <View style={bStyles.card}>
+          <View style={bStyles.cardHeaderRow}>
+            <Text style={bStyles.cardTitle}>Recent Orders</Text>
+            <TouchableOpacity style={bStyles.linkRow} onPress={() => goOrders()}>
+              <Text style={bStyles.linkText}>View all</Text>
+              <Ionicons name="chevron-forward" size={16} color={COLORS.primary} />
+            </TouchableOpacity>
           </View>
-
-          <View style={styles.adminStatsGrid}>
-            {[stats.slice(0, 2), stats.slice(2, 4)].map((row, rowIndex) => (
-              <View style={styles.adminStatsRow} key={`admin-stats-row-${rowIndex}`}>
-                {row.map((stat, index) => (
-                  <AnimatedCard
-                    key={stat.title}
-                    style={[styles.statCard, { borderColor: `${stat.color}55` }]}
-                    onPress={() => {
-                      if (stat.title === "Revenue") {
-                        setRevenueModalVisible(true);
-                      } else if (stat.title === "Today") {
-                        loadTodayStatusCounts();
-                      }
-                    }}
-                  >
-                    <LinearGradient
-                      colors={[`${stat.color}12`, COLORS.surface]}
-                      start={{ x: 0, y: 0 }}
-                      end={{ x: 1, y: 1 }}
-                      style={styles.statGradient}
-                    >
-                      <View style={styles.statTopRow}>
-                        <View
-                          style={[
-                            styles.statIcon,
-                            {
-                              backgroundColor: `${stat.color}18`,
-                              borderColor: `${stat.color}24`,
-                            },
-                          ]}
-                        >
-                          <Ionicons
-                            name={stat.icon as any}
-                            size={20}
-                            color={stat.color}
-                          />
-                        </View>
-                        <View style={[styles.statAccent, { backgroundColor: stat.color }]} />
-                      </View>
-                      <View style={styles.statTextBlock}>
-                        <AnimatedNumber value={stat.value} style={styles.statValue} />
-                        <Text style={styles.statTitle}>{stat.title}</Text>
-                      </View>
-                    </LinearGradient>
-                  </AnimatedCard>
-                ))}
-              </View>
-            ))}
-          </View>
-
-          <Modal
-            visible={revenueModalVisible}
-            transparent
-            animationType="fade"
-            onRequestClose={() => setRevenueModalVisible(false)}
-          >
-            <View style={styles.revenueModalOverlay}>
-              <View style={styles.revenueModalCard}>
+          {recentOrders.length === 0 ? (
+            <Text style={bStyles.emptyText}>No recent orders</Text>
+          ) : (
+            recentOrders.map((o, i) => {
+              const s = `${o.status_display || o.status_name || o.status || ""}`.toLowerCase();
+              const pill = s.includes("reject")
+                ? { label: "Rejected", color: "#DC2626", bg: "#FEF2F2", icon: "close-circle-outline" }
+                : s.includes("approv") || s.includes("complete") || s.includes("accept")
+                  ? { label: "Approved", color: "#16A34A", bg: "#ECFDF3", icon: "checkmark-circle-outline" }
+                  : { label: "Pending Approval", color: "#EA8C00", bg: "#FFF7ED", icon: "time-outline" };
+              return (
                 <TouchableOpacity
-                  style={styles.revenueModalClose}
-                  onPress={() => setRevenueModalVisible(false)}
+                  key={o.id}
+                  activeOpacity={0.8}
+                  style={[bStyles.recentRow, i > 0 && bStyles.recentRowBordered]}
+                  onPress={() =>
+                    router.push({
+                      pathname: "/orders/orderdetails",
+                      params: { orderId: o.id, from: "dashboard" },
+                    })
+                  }
                 >
-                  <Ionicons name="close" size={20} color={COLORS.textSecondary} />
-                </TouchableOpacity>
-
-                <View style={styles.revenueModalIcon}>
-                  <Ionicons name="cash" size={26} color="#059669" />
-                </View>
-                <Text style={styles.revenueModalTitle}>Revenue</Text>
-                <Text style={styles.revenueModalTotal}>
-                  ₹{Number(data?.total_revenue || 0).toLocaleString("en-IN")}
-                </Text>
-
-                <View style={styles.revenueBreakdownCard}>
-                  {[
-                    {
-                      label: "Completed Order Sales",
-                      value: Number(data?.completed_revenue || 0),
-                      count: Object.entries(data?.status_counts || {}).reduce(
-                        (sum, [key, value]) =>
-                          normalizeText(key).includes("completed")
-                            ? sum + Number(value || 0)
-                            : sum,
-                        0,
-                      ),
-                    },
-                    {
-                      label: "Pending Order Sales",
-                      value: Number(data?.pending_revenue || 0),
-                      count: Math.max(
-                        Number(data?.total_orders || 0) -
-                        Object.entries(data?.status_counts || {}).reduce(
-                          (sum, [key, value]) =>
-                            normalizeText(key).includes("completed") ||
-                            normalizeText(key).includes("rejected")
-                              ? sum + Number(value || 0)
-                              : sum,
-                          0,
-                        ),
-                        0,
-                      ),
-                    },
-                    {
-                      label: "Rejected Order Sales",
-                      value: Number(data?.rejected_revenue || 0),
-                      count: Object.entries(data?.status_counts || {}).reduce(
-                        (sum, [key, value]) =>
-                          normalizeText(key).includes("rejected")
-                            ? sum + Number(value || 0)
-                            : sum,
-                        0,
-                      ),
-                    },
-                  ].map((item) => (
-                    <View style={styles.revenueBreakdownRow} key={item.label}>
-                      <View style={styles.revenueBreakdownTextWrap}>
-                        <Text style={styles.revenueBreakdownLabel}>{item.label}</Text>
-                        <Text style={styles.revenueBreakdownCount}>
-                          {item.count} order{item.count === 1 ? "" : "s"}
-                        </Text>
-                      </View>
-                      <Text style={styles.revenueBreakdownValue}>
-                        ₹{item.value.toLocaleString("en-IN")}
-                      </Text>
-                    </View>
-                  ))}
-                </View>
-              </View>
-            </View>
-          </Modal>
-
-          <Modal
-            visible={todayModalVisible}
-            transparent
-            animationType="fade"
-            onRequestClose={() => setTodayModalVisible(false)}
-          >
-            <View style={styles.revenueModalOverlay}>
-              <View style={styles.revenueModalCard}>
-                <TouchableOpacity
-                  style={styles.revenueModalClose}
-                  onPress={() => setTodayModalVisible(false)}
-                >
-                  <Ionicons name="close" size={20} color={COLORS.textSecondary} />
-                </TouchableOpacity>
-
-                <View style={styles.revenueModalIcon}>
-                  <Ionicons name="today" size={26} color={COLORS.primary} />
-                </View>
-                <Text style={styles.revenueModalTitle}>Today Orders</Text>
-                <Text style={styles.revenueModalTotal}>
-                  {Number(data?.today_orders || 0).toLocaleString("en-IN")}
-                </Text>
-
-                <View style={styles.revenueBreakdownCard}>
-                  {[
-                    { label: "Completed", count: todayStatusCounts.completed },
-                    { label: "Pending", count: todayStatusCounts.pending },
-                    { label: "Rejected", count: todayStatusCounts.rejected },
-                  ].map((item) => (
-                    <View style={styles.revenueBreakdownRow} key={item.label}>
-                      <Text style={styles.revenueBreakdownLabel}>{item.label}</Text>
-                      <Text style={styles.revenueBreakdownValue}>
-                        {item.count} order{item.count === 1 ? "" : "s"}
-                      </Text>
-                    </View>
-                  ))}
-                </View>
-              </View>
-            </View>
-          </Modal>
-
-          {renderAdminOrdersModal()}
-
-          {chartData ? (
-            <View style={styles.chartsContainer}>
-              {/* Line chart with its own year picker */}
-              <View style={styles.lineChartHeader}>
-                <Text style={styles.chartSectionLabel}>Revenue Trend</Text>
-                <Dropdown
-                  data={YEAR_OPTIONS}
-                  labelField="label"
-                  valueField="value"
-                  value={lineYear}
-                  onChange={(item) => setLineYear(item.value)}
-                  style={styles.yearDropdown}
-                  selectedTextStyle={styles.yearDropdownText}
-                />
-              </View>
-              <SalesLineChart data={chartData.monthly_sales} />
-
-              {/* Donut charts with their own month+year filter */}
-              <View style={styles.overviewPanel}>
-                <View style={styles.overviewHeaderRow}>
-                  <View style={styles.overviewIcon}>
-                    <Ionicons name="options-outline" size={18} color={COLORS.primary} />
+                  <View style={bStyles.recentIcon}>
+                    <Ionicons name="document-text-outline" size={18} color={COLORS.primary} />
                   </View>
-                  <View style={styles.overviewHeaderTextWrap}>
-                    <Text style={styles.chartSectionLabel}>Overview</Text>
-                    <Text style={styles.overviewFilterSummary} numberOfLines={1}>
-                      {overviewPeriodLabel} • {selectedReportLabel}
+                  <View style={bStyles.recentTextWrap}>
+                    <Text style={bStyles.recentNumber} numberOfLines={1}>
+                      {o.order_number}
+                    </Text>
+                    <Text style={bStyles.recentParty} numberOfLines={1}>
+                      {o.card_name}
                     </Text>
                   </View>
-                </View>
-
-                <View style={styles.inlineFilterPanel}>
-                  <MonthPicker
-                    year={donutYear}
-                    month={donutMonth}
-                    onChangeYear={setDonutYear}
-                    onChangeMonth={setDonutMonth}
-                  />
-
-                  <View style={styles.reportFilterRow}>
-                    <Text style={styles.reportFilterLabel}>Report</Text>
-                    <Dropdown
-                      data={REPORT_OPTIONS}
-                      labelField="label"
-                      valueField="value"
-                      value={selectedReport}
-                      onChange={(item) => setSelectedReport(item.value)}
-                      style={styles.reportDropdown}
-                      selectedTextStyle={styles.reportDropdownText}
-                      placeholderStyle={styles.reportDropdownPlaceholder}
-                      placeholder="Select report"
-                    />
+                  <View style={[bStyles.recentPill, { backgroundColor: pill.bg }]}>
+                    <Ionicons name={pill.icon as any} size={12} color={pill.color} />
+                    <Text style={[bStyles.recentPillText, { color: pill.color }]} numberOfLines={1}>
+                      {pill.label}
+                    </Text>
                   </View>
-                </View>
-              </View>
-              <View style={styles.chartsGrid}>
-                {(selectedReport === "ALL" || selectedReport === "STATUS") && (
-                  <StatusPieChart
-                    data={chartData?.status_distribution || []}
-                    showAllStatus={selectedReport === "STATUS"}
-                    onTotalPress={() => openAdminOrders()}
-                    onStatusPress={(status) => {
-                      if (status === "Completed") {
-                        openAdminOrders("approved");
-                      } else if (status === "Rejected") {
-                        openAdminOrders("rejected");
-                      } else {
-                        openAdminOrders("pending");
-                      }
-                    }}
-                  />
-                )}
-                {(selectedReport === "ALL" || selectedReport === "CATEGORY") && (
-                  <CategorySalesChart
-                    data={chartData.category_sales}
-                    showBarGraph={selectedReport === "CATEGORY"}
-                  />
-                )}
-                {(selectedReport === "ALL" || selectedReport === "TOP_PARTIES") && (
-                  <TopPartiesChart data={completedTopParties} />
-                )}
-                {(selectedReport === "ALL" || selectedReport === "STATEWISE") && (
-                  <StatewiseBarChart data={chartData.statewise_orders} />
-                )}
-                {(selectedReport === "ALL" || selectedReport === "PERSON_PERFORMANCE") &&
-                  renderPersonWisePerformance()}
-                {(selectedReport === "ALL" || selectedReport === "COMPLETED_VARIETY") &&
-                  renderCompletedVarietyOrders()}
-              </View>
-            </View>
-          ) : null}
-
-          {/* <View style={styles.section}>
- <Text style={styles.sectionTitle}>Quick Actions</Text>
- <View style={styles.actionsRow}>
- <Surface style={styles.actionCard}>
- <Ionicons name="add-circle" size={28} color={COLORS.primary} />
- <Text style={styles.actionText}>New Order</Text>
- </Surface>
- <Surface style={styles.actionCard}>
- <Ionicons name="search" size={28} color={COLORS.primary} />
- <Text style={styles.actionText}>Search</Text>
- </Surface>
- <Surface style={styles.actionCard}>
- <Ionicons name="stats-chart" size={28} color={COLORS.primary} />
- <Text style={styles.actionText}>Reports</Text>
- </Surface>
- </View>
- </View> */}
-        </ScrollView>
-      </StateWrapper>
-    );
-  }
+                  <Text style={bStyles.recentAmount}>
+                    ₹{Number(o.total_amount || 0).toLocaleString("en-IN")}
+                  </Text>
+                  <Ionicons name="chevron-forward" size={16} color="#9CA3AF" />
+                </TouchableOpacity>
+              );
+            })
+          )}
+        </View>
+      </ScrollView>
+     </View>
+    </StateWrapper>
+  );
 }
 
 const styles = StyleSheet.create({
@@ -3701,7 +3181,9 @@ const bStyles = StyleSheet.create({
 
   // Hero
   hero: {
-    margin: 16,
+    marginHorizontal: 16,
+    marginTop: 14,
+    marginBottom: 6,
     borderRadius: 22,
     padding: 18,
     overflow: "hidden",
@@ -3762,42 +3244,36 @@ const bStyles = StyleSheet.create({
     color: "#fff",
     marginTop: 1,
   },
+  // Role + company tags sit side by side (horizontal), wrapping if needed.
+  heroChipRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: 6,
+    marginTop: 8,
+  },
   heroChip: {
     flexDirection: "row",
     alignItems: "center",
     gap: 5,
     alignSelf: "flex-start",
+    maxWidth: "100%",
     backgroundColor: "rgba(255,255,255,0.16)",
     borderRadius: 14,
     paddingHorizontal: 10,
     paddingVertical: 5,
-    marginTop: 8,
-  },
-  heroChipCompany: {
-    marginTop: 8,
   },
   heroChipText: {
     fontSize: 12,
     fontWeight: "600",
     color: "#fff",
   },
-  heroIllustration: {
-    width: 66,
-    height: 66,
-    alignItems: "center",
-    justifyContent: "center",
-    position: "relative",
+  heroLogoWrap: {
+    backgroundColor: "transparent",
   },
-  heroIllustrationBadge: {
-    position: "absolute",
-    bottom: 2,
-    left: 0,
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    backgroundColor: "#fff",
-    alignItems: "center",
-    justifyContent: "center",
+  heroLogo: {
+    width: 96,
+    height: 76,
   },
   heroStatsRow: {
     flexDirection: "row",
@@ -3835,8 +3311,8 @@ const bStyles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 16,
-    marginTop: 18,
-    marginBottom: 12,
+    marginTop: 14,
+    marginBottom: 10,
     gap: 10,
   },
   sectionTitle: {
@@ -3850,33 +3326,57 @@ const bStyles = StyleSheet.create({
     flexDirection: "row",
     flexWrap: "wrap",
     paddingHorizontal: 16,
-    gap: 12,
+    gap: 10,
     justifyContent: "space-between",
   },
+  // Compact status boxes (Total / Pending / Approved / Rejected).
   activityCard: {
-    width: "47.5%",
-    borderRadius: 16,
-    padding: 14,
+    width: "48%",
+    borderRadius: 14,
+    padding: 11,
     borderWidth: 1,
   },
   activityIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
+    width: 32,
+    height: 32,
+    borderRadius: 10,
     alignItems: "center",
     justifyContent: "center",
-    marginBottom: 12,
+    marginBottom: 7,
   },
   activityValue: {
-    fontSize: 26,
+    fontSize: 21,
     fontWeight: "800",
     color: "#0F172A",
   },
   activityLabel: {
-    fontSize: 13,
+    fontSize: 12,
     color: "#64748B",
-    marginTop: 2,
+    marginTop: 1,
     fontWeight: "500",
+  },
+  deltaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    marginTop: 8,
+  },
+  deltaChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 1,
+    borderRadius: 6,
+    paddingHorizontal: 5,
+    paddingVertical: 2,
+  },
+  deltaChipText: {
+    fontSize: 10.5,
+    fontWeight: "800",
+  },
+  deltaVs: {
+    fontSize: 10.5,
+    color: "#94A3B8",
+    fontWeight: "600",
   },
 
   // Generic card
@@ -3955,6 +3455,16 @@ const bStyles = StyleSheet.create({
     width: 4,
     borderRadius: 2,
     backgroundColor: "#8B5CF6",
+  },
+  trendChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 2,
+    marginTop: 4,
+  },
+  trendChipText: {
+    fontSize: 10.5,
+    fontWeight: "700",
   },
 
   // Recent orders

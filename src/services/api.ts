@@ -223,7 +223,7 @@ const decodeBase64 = (input: string): string | null => {
 
 /** True when the access token is expired (or within 15s of expiring). Returns
  * false if it can't be decoded — the reactive 401 path still covers that. */
-const isAccessTokenExpired = (token: string): boolean => {
+export const isAccessTokenExpired = (token: string): boolean => {
   const part = token.split('.')[1];
   if (!part) return false;
   const json = decodeBase64(part.replace(/-/g, '+').replace(/_/g, '/'));

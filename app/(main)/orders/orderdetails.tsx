@@ -139,6 +139,33 @@ const isPendingActionStatusForRole = (order: any, userRole: string) => {
   return false;
 };
 
+// The creator of an order may edit it ONLY while the next approver has not
+// acted on it yet (i.e. it is still sitting in the approver's pending queue).
+// Returns whether the current user created the order and whether it is still
+// awaiting that first approval.
+const getCreatorEditState = (
+  order: any,
+  user: { id?: number; username?: string | null } | null | undefined,
+) => {
+  if (!order) return { isCreator: false, awaitingApprover: false };
+  const statuses = getOrderStatusCodes(order);
+  const awaitingApprover =
+    hasStatusCode(statuses, "NEED_APPROVAL") ||
+    hasStatusCode(statuses, "RATE_APPROVAL") ||
+    statuses.includes("2") ||
+    statuses.includes("4") ||
+    hasStatusText(statuses, "need approval") ||
+    hasStatusText(statuses, "rate approval") ||
+    hasStatusText(statuses, "pending approval");
+  const isCreator =
+    (order?.created_by != null &&
+      Number(order.created_by) === Number(user?.id)) ||
+    (!!order?.created_by_name &&
+      !!user?.username &&
+      order.created_by_name === user.username);
+  return { isCreator, awaitingApprover };
+};
+
 const getBillingApprovalMessage = (response: any) => {
   const status = String(response?.status || "").trim();
   const message = String(response?.message || "").trim();
@@ -178,9 +205,23 @@ export default function OrderDetailsScreen() {
     setExpandedItems((prev) => ({ ...prev, [key]: !prev[key] }));
   }, []);
 
+  // Show the edit (pencil) action only to the order's creator, and only while
+  // the next approver hasn't acted yet. Once approved/rejected/forwarded, the
+  // order is locked and the creator can view it but no longer edit it.
+  const { isCreator, awaitingApprover } = getCreatorEditState(order, user);
+  const canCreatorEdit = isCreator && awaitingApprover;
   useEffect(() => {
-    if (userRole !== "billing") return;
-    const parsedId = Number(Array.isArray(orderId) ? orderId[0] : orderId);
+    // Only the creator's header is customised; everyone else keeps the default
+    // header (with the notification bell) untouched.
+    if (!order || !isCreator) return;
+    if (!canCreatorEdit) {
+      // Creator, but the approver has acted — lock the order (no edit action).
+      navigation.setOptions({ headerRight: () => null });
+      return;
+    }
+    const parsedId = Number(
+      order?.id ?? (Array.isArray(orderId) ? orderId[0] : orderId),
+    );
     navigation.setOptions({
       headerRight: () => (
         <TouchableOpacity
@@ -201,7 +242,7 @@ export default function OrderDetailsScreen() {
         </TouchableOpacity>
       ),
     });
-  }, [navigation, userRole, orderId]);
+  }, [navigation, isCreator, canCreatorEdit, order?.id, orderId]);
 
   const fetchOrder = useCallback(async (id: number, isRefresh = false) => {
     try {
@@ -446,6 +487,24 @@ export default function OrderDetailsScreen() {
                     </View>
                   )}
                 </View>
+
+                {/* Creator's edit window has closed — order is now read-only. */}
+                {isCreator && !awaitingApprover && (
+                  <View style={styles.readOnlyChip}>
+                    <Ionicons name="lock-closed" size={12} color="rgba(255,255,255,0.92)" />
+                    <Text style={styles.readOnlyChipText}>
+                      View only · locked after approval action
+                    </Text>
+                  </View>
+                )}
+                {canCreatorEdit && (
+                  <View style={styles.readOnlyChip}>
+                    <Ionicons name="create-outline" size={12} color="rgba(255,255,255,0.92)" />
+                    <Text style={styles.readOnlyChipText}>
+                      Editable until the approver acts
+                    </Text>
+                  </View>
+                )}
               </View>
             </LinearGradient>
 
@@ -850,6 +909,22 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
+  },
+  readOnlyChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    alignSelf: "flex-start",
+    gap: 5,
+    marginTop: 10,
+    backgroundColor: "rgba(255,255,255,0.16)",
+    borderRadius: 10,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  readOnlyChipText: {
+    color: "rgba(255,255,255,0.95)",
+    fontSize: 11,
+    fontWeight: "700",
   },
   orderNo: {
     flex: 1,
