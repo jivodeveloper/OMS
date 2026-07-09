@@ -17,6 +17,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { OrderItemList, orderService, productService } from "@/src/services/order.service";
 import { COLORS } from "@/constants/theme";
 import InlineOrderDateFilter, { type DateFilterValue } from "@/src/components/common/InlineOrderDateFilter";
+import Dropdown from "@/src/components/common/DropdownProps";
 import { router, useLocalSearchParams, useNavigation } from "expo-router";
 import { api } from "@/src/services/api";
 import StateWrapper from "@/src/components/common/StateWrapper";
@@ -116,6 +117,18 @@ export default function AuditorApprovalScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<AuditorTab>(tab === "others" ? "others" : "pending");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [statusView, setStatusView] = useState<string>(
+    statusFilter === "approved"
+      ? "approved"
+      : statusFilter === "rejected"
+        ? "rejected"
+        : statusFilter === "pending"
+          ? "pending"
+          : tab === "others"
+            ? "all"
+            : "pending",
+  );
   const [actionLoading, setActionLoading] = useState<{
     id: number;
     type: "approve" | "reject";
@@ -161,10 +174,23 @@ export default function AuditorApprovalScreen() {
   } | null>(null);
 
   useEffect(() => {
-    setActiveTab(tab === "others" ? "others" : "pending");
+    // Keep the Status dropdown, the active tab and the decision filter in sync.
+    // Defaults to Pending unless a specific status / the "others" tab is asked.
+    const nextView =
+      statusFilter === "approved"
+        ? "approved"
+        : statusFilter === "rejected"
+          ? "rejected"
+          : statusFilter === "pending"
+            ? "pending"
+            : tab === "others"
+              ? "all"
+              : "pending";
+    setStatusView(nextView);
+    setActiveTab(nextView === "pending" ? "pending" : "others");
     setSelectedStatuses(
-      statusFilter === "approved" ? ["Auditor Approved"] :
-      statusFilter === "rejected" ? ["Auditor Rejected"] : []
+      nextView === "approved" ? ["Auditor Approved"] :
+      nextView === "rejected" ? ["Auditor Rejected"] : []
     );
   }, [tab, statusFilter]);
 
@@ -589,6 +615,12 @@ export default function AuditorApprovalScreen() {
       if (!auditorDecisionSummary) return false;
     }
 
+    if (searchQuery.trim()) {
+      const q = searchQuery.trim().toLowerCase();
+      const haystack = `${item.order_number || ""} ${item.card_name || ""} ${item.card_code || ""}`.toLowerCase();
+      if (!haystack.includes(q)) return false;
+    }
+
     if (selectedOrderDate) {
       const orderDate = getOrderDateValue(item.created_at);
       if (selectedOrderDate.mode === "date") {
@@ -1005,79 +1037,97 @@ export default function AuditorApprovalScreen() {
     >
       <View style={styles.container}>
         <View style={styles.tabContainer}>
-          <View style={styles.tabGroup}>
-            <TouchableOpacity
-              style={[
-                styles.tab,
-                activeTab === "pending" && styles.activePendingTab,
+          <View style={styles.statusDropdownWrap}>
+            <Dropdown
+              label="Status"
+              data={[
+                { label: "Pending", value: "pending" },
+                { label: "Approved", value: "approved" },
+                { label: "Rejected", value: "rejected" },
+                { label: "All", value: "all" },
               ]}
-              onPress={() => {
-                setActiveTab("pending");
+              value={statusView}
+              onChange={(value) => {
+                setStatusView(value);
+                setActiveTab(value === "pending" ? "pending" : "others");
                 setSelectedFilter("ALL");
                 setSelectedParties([]);
                 setSelectedItems([]);
-                setSelectedStatuses([]);
+                setSelectedStatuses(
+                  value === "approved"
+                    ? ["Auditor Approved"]
+                    : value === "rejected"
+                      ? ["Auditor Rejected"]
+                      : [],
+                );
               }}
-            >
-              <Text
-                style={[
-                  styles.tabText,
-                  activeTab === "pending" && styles.activeTabText,
-                ]}
-              >
-                Pending
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[
-                styles.tab,
-                activeTab === "others" && styles.activeOthersTab,
-              ]}
-              onPress={() => {
-                setActiveTab("others");
-                setSelectedFilter("ALL");
-                setSelectedParties([]);
-                setSelectedItems([]);
-                setSelectedStatuses([]);
-              }}
-            >
-              <Text
-                style={[
-                  styles.tabText,
-                  activeTab === "others" && styles.activeTabText,
-                ]}
-              >
-                Others
-              </Text>
-            </TouchableOpacity>
+              searchable={false}
+              floatingLabel
+              noBottomSpacing
+            />
           </View>
-          <View style={styles.tabActionGroup}>
+          <View style={styles.fieldWrap}>
+            <Text style={styles.fieldLabel}>Search</Text>
+            <View style={styles.searchWrap}>
+              <Ionicons name="search-outline" size={18} color={COLORS.textSecondary} />
+              <TextInput
+                style={styles.searchInput}
+                value={searchQuery}
+                onChangeText={(value) => setSearchQuery(value.toUpperCase())}
+                placeholder="NAME / CODE"
+                placeholderTextColor={COLORS.textSecondary}
+                autoCapitalize="characters"
+                autoCorrect={false}
+              />
+              {!!searchQuery && (
+                <TouchableOpacity onPress={() => setSearchQuery("")}>
+                  <Ionicons name="close-circle" size={18} color={COLORS.textSecondary} />
+                </TouchableOpacity>
+              )}
+            </View>
+          </View>
+          <View style={styles.dateFieldWrap}>
+            <Text style={styles.fieldLabel}>Date</Text>
             <InlineOrderDateFilter
               value={selectedOrderDate}
               onChange={setSelectedOrderDate}
-              variant="compact"
+              variant="field"
             />
-            <TouchableOpacity
-              style={styles.filterIconButton}
-              onPress={() => setIsFilterModalVisible(true)}
-              activeOpacity={0.8}
-            >
-              <Ionicons name="filter-outline" size={16} color={COLORS.primary} />
-              {(selectedParties.length > 0 || selectedItems.length > 0 || selectedStatuses.length > 0) && (
-                <View style={styles.filterActiveDot} />
-              )}
-            </TouchableOpacity>
           </View>
         </View>
 
         {!loading && filteredOrders.length > 0 && (
-          <View style={styles.countBar}>
-            <Text style={styles.countText}>
-              {filteredOrders.length} order
-              {filteredOrders.length > 1 ? "s" : ""} found
-            </Text>
-          </View>
+          <LinearGradient
+            colors={[COLORS.primaryDark, COLORS.primary]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.countBar}
+          >
+            <View style={styles.countBarLeft}>
+              <View style={styles.countBarIcon}>
+                <Ionicons name="receipt-outline" size={18} color="#fff" />
+              </View>
+              <View style={styles.countBarTextWrap}>
+                <Text style={styles.countText} numberOfLines={1}>
+                  {filteredOrders.length} order{filteredOrders.length > 1 ? "s" : ""} found
+                </Text>
+                <Text style={styles.countSubText} numberOfLines={1}>
+                  Last updated just now
+                </Text>
+              </View>
+            </View>
+            <TouchableOpacity
+              style={styles.countBarFilterBtn}
+              onPress={() => setIsFilterModalVisible(true)}
+              activeOpacity={0.8}
+            >
+              <Ionicons name="funnel-outline" size={14} color="#fff" />
+              <Text style={styles.countBarFilterText}>Filter</Text>
+              {(selectedParties.length > 0 || selectedItems.length > 0 || selectedStatuses.length > 0) && (
+                <View style={styles.countBarFilterDot} />
+              )}
+            </TouchableOpacity>
+          </LinearGradient>
         )}
 
         <FlatList
@@ -1639,15 +1689,115 @@ const styles = StyleSheet.create({
   filterDateWrap: {
     marginBottom: 8,
   },
+  // Filter bar fields (Status dropdown + Search + Date) — matches Order List.
+  statusDropdownWrap: {
+    width: 126,
+  },
+  fieldWrap: {
+    flex: 1,
+    paddingTop: 8,
+    position: "relative",
+  },
+  dateFieldWrap: {
+    paddingTop: 8,
+    position: "relative",
+  },
+  fieldLabel: {
+    position: "absolute",
+    top: 0,
+    left: 12,
+    zIndex: 2,
+    backgroundColor: COLORS.inputBackground,
+    paddingHorizontal: 4,
+    fontSize: 12,
+    fontWeight: "500",
+    color: COLORS.textSecondary,
+  },
+  searchWrap: {
+    alignSelf: "stretch",
+    height: 56,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 10,
+    borderWidth: 1.5,
+    borderColor: COLORS.border,
+    borderRadius: 12,
+    backgroundColor: COLORS.inputBackground,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 12,
+    fontWeight: "600",
+    color: COLORS.text,
+    paddingVertical: 0,
+  },
+  // Gradient count bar with Filter action — matches Order List.
   countBar: {
-    backgroundColor: COLORS.primary,
-    paddingVertical: 8,
-    paddingHorizontal: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginHorizontal: 16,
+    marginTop: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 16,
+    shadowColor: COLORS.primaryDark,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.2,
+    shadowRadius: 12,
+    elevation: 6,
+  },
+  countBarLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    flex: 1,
+    marginRight: 10,
+  },
+  countBarIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: "rgba(255,255,255,0.18)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  countBarTextWrap: {
+    flex: 1,
   },
   countText: {
     color: "#fff",
-    fontWeight: "500",
-    textAlign: "center",
+    fontSize: 15,
+    fontWeight: "800",
+  },
+  countSubText: {
+    color: "rgba(255,255,255,0.8)",
+    fontSize: 11,
+    marginTop: 2,
+  },
+  countBarFilterBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "rgba(255,255,255,0.2)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.35)",
+    borderRadius: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  countBarFilterText: {
+    color: "#fff",
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  countBarFilterDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: "#FFD166",
+    marginLeft: 2,
   },
   loadingContainer: {
     flex: 1,

@@ -8,12 +8,20 @@ import {
   ActivityIndicator,
   Alert,
   Modal,
+  Pressable,
+  KeyboardAvoidingView,
   TextInput,
   RefreshControl,
   Platform,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
+import Animated, {
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring,
+  withTiming,
+} from "react-native-reanimated";
 import {
   OrderItemList,
   orderService,
@@ -26,6 +34,7 @@ import { api } from "@/src/services/api";
 import { storage } from "@/src/utils/storage";
 import StateWrapper from "@/src/components/common/StateWrapper";
 import { useAuth } from "@/src/context/AuthContext";
+import Dropdown from "@/src/components/common/DropdownProps";
 
 type OrderListTab = "pending" | "others";
 type BillingDecisionFilter = "Billing Approved" | "Billing Rejected";
@@ -139,6 +148,107 @@ const getBillingApprovalSuccessCopy = (status?: string | null, message?: string 
   };
 };
 
+type ActionDialogProps = {
+  visible: boolean;
+  type: "approve" | "reject";
+  remark: string;
+  onChangeRemark: (value: string) => void;
+  loading: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+};
+
+const ActionDialog = ({
+  visible,
+  type,
+  remark,
+  onChangeRemark,
+  loading,
+  onCancel,
+  onConfirm,
+}: ActionDialogProps) => {
+  const progress = useSharedValue(0);
+  const isApprove = type === "approve";
+  const accent = isApprove ? COLORS.success : COLORS.error;
+
+  useEffect(() => {
+    if (visible) {
+      progress.value = withSpring(1, { damping: 15, stiffness: 180, mass: 0.7 });
+    } else {
+      progress.value = withTiming(0, { duration: 140 });
+    }
+  }, [visible, progress]);
+
+  const overlayStyle = useAnimatedStyle(() => ({ opacity: progress.value }));
+  const cardStyle = useAnimatedStyle(() => ({
+    opacity: progress.value,
+    transform: [{ scale: 0.88 + progress.value * 0.12 }, { translateY: (1 - progress.value) * 24 }],
+  }));
+
+  return (
+    <Modal visible={visible} transparent animationType="none" statusBarTranslucent onRequestClose={onCancel}>
+      <Animated.View style={[styles.dialogOverlay, overlayStyle]}>
+        <Pressable style={StyleSheet.absoluteFill} onPress={onCancel} />
+        <KeyboardAvoidingView
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+          style={styles.dialogKav}
+          pointerEvents="box-none"
+        >
+          <Animated.View style={[styles.dialogCard, cardStyle]}>
+            <View style={[styles.dialogIconWrap, { backgroundColor: isApprove ? "#DCFCE7" : "#FEE2E2" }]}>
+              <Ionicons name={isApprove ? "checkmark-done" : "close"} size={30} color={accent} />
+            </View>
+            <Text style={styles.dialogTitle}>{isApprove ? "Approve Order" : "Reject Order"}</Text>
+            <Text style={styles.dialogMessage}>
+              {isApprove
+                ? "Confirm approval for this order. You can add an optional remark below."
+                : "Please provide a reason for rejecting this order."}
+            </Text>
+
+            <Text style={styles.dialogRemarkLabel}>
+              {isApprove ? "Remarks (optional)" : "Rejection reason"}
+            </Text>
+            <TextInput
+              style={styles.dialogInput}
+              placeholder={isApprove ? "Add a remark..." : "Enter reason..."}
+              placeholderTextColor="#94A3B8"
+              value={remark}
+              onChangeText={onChangeRemark}
+              multiline
+              numberOfLines={3}
+              textAlignVertical="top"
+              editable={!loading}
+            />
+
+            <View style={styles.dialogActions}>
+              <TouchableOpacity
+                style={[styles.dialogBtn, styles.dialogCancelBtn]}
+                onPress={onCancel}
+                disabled={loading}
+                activeOpacity={0.85}
+              >
+                <Text style={styles.dialogCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.dialogBtn, { backgroundColor: accent }]}
+                onPress={onConfirm}
+                disabled={loading}
+                activeOpacity={0.85}
+              >
+                {loading ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Text style={styles.dialogConfirmText}>{isApprove ? "Approve" : "Reject"}</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </Animated.View>
+        </KeyboardAvoidingView>
+      </Animated.View>
+    </Modal>
+  );
+};
+
 export default function BillingOrderList() {
   const { tab, statusFilter, year, month, _t } = useLocalSearchParams<{ tab?: string; statusFilter?: string; year?: string; month?: string; _t?: string }>();
   const { user } = useAuth();
@@ -160,6 +270,18 @@ export default function BillingOrderList() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<OrderListTab>(tab === "others" ? "others" : "pending");
+  const [statusView, setStatusView] = useState<string>(
+    statusFilter === "approved"
+      ? "approved"
+      : statusFilter === "rejected"
+        ? "rejected"
+        : statusFilter === "pending"
+          ? "pending"
+          : tab === "others"
+            ? "all"
+            : "pending",
+  );
+  const [searchQuery, setSearchQuery] = useState("");
   const [selectedFilter, setSelectedFilter] = useState<string | null>("ALL");
   const [isFilterModalVisible, setIsFilterModalVisible] = useState(false);
   const [parties, setParties] = useState<any[]>([]);
@@ -195,6 +317,7 @@ export default function BillingOrderList() {
   const [rejectModalVisible, setRejectModalVisible] = useState(false);
   const [selectedOrderId, setSelectedOrderId] = useState<number | null>(null);
   const [rejectReason, setRejectReason] = useState("");
+  const [decisionType, setDecisionType] = useState<"approve" | "reject">("reject");
 
   const [pendingModalVisible, setPendingModalVisible] = useState(false);
   const [pendingReason, setPendingReason] = useState("");
@@ -253,15 +376,30 @@ export default function BillingOrderList() {
       const hasNewParams = _t !== undefined && _t !== lastConsumedT.current;
       if (hasNewParams) lastConsumedT.current = _t;
 
-      setActiveTab(hasNewParams && tab === "others" ? "others" : "pending");
+      // Keep the Status dropdown, the active tab and the billing-status filter
+      // all in sync with the incoming navigation (e.g. tapping "Pending" on the
+      // home dashboard must select "Pending" here and show pending data).
+      const nextStatusView = hasNewParams
+        ? statusFilter === "approved"
+          ? "approved"
+          : statusFilter === "rejected"
+            ? "rejected"
+            : statusFilter === "pending"
+              ? "pending"
+              : tab === "others"
+                ? "all"
+                : "pending"
+        : "pending";
+      setStatusView(nextStatusView);
+      setActiveTab(nextStatusView === "pending" ? "pending" : "others");
       setSelectedFilter("ALL");
       setSelectedParties([]);
       setTempSelectedParties([]);
       setSelectedItems([]);
       setTempSelectedItems([]);
       setSelectedStatuses(
-        hasNewParams && statusFilter === "approved" ? ["Billing Approved"] :
-        hasNewParams && statusFilter === "rejected" ? ["Billing Rejected"] : []
+        nextStatusView === "approved" ? ["Billing Approved"] :
+        nextStatusView === "rejected" ? ["Billing Rejected"] : []
       );
       setTempSelectedStatuses([]);
       if (hasNewParams && year && month) {
@@ -291,6 +429,7 @@ export default function BillingOrderList() {
     setRefreshing(true);
     loadOrders();
   };
+
 
   useEffect(() => {
     const loadStatuses = async () => {
@@ -479,13 +618,6 @@ export default function BillingOrderList() {
     }
   }
 
-  let itemLabel = " Item";
-  if (selectedItems.length > 0) {
-    itemLabel = selectedItems.length === 1
-      ? `Item: ${selectedItems[0]}`
-      : `${selectedItems.length} Items Selected`;
-  }
-
   let statusLabel = " Status";
   if (selectedStatuses.length > 0) {
     statusLabel = selectedStatuses.length === 1
@@ -499,7 +631,6 @@ export default function BillingOrderList() {
       ? [{ label: statusLabel, value: "__STATUS__" }]
       : []),
     { label: partyLabel, value: "__PARTY__" },
-    { label: itemLabel, value: "__ITEM__" },
   ];
 
   const handleFilterChange = (val: string) => {
@@ -542,6 +673,11 @@ export default function BillingOrderList() {
 
     if (activeTab === "others" && !billingDecision) {
       return false;
+    }
+    const normalizedSearch = searchQuery.trim().toUpperCase();
+    if (normalizedSearch) {
+      const searchableCustomer = `${item.card_name || ""} ${item.card_code || ""}`.toUpperCase();
+      if (!searchableCustomer.includes(normalizedSearch)) return false;
     }
 
     if (selectedOrderDate) {
@@ -588,6 +724,32 @@ export default function BillingOrderList() {
       return `${status}: ${rejectedByName}`;
     }
     return status;
+  };
+
+  const getCardStatusBadge = (
+    item: OrderItemList,
+  ): { label: string; color: string; bg: string; icon: React.ComponentProps<typeof Ionicons>["name"] } => {
+    if (activeTab === "others") {
+      const decision = getBillingDecisionSummary(item);
+      if (decision?.decision === "Billing Approved") {
+        return { label: "Approved", color: COLORS.success, bg: "#ECFDF3", icon: "checkmark-circle-outline" };
+      }
+      if (decision?.decision === "Billing Rejected") {
+        return { label: "Rejected", color: COLORS.error, bg: "#FEF2F2", icon: "close-circle-outline" };
+      }
+    }
+
+    const raw = getStatusName(item).toLowerCase();
+    if (raw.includes("reject")) {
+      return { label: getStatusName(item) || "Rejected", color: COLORS.error, bg: "#FEF2F2", icon: "close-circle-outline" };
+    }
+    if (raw.includes("approv") || raw.includes("accept") || raw.includes("complete")) {
+      return { label: getStatusName(item) || "Approved", color: COLORS.success, bg: "#ECFDF3", icon: "checkmark-circle-outline" };
+    }
+    if (activeTab === "pending" || raw.includes("pending") || raw.includes("billing")) {
+      return { label: "Pending Approval", color: "#EA8C00", bg: "#FFF7ED", icon: "time-outline" };
+    }
+    return { label: getStatusName(item) || "Order", color: COLORS.primary, bg: COLORS.primaryLight, icon: "ellipse-outline" };
   };
 
   useEffect(() => {
@@ -704,14 +866,14 @@ export default function BillingOrderList() {
     return `${categories.slice(0, 2).join(", ")} +${categories.length - 2}`;
   };
 
-  const handleApprove = (order: OrderItemList) => {
+  const handleApprove = (order: OrderItemList, remarks = "") => {
     const approveAction = async () => {
       try {
         setActionLoading({ id: order.id, type: "approve" });
         const response: any = await productService.updatestatus(
           order.id,
           "10",
-          "Accepted by billing",
+          remarks.trim() || "Accepted by billing",
         );
         const copy = getBillingApprovalSuccessCopy(response?.status, response?.message);
         setApprovalResult({
@@ -737,11 +899,26 @@ export default function BillingOrderList() {
 
   const openRejectModal = (orderId: number) => {
     setSelectedOrderId(orderId);
+    setDecisionType("reject");
+    setRejectReason("");
+    setRejectModalVisible(true);
+  };
+
+  const openApproveModal = (orderId: number) => {
+    setSelectedOrderId(orderId);
+    setDecisionType("approve");
     setRejectReason("");
     setRejectModalVisible(true);
   };
 
   const handleReject = async () => {
+    if (decisionType === "approve") {
+      const order = orders.find((item) => item.id === selectedOrderId);
+      if (!order) return;
+      setRejectModalVisible(false);
+      handleApprove(order, rejectReason);
+      return;
+    }
     if (!rejectReason.trim()) {
       if (Platform.OS === "web") {
         window.alert("Please enter rejection reason");
@@ -829,13 +1006,17 @@ export default function BillingOrderList() {
             Created: {formatDateTime(item.created_at)}
           </Text>
         </View>
-        {userRole === "manager" && (
-          <View style={styles.statusBadge}>
-            <Text style={styles.statusText}>
-              {getStatusBadgeText(item)}
-            </Text>
-          </View>
-        )}
+        {(() => {
+          const badge = getCardStatusBadge(item);
+          return (
+            <View style={[styles.cardStatusBadge, { backgroundColor: badge.bg }]}>
+              <Ionicons name={badge.icon} size={13} color={badge.color} />
+              <Text style={[styles.cardStatusText, { color: badge.color }]} numberOfLines={1}>
+                {badge.label}
+              </Text>
+            </View>
+          );
+        })()}
       </View>
 
       <Text style={styles.cardName}>{item.card_name}</Text>
@@ -845,21 +1026,13 @@ export default function BillingOrderList() {
         <View style={styles.metaWrap}>
           {sapDocEntry != null && (
             <View style={styles.metaChip}>
-              <Ionicons
-                name="document-attach-outline"
-                size={14}
-                color={COLORS.primary}
-              />
+              <Ionicons name="document-attach-outline" size={14} color={COLORS.primary} />
               <Text style={styles.metaText}>SAP Entry: {sapDocEntry}</Text>
             </View>
           )}
           {sapDocNum != null && (
             <View style={styles.metaChip}>
-              <Ionicons
-                name="receipt-outline"
-                size={14}
-                color={COLORS.primary}
-              />
+              <Ionicons name="receipt-outline" size={14} color={COLORS.primary} />
               <Text style={styles.metaText}>SAP Num: {sapDocNum}</Text>
             </View>
           )}
@@ -891,11 +1064,7 @@ export default function BillingOrderList() {
           <Text style={styles.metaText}>Category: {getCategoryText(item)}</Text>
         </View>
         <View style={styles.metaChip}>
-          <Ionicons
-            name="document-text-outline"
-            size={14}
-            color={COLORS.primary}
-          />
+          <Ionicons name="document-text-outline" size={14} color={COLORS.primary} />
           <Text style={styles.metaText}>PO: {item.po_number || "-"}</Text>
         </View>
       </View>
@@ -917,7 +1086,7 @@ export default function BillingOrderList() {
                 <ActivityIndicator size="small" color="#fff" />
               ) : (
                 <>
-                  <Ionicons name="close-outline" size={18} color="#fff" />
+                  <Ionicons name="close-circle-outline" size={18} color="#fff" />
                   <Text style={styles.actionBtnText}>Reject</Text>
                 </>
               )}
@@ -925,15 +1094,15 @@ export default function BillingOrderList() {
 
             <TouchableOpacity
               style={[styles.actionBtn, styles.approveBtn]}
-              onPress={() => handleApprove(item)}
+              onPress={() => openApproveModal(item.id)}
               disabled={actionLoading !== null}
             >
               {actionLoading?.id === item.id && actionLoading.type === "approve" ? (
                 <ActivityIndicator size="small" color="#fff" />
               ) : (
                 <>
-                  <Ionicons name="checkmark-outline" size={18} color="#fff" />
-                  <Text style={styles.actionBtnText}>Accept</Text>
+                  <Ionicons name="checkmark-circle-outline" size={18} color="#fff" />
+                  <Text style={styles.actionBtnText}>Approve</Text>
                 </>
               )}
             </TouchableOpacity>
@@ -977,67 +1146,90 @@ export default function BillingOrderList() {
     >
     <View style={styles.container}>
       <View style={styles.tabContainer}>
-        <View style={styles.tabGroup}>
-          <TouchableOpacity
-            style={[styles.tab, activeTab === "pending" && styles.activePendingTab]}
-            onPress={() => {
-              setActiveTab("pending");
-              setSelectedFilter("ALL");
-              setSelectedParties([]);
-              setSelectedItems([]);
-              setSelectedStatuses([]);
+        <View style={styles.statusDropdownWrap}>
+          <Dropdown
+            label="Status"
+            data={[
+              { label: "Pending", value: "pending" },
+              { label: "Approved", value: "approved" },
+              { label: "Rejected", value: "rejected" },
+              { label: "All", value: "all" },
+            ]}
+            value={statusView}
+            onChange={(value) => {
+              setStatusView(value);
+              setActiveTab(value === "pending" ? "pending" : "others");
+              setSelectedStatuses(
+                value === "approved" ? ["Billing Approved"] :
+                value === "rejected" ? ["Billing Rejected"] : [],
+              );
             }}
-          >
-            <Text
-              style={[styles.tabText, activeTab === "pending" && styles.activeTabText]}
-            >
-              Pending
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[styles.tab, activeTab === "others" && styles.activeOthersTab]}
-            onPress={() => {
-              setActiveTab("others");
-              setSelectedFilter("ALL");
-              setSelectedParties([]);
-              setSelectedItems([]);
-              setSelectedStatuses([]);
-            }}
-          >
-            <Text
-              style={[styles.tabText, activeTab === "others" && styles.activeTabText]}
-            >
-              Others
-            </Text>
-          </TouchableOpacity>
+            searchable={false}
+            floatingLabel
+            noBottomSpacing
+          />
         </View>
-        <View style={styles.tabActionGroup}>
+        <View style={styles.fieldWrap}>
+          <Text style={styles.fieldLabel}>Search</Text>
+          <View style={styles.searchWrap}>
+            <Ionicons name="search-outline" size={18} color={COLORS.textSecondary} />
+            <TextInput
+              style={styles.searchInput}
+              value={searchQuery}
+              onChangeText={(value) => setSearchQuery(value.toUpperCase())}
+              placeholder="NAME / CODE"
+              placeholderTextColor={COLORS.textSecondary}
+              autoCapitalize="characters"
+              autoCorrect={false}
+            />
+            {!!searchQuery && (
+              <TouchableOpacity onPress={() => setSearchQuery("")}>
+                <Ionicons name="close-circle" size={18} color={COLORS.textSecondary} />
+              </TouchableOpacity>
+            )}
+          </View>
+        </View>
+        <View style={styles.dateFieldWrap}>
+          <Text style={styles.fieldLabel}>Date</Text>
           <InlineOrderDateFilter
             value={selectedOrderDate}
             onChange={setSelectedOrderDate}
-            variant="compact"
+            variant="field"
           />
-          <TouchableOpacity
-            style={styles.filterIconButton}
-            onPress={() => setIsFilterModalVisible(true)}
-            activeOpacity={0.8}
-          >
-            <Ionicons name="filter-outline" size={16} color={COLORS.primary} />
-            {(selectedParties.length > 0 || selectedItems.length > 0 || selectedStatuses.length > 0) && (
-              <View style={styles.filterActiveDot} />
-            )}
-          </TouchableOpacity>
         </View>
       </View>
 
-      {/* Orders Count */}
+      {/* Orders Count + Filter */}
       {!loading && filteredOrders.length > 0 && (
-        <View style={styles.countBar}>
-          <Text style={styles.countText}>
-            {filteredOrders.length} order{filteredOrders.length > 1 ? "s" : ""} found
-          </Text>
-        </View>
+        <LinearGradient
+          colors={[COLORS.primaryDark, COLORS.primary]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.countBar}
+        >
+          <View style={styles.countBarLeft}>
+            <View style={styles.countBarIcon}>
+              <Ionicons name="receipt-outline" size={18} color="#fff" />
+            </View>
+            <View style={styles.countBarTextWrap}>
+              <Text style={styles.countText} numberOfLines={1}>
+                {filteredOrders.length} order{filteredOrders.length > 1 ? "s" : ""} found
+              </Text>
+              <Text style={styles.countSubText} numberOfLines={1}>Last updated just now</Text>
+            </View>
+          </View>
+          <TouchableOpacity
+            style={styles.countBarFilterBtn}
+            onPress={() => setIsFilterModalVisible(true)}
+            activeOpacity={0.8}
+          >
+            <Ionicons name="funnel-outline" size={14} color="#fff" />
+            <Text style={styles.countBarFilterText}>Filter</Text>
+            {(selectedParties.length > 0 || selectedStatuses.length > 0) && (
+              <View style={styles.countBarFilterDot} />
+            )}
+          </TouchableOpacity>
+        </LinearGradient>
       )}
 
       {/* Orders List */}
@@ -1052,53 +1244,19 @@ export default function BillingOrderList() {
         }
       />
 
-      {/* Reject Modal */}
-      <Modal
+      {/* Approve / Reject Dialog */}
+      <ActionDialog
         visible={rejectModalVisible}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setRejectModalVisible(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Reject Order</Text>
-            <Text style={styles.modalSubtitle}>
-              Please provide a reason for rejection:
-            </Text>
-
-            <TextInput
-              style={styles.reasonInput}
-              placeholder="Enter reason..."
-              value={rejectReason}
-              onChangeText={setRejectReason}
-              multiline
-              numberOfLines={4}
-              textAlignVertical="top"
-            />
-
-            <View style={styles.modalActions}>
-              <TouchableOpacity
-                style={[styles.modalBtn, styles.cancelBtn]}
-                onPress={() => setRejectModalVisible(false)}
-              >
-                <Text style={styles.cancelBtnText}>Cancel</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.modalBtn, styles.confirmRejectBtn]}
-                onPress={() => handleReject()}
-                disabled={actionLoading !== null}
-              >
-                {actionLoading?.type === "reject" ? (
-                  <ActivityIndicator size="small" color="#fff" />
-                ) : (
-                  <Text style={styles.confirmRejectText}>Reject Order</Text>
-                )}
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
+        type={decisionType}
+        remark={rejectReason}
+        onChangeRemark={(value) => setRejectReason(value.toUpperCase())}
+        loading={actionLoading?.type === decisionType}
+        onCancel={() => {
+          if (actionLoading !== null) return;
+          setRejectModalVisible(false);
+        }}
+        onConfirm={() => handleReject()}
+      />
 
       <Modal
         visible={approvalSuccessModal && !!approvalResult}
@@ -1466,6 +1624,100 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: 8,
   },
+  statusDropdownWrap: {
+    width: 126,
+  },
+  fieldWrap: {
+    flex: 1,
+    paddingTop: 8,
+    position: "relative",
+  },
+  dateFieldWrap: {
+    paddingTop: 8,
+    position: "relative",
+  },
+  fieldLabel: {
+    position: "absolute",
+    top: 0,
+    left: 12,
+    zIndex: 2,
+    backgroundColor: COLORS.inputBackground,
+    paddingHorizontal: 4,
+    fontSize: 12,
+    fontWeight: "500",
+    color: COLORS.textSecondary,
+  },
+  searchWrap: {
+    alignSelf: "stretch",
+    height: 56,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 10,
+    borderWidth: 1.5,
+    borderColor: COLORS.border,
+    borderRadius: 12,
+    backgroundColor: COLORS.inputBackground,
+  },
+  headerRightRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingRight: 6,
+  },
+  headerIconBtn: {
+    width: 40,
+    height: 40,
+    alignItems: "center",
+    justifyContent: "center",
+    position: "relative",
+  },
+  headerFilterDot: {
+    position: "absolute",
+    top: 6,
+    right: 6,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: COLORS.error,
+  },
+  headerBadge: {
+    position: "absolute",
+    top: 2,
+    right: 2,
+    minWidth: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: COLORS.error,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 3,
+  },
+  headerBadgeText: {
+    color: "#fff",
+    fontSize: 9,
+    fontWeight: "700",
+  },
+  cardStatusBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 20,
+    maxWidth: 150,
+  },
+  cardStatusText: {
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 12,
+    fontWeight: "600",
+    color: COLORS.text,
+    paddingVertical: 0,
+  },
   tabActionGroup: {
     flexDirection: "row",
     alignItems: "center",
@@ -1513,14 +1765,70 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.error,
   },
   countBar: {
-    backgroundColor: COLORS.primary,
-    paddingVertical: 8,
-    paddingHorizontal: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginHorizontal: 16,
+    marginTop: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 16,
+    shadowColor: COLORS.primaryDark,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.2,
+    shadowRadius: 12,
+    elevation: 6,
+  },
+  countBarLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    flex: 1,
+    marginRight: 10,
+  },
+  countBarIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: "rgba(255,255,255,0.18)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  countBarTextWrap: {
+    flex: 1,
   },
   countText: {
     color: "#fff",
-    fontWeight: "500",
-    textAlign: "center",
+    fontSize: 15,
+    fontWeight: "800",
+  },
+  countSubText: {
+    color: "rgba(255,255,255,0.8)",
+    fontSize: 11,
+    marginTop: 2,
+  },
+  countBarFilterBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "rgba(255,255,255,0.2)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.35)",
+    borderRadius: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  countBarFilterText: {
+    color: "#fff",
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  countBarFilterDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: "#FFD166",
+    marginLeft: 2,
   },
   loadingContainer: {
     flex: 1,
@@ -1575,14 +1883,84 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: "700",
   },
-  cardName: {
-    fontSize: 14,
+  cardTopRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    marginBottom: 12,
+  },
+  cardPartyRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    marginBottom: 14,
+  },
+  cardIconBox: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: COLORS.primaryLight,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  itemsChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: COLORS.primaryLight,
+    borderRadius: 16,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  itemsChipText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: COLORS.primary,
+  },
+  metaGrid: {
+    flexDirection: "row",
+    alignItems: "stretch",
+    backgroundColor: COLORS.background,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    paddingVertical: 10,
+    marginBottom: 6,
+  },
+  metaCol: {
+    flex: 1,
+    paddingHorizontal: 10,
+  },
+  metaColDivider: {
+    width: 1,
+    backgroundColor: COLORS.border,
+    marginVertical: 2,
+  },
+  metaColHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    marginBottom: 4,
+  },
+  metaColLabel: {
+    fontSize: 11,
+    color: COLORS.textSecondary,
     fontWeight: "600",
+  },
+  metaColValue: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: COLORS.text,
+  },
+  cardName: {
+    fontSize: 15,
+    fontWeight: "700",
     color: COLORS.text,
   },
   cardCode: {
     fontSize: 12,
     color: COLORS.textSecondary,
+    marginTop: 2,
     marginBottom: 10,
   },
   metaWrap: {
@@ -1637,6 +2015,7 @@ const styles = StyleSheet.create({
     flexWrap: "wrap",
     justifyContent: "space-between",
     marginTop: 16,
+    gap: 10,
   },
   actionBtn: {
     flex: 1,
@@ -1644,7 +2023,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     paddingVertical: 12,
-    borderRadius: 8,
+    borderRadius: 10,
     gap: 6,
   },
 
@@ -1884,6 +2263,9 @@ const styles = StyleSheet.create({
   confirmRejectBtn: {
     backgroundColor: COLORS.error,
   },
+  confirmApproveBtn: {
+    backgroundColor: COLORS.success,
+  },
 
   confirmRejectText: {
     color: "#fff",
@@ -1963,5 +2345,96 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "700",
     color: COLORS.text,
+  },
+
+  // ===== Approve / Reject Dialog =====
+  dialogOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(15,23,42,0.55)",
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 24,
+  },
+  dialogKav: {
+    width: "100%",
+    alignItems: "center",
+  },
+  dialogCard: {
+    width: "100%",
+    maxWidth: 400,
+    backgroundColor: "#fff",
+    borderRadius: 24,
+    padding: 22,
+    alignItems: "center",
+    shadowColor: "#000",
+    shadowOpacity: 0.25,
+    shadowRadius: 24,
+    shadowOffset: { width: 0, height: 12 },
+    elevation: 12,
+  },
+  dialogIconWrap: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 14,
+  },
+  dialogTitle: {
+    fontSize: 19,
+    fontWeight: "800",
+    color: COLORS.text,
+    marginBottom: 6,
+  },
+  dialogMessage: {
+    fontSize: 13.5,
+    lineHeight: 20,
+    color: COLORS.textSecondary,
+    textAlign: "center",
+    marginBottom: 18,
+  },
+  dialogRemarkLabel: {
+    alignSelf: "flex-start",
+    fontSize: 13,
+    fontWeight: "700",
+    color: COLORS.text,
+    marginBottom: 8,
+  },
+  dialogInput: {
+    width: "100%",
+    borderWidth: 1.4,
+    borderColor: "#E2E8F0",
+    borderRadius: 14,
+    padding: 12,
+    fontSize: 14,
+    minHeight: 84,
+    color: COLORS.text,
+    backgroundColor: "#F8FAFC",
+    marginBottom: 18,
+  },
+  dialogActions: {
+    flexDirection: "row",
+    gap: 12,
+    width: "100%",
+  },
+  dialogBtn: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  dialogCancelBtn: {
+    backgroundColor: "#F1F5F9",
+  },
+  dialogCancelText: {
+    fontWeight: "700",
+    color: COLORS.text,
+    fontSize: 15,
+  },
+  dialogConfirmText: {
+    fontWeight: "800",
+    color: "#fff",
+    fontSize: 15,
   },
 });

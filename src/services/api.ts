@@ -184,131 +184,196 @@ const requestWithFallback = async (
   }
 };
 
+/* ------------------------------------------------------------------ *
+ * JWT lifecycle: automatic refresh on 401, single-flight, no retry of
+ * auth endpoints, and a session-expired handoff. Tokens are NEVER logged.
+ * ------------------------------------------------------------------ */
+
+// Auth endpoints must never trigger auto-refresh / retry (Task 10).
+const AUTH_ENDPOINTS = ['/auth/login/', '/auth/refresh/', '/auth/logout/'];
+const isAuthEndpoint = (endpoint: string) =>
+  AUTH_ENDPOINTS.some((path) => endpoint.startsWith(path));
+
+// Outcome of a refresh attempt. `invalid` = the refresh token was rejected
+// (401/400) → real session end. `network` = timeout/offline/DNS/5xx → the
+// session MUST be kept (network errors must never log the user out).
+type RefreshResult =
+  | { ok: true; access: string }
+  | { ok: false; reason: 'invalid' | 'network' };
+
+// Single-flight guard: 20 concurrent 401s trigger exactly ONE /auth/refresh/.
+let refreshPromise: Promise<RefreshResult> | null = null;
+
+// Session-expired handoff (AuthContext registers navigation + alert).
+let sessionExpiredHandler: (() => void) | null = null;
+let sessionExpiring = false;
+export const setSessionExpiredHandler = (fn: (() => void) | null) => {
+  sessionExpiredHandler = fn;
+};
+
+const decodeBase64 = (input: string): string | null => {
+  try {
+    if (typeof atob === 'function') return atob(input);
+    const g = globalThis as unknown as { atob?: (s: string) => string };
+    return g.atob ? g.atob(input) : null;
+  } catch {
+    return null;
+  }
+};
+
+/** True when the access token is expired (or within 15s of expiring). Returns
+ * false if it can't be decoded — the reactive 401 path still covers that. */
+export const isAccessTokenExpired = (token: string): boolean => {
+  const part = token.split('.')[1];
+  if (!part) return false;
+  const json = decodeBase64(part.replace(/-/g, '+').replace(/_/g, '/'));
+  if (!json) return false;
+  try {
+    const payload = JSON.parse(json);
+    if (typeof payload.exp !== 'number') return false;
+    return payload.exp * 1000 <= Date.now() + 15000;
+  } catch {
+    return false;
+  }
+};
+
+const doRefresh = async (): Promise<RefreshResult> => {
+  let refresh: string | null = null;
+  try {
+    refresh = await storage.getRefreshToken();
+  } catch {
+    refresh = null;
+  }
+  if (!refresh) return { ok: false, reason: 'invalid' };
+
+  const result = await requestWithFallback('/auth/refresh/', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ refresh }),
+  });
+
+  const newAccess: string | undefined = result?.access;
+  const newRefresh: string | undefined = result?.refresh;
+
+  if (newAccess) {
+    try {
+      // Rotation returns a new refresh token; persist both.
+      await storage.saveTokens(newAccess, newRefresh || refresh);
+    } catch {
+      /* ignore persistence errors */
+    }
+    return { ok: true, access: newAccess };
+  }
+
+  // requestWithFallback returns `status: 401` (or 400) for a genuine auth
+  // rejection, and NO `status` for network/timeout errors. Only the former
+  // ends the session; everything else keeps the tokens.
+  if (result?.status === 401 || result?.status === 400) {
+    return { ok: false, reason: 'invalid' };
+  }
+  return { ok: false, reason: 'network' };
+};
+
+/** Obtain a fresh access token, ensuring only one refresh runs at a time. */
+export const refreshAccessToken = (): Promise<RefreshResult> => {
+  if (!refreshPromise) {
+    refreshPromise = doRefresh().finally(() => {
+      refreshPromise = null;
+    });
+  }
+  return refreshPromise;
+};
+
+/** Proactively refresh if the stored access token is expired (startup +
+ * background-resume). No-op when there is no refresh token. */
+export const ensureFreshAccessToken = async (): Promise<void> => {
+  let access: string | null = null;
+  let refresh: string | null = null;
+  try {
+    access = await storage.getAccessToken();
+    refresh = await storage.getRefreshToken();
+  } catch {
+    return;
+  }
+  if (!refresh) return;
+  if (access && !isAccessTokenExpired(access)) return;
+  await refreshAccessToken();
+};
+
+const handleSessionExpired = async () => {
+  if (sessionExpiring) return;
+  sessionExpiring = true;
+  try {
+    await storage.clear();
+  } catch {
+    /* ignore */
+  }
+  try {
+    sessionExpiredHandler?.();
+  } finally {
+    sessionExpiring = false;
+  }
+};
+
+/** Single place that attaches the Bearer token, sends the request, and on a
+ * 401 (for non-auth endpoints) refreshes once and retries. */
+const sendAuthed = async (
+  method: string,
+  endpoint: string,
+  body?: object,
+  tokenOverride?: string,
+  isRetry = false,
+): Promise<any> => {
+  let token = tokenOverride;
+  if (!token) {
+    try {
+      token = (await storage.getAccessToken()) || undefined;
+    } catch {
+      token = undefined;
+    }
+  }
+
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+
+  const init: RequestInit = {
+    method,
+    headers,
+    ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+  };
+
+  const result = await requestWithFallback(endpoint, init);
+
+  if (result?.status === 401 && !isRetry && !isAuthEndpoint(endpoint)) {
+    const refreshResult = await refreshAccessToken();
+    if (refreshResult.ok) {
+      return sendAuthed(method, endpoint, body, refreshResult.access, true);
+    }
+    // ONLY a rejected refresh token ends the session. A network failure keeps
+    // the tokens and just lets this request fail — the user stays logged in.
+    if (refreshResult.reason === 'invalid') {
+      await handleSessionExpired();
+    }
+  }
+
+  return result;
+};
+
 export const api = {
+  get: (endpoint: string, token?: string): Promise<any> =>
+    sendAuthed('GET', endpoint, undefined, token),
 
-  get: async (endpoint: string, token?: string): Promise<any> => {
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-    };
+  post: (endpoint: string, body: object, token?: string): Promise<any> =>
+    sendAuthed('POST', endpoint, body, token),
 
-    if (!token) {
-      try {
-        token = (await storage.getAccessToken()) || undefined;
-      } catch (error) {
-        console.log('Error retrieving token:', error);
-      }
-    }
+  put: (endpoint: string, body: object, token?: string): Promise<any> =>
+    sendAuthed('PUT', endpoint, body, token),
 
-    if (token) {
-      headers['Authorization'] = `Bearer ${token}`;
-    }
+  patch: (endpoint: string, body?: object, token?: string): Promise<any> =>
+    sendAuthed('PATCH', endpoint, body, token),
 
-    return requestWithFallback(endpoint, {
-      method: 'GET',
-      headers,
-    });
-
-  },
-
-  post: async (endpoint: string, body: object, token?: string): Promise<any> => {
-
-    if (!token) {
-      try {
-        token = (await storage.getAccessToken()) || undefined;
-      } catch (error) {
-        console.log('Error retrieving token:', error);
-      }
-    }
-
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-    };
-    if (token) {
-      headers["Authorization"] = `Bearer ${token}`;
-    }
-
-    console.log("Headers:", headers);
-    console.log(`POST payload for ${endpoint}:`, JSON.stringify(body, null, 2));
-
-    return requestWithFallback(endpoint, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(body),
-    });
-  },
-
-
-  put: async (endpoint: string, body: object, token?: string): Promise<any> => {
-
-    if (!token) {
-      try {
-        token = (await storage.getAccessToken()) || undefined;
-      } catch (error) {
-        console.log('Error retrieving token:', error);
-      }
-    }
-
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-    };
-    if (token) {
-      headers["Authorization"] = `Bearer ${token}`;
-    }
-
-    return requestWithFallback(endpoint, {
-      method: 'PUT',
-      headers,
-      body: JSON.stringify(body),
-    });
-  },
-
-  patch: async (endpoint: string, body?: object, token?: string): Promise<any> => {
-
-    if (!token) {
-      try {
-        token = (await storage.getAccessToken()) || undefined;
-      } catch (error) {
-        console.log('Error retrieving token:', error);
-      }
-    }
-
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-    };
-    if (token) {
-      headers["Authorization"] = `Bearer ${token}`;
-    }
-
-    return requestWithFallback(endpoint, {
-      method: 'PATCH',
-      headers,
-      ...(body ? { body: JSON.stringify(body) } : {}),
-    });
-  },
-
-  delete: async (endpoint: string, body?: object, token?: string): Promise<any> => {
-
-    if (!token) {
-      try {
-        token = (await storage.getAccessToken()) || undefined;
-      } catch (error) {
-        console.log('Error retrieving token:', error);
-      }
-    }
-
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-    };
-    if (token) {
-      headers["Authorization"] = `Bearer ${token}`;
-    }
-
-    return requestWithFallback(endpoint, {
-      method: 'DELETE',
-      headers,
-      ...(body ? { body: JSON.stringify(body) } : {}),
-    });
-  },
+  delete: (endpoint: string, body?: object, token?: string): Promise<any> =>
+    sendAuthed('DELETE', endpoint, body, token),
 
   //   delete: async (endpoint: string, token?: string): Promise<any> => {
   //   const headers: Record<string, string> = {

@@ -1,90 +1,348 @@
-import React from "react";
-import { View, StyleSheet, TouchableOpacity } from "react-native";
+import React, { useEffect, useState } from "react";
+import {
+  View,
+  StyleSheet,
+  TouchableOpacity,
+  Switch,
+  Text,
+  Modal,
+} from "react-native";
 import {
   DrawerContentScrollView,
-  DrawerItemList,
   DrawerContentComponentProps,
+  useDrawerStatus,
 } from "@react-navigation/drawer";
-import { Text, Divider } from "react-native-paper";
+import { setDrawerOpen } from "@/src/utils/drawerState";
+import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router } from "expo-router";
 import { useAuth } from "@/src/context/AuthContext";
-import { COLORS, RADIUS } from "@/src/constants/theme";
+import { COLORS } from "@/src/constants/theme";
+import { orderService } from "@/src/services/order.service";
+import { storage } from "@/src/utils/storage";
+
+/** Per-route accent colour for the icon tile. */
+const ACCENTS: Record<string, string> = {
+  dashboard: "#2563EB",
+  notifications: "#2563EB",
+  "orders/create": "#2563EB",
+  "orders/drafts": "#7C3AED",
+  "orders/foc": "#16A34A",
+  "orders/orderlist": "#2563EB",
+  "reports/daily-report": "#F59E0B",
+  "orders/ordertracking": "#EC4899",
+  "sap/sap-sync": "#2563EB",
+  "sap/party-assignment": "#0891B2",
+  "sap/party-product-assignment": "#0891B2",
+  "admin/order-flow": "#7C3AED",
+  "admin/sales-quotation": "#0891B2",
+  "users/create": "#2563EB",
+  "users/allUsers": "#2563EB",
+  "users/pagePermissions": "#16A34A",
+  "users/addScheme": "#F59E0B",
+  "approver/pending_approval": "#16A34A",
+  "orders/auditorapproval": "#16A34A",
+};
+
+// These routes already live in the persistent bottom bar (Home / Orders /
+// Create / Drafts / Reports), so they're hidden from the drawer to avoid the
+// same page appearing in two places. The Orders tab is role-specific, so every
+// role's order screen is listed here.
+const BOTTOM_BAR_ROUTES = new Set<string>([
+  "dashboard", // Home
+  "orders/orderlist", // Orders (billing)
+  "orders/ordertracking", // Orders (manager)
+  "approver/pending_approval", // Orders (approver)
+  "orders/auditorapproval", // Orders (auditor)
+  "orders/create", // Create
+  "orders/drafts", // Drafts
+  "reports/daily-report", // Reports
+]);
+
+/** Routes grouped after the primary block get a divider before them. */
+const GROUP: Record<string, number> = {
+  "sap/sap-sync": 1,
+  "sap/party-assignment": 1,
+  "sap/party-product-assignment": 1,
+  "orders/ordertracking": 1,
+};
+
+const tint = (hex: string, alpha: number) => {
+  const h = hex.replace("#", "");
+  const r = parseInt(h.substring(0, 2), 16);
+  const g = parseInt(h.substring(2, 4), 16);
+  const b = parseInt(h.substring(4, 6), 16);
+  return `rgba(${r},${g},${b},${alpha})`;
+};
+
+// Theme toggle temporarily hidden. Flip to `true` to re-enable the Dark Mode
+// card once the dark theme is implemented.
+const SHOW_DARK_MODE = false;
 
 export default function CustomDrawer(props: DrawerContentComponentProps) {
   const { user, logout } = useAuth();
+  const insets = useSafeAreaInsets();
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [darkMode, setDarkMode] = useState(false);
+  const [showLogoutModal, setShowLogoutModal] = useState(false);
 
-  const performLogout = async () => {
-    await logout();
+  // Report open/closed to the shared store so the global BottomBar can hide
+  // while the sidebar is open (and reappear when it closes).
+  const drawerStatus = useDrawerStatus();
+  useEffect(() => {
+    setDrawerOpen(drawerStatus === "open");
+  }, [drawerStatus]);
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const notifications = await orderService.getNotifications();
+        const hiddenIds = new Set(await storage.getHiddenNotificationIds());
+        if (!active) return;
+        setUnreadCount(
+          (Array.isArray(notifications) ? notifications : []).filter(
+            (n: any) => !n.is_read && !hiddenIds.has(n.id),
+          ).length,
+        );
+      } catch {
+        // badge simply stays hidden
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const performLogout = () => {
+    // Instant: close the dialog and navigate to Login immediately. The actual
+    // sign-out cleanup (token revoke, push deactivate, storage clear) runs in
+    // the background inside logout(), so the user never waits.
+    setShowLogoutModal(false);
     router.replace("/(auth)/login" as any);
+    logout();
+  };
+
+  const confirmLogout = () => setShowLogoutModal(true);
+
+  const initial =
+    user?.name?.charAt(0)?.toUpperCase() ||
+    user?.username?.charAt(0)?.toUpperCase() ||
+    "U";
+
+  const focusedRouteName =
+    props.state.routes[props.state.index]?.name ?? "";
+
+  // Only render routes that are visible for this role (the navigator hides the
+  // rest via `drawerItemStyle: { display: 'none' }`) and that expose an icon.
+  const visibleItems = props.state.routes
+    .map((route) => ({ route, options: props.descriptors[route.key].options }))
+    .filter(
+      ({ route, options }) =>
+        // "notifications" now lives as a bell in the profile header, so keep it
+        // out of the menu list to avoid duplication.
+        route.name !== "notifications" &&
+        // Pages that already live in the bottom bar are hidden here so the same
+        // page isn't offered in two places.
+        !BOTTOM_BAR_ROUTES.has(route.name) &&
+        (options.drawerItemStyle as any)?.display !== "none" &&
+        !!options.drawerIcon,
+    );
+
+  const openItem = (routeName: string) => {
+    if (routeName === "orders/create") {
+      (props.navigation as any).navigate("orders/create", {
+        openMode: "create",
+        openedAt: String(Date.now()),
+      });
+      return;
+    }
+    props.navigation.navigate(routeName as never);
   };
 
   return (
     <View style={styles.container}>
-      {/* Header with Gradient */}
+      {/* ===== Header ===== */}
       <LinearGradient
-        colors={[COLORS.primaryDark, COLORS.primary]}
+        colors={["#2563EB", "#1E3A8A"]}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
-        style={styles.header}
+        style={[styles.header, { paddingTop: insets.top + 18 }]}
       >
-        {/* Decorative circles */}
         <View style={styles.decorCircle1} />
         <View style={styles.decorCircle2} />
 
-        {/* User Avatar */}
-        <View style={styles.avatarContainer}>
+        <View style={styles.avatarWrap}>
           <LinearGradient
-            colors={["rgba(255,255,255,0.2)", "rgba(255,255,255,0.1)"]}
+            colors={["#60A5FA", "#1D4ED8"]}
             style={styles.avatar}
           >
-            <Text style={styles.avatarText}>
-              {user?.name?.charAt(0)?.toUpperCase() ||
-                user?.username?.charAt(0)?.toUpperCase() ||
-                "U"}
-            </Text>
+            <Text style={styles.avatarText}>{initial}</Text>
           </LinearGradient>
-          <View style={styles.onlineIndicator} />
         </View>
 
-        {/* User Info */}
-        <Text style={styles.userName}>
-          {user?.name || user?.username || "User"}
-        </Text>
-        <Text style={styles.userRole}>{user?.role || "Member"}</Text>
+        <View style={styles.nameRow}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.userName} numberOfLines={1}>
+              {user?.name || user?.username || "User"}
+            </Text>
+            <Text style={styles.userRole} numberOfLines={1}>
+              {user?.role || "Member"}
+            </Text>
+          </View>
+          <View style={styles.onlinePill}>
+            <View style={styles.onlinePillDot} />
+            <Text style={styles.onlinePillText}>Online</Text>
+          </View>
+        </View>
 
-        {/* Company Badge */}
-        {user?.company && (
+        {!!user?.company && (
           <View style={styles.companyBadge}>
+            <Ionicons name="business" size={13} color="#fff" />
             <Text style={styles.companyText}>{user.company.name}</Text>
           </View>
         )}
       </LinearGradient>
 
-      {/* Navigation Items */}
+      {/* ===== Scrollable content ===== */}
       <DrawerContentScrollView
         {...props}
-        contentContainerStyle={styles.drawerContent}
+        contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        <View style={styles.menuSection}>
-          <DrawerItemList {...props} />
-        </View>
+        {/* Dark Mode card (hidden until the dark theme ships — flip SHOW_DARK_MODE) */}
+        {SHOW_DARK_MODE && (
+          <View style={styles.darkCard}>
+            <View style={styles.darkIconBox}>
+              <Ionicons name="moon-outline" size={20} color={COLORS.primary} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.darkTitle}>Dark Mode</Text>
+              <Text style={styles.darkSub}>Switch between light and dark theme</Text>
+            </View>
+            <Switch
+              value={darkMode}
+              onValueChange={setDarkMode}
+              trackColor={{ false: "#CBD5E1", true: COLORS.primary }}
+              thumbColor="#ffffff"
+              ios_backgroundColor="#CBD5E1"
+            />
+          </View>
+        )}
+
+        {/* Menu items */}
+        {visibleItems.map(({ route, options }, index) => {
+          const accent = ACCENTS[route.name] ?? COLORS.primary;
+          const group = GROUP[route.name] ?? 0;
+          const prevGroup =
+            index > 0 ? GROUP[visibleItems[index - 1].route.name] ?? 0 : group;
+          const showDivider = index > 0 && group !== prevGroup;
+          const focused = route.name === focusedRouteName;
+          const label = (options.title as string) ?? route.name;
+          const badge =
+            route.name === "notifications" && unreadCount > 0
+              ? unreadCount
+              : null;
+
+          return (
+            <React.Fragment key={route.key}>
+              {showDivider && <View style={styles.groupDivider} />}
+              <TouchableOpacity
+                style={[styles.item, focused && styles.itemActive]}
+                activeOpacity={0.7}
+                onPress={() => openItem(route.name)}
+              >
+                <View
+                  style={[styles.itemIconBox, { backgroundColor: tint(accent, 0.12) }]}
+                >
+                  {options.drawerIcon?.({ color: accent, size: 20, focused })}
+                </View>
+                <Text
+                  style={[styles.itemLabel, focused && styles.itemLabelActive]}
+                  numberOfLines={1}
+                >
+                  {label}
+                </Text>
+                {badge != null && (
+                  <View style={styles.itemBadge}>
+                    <Text style={styles.itemBadgeText}>
+                      {badge > 99 ? "99+" : badge}
+                    </Text>
+                  </View>
+                )}
+                <Ionicons
+                  name="chevron-forward"
+                  size={18}
+                  color={focused ? COLORS.primary : "#9CA3AF"}
+                />
+              </TouchableOpacity>
+            </React.Fragment>
+          );
+        })}
       </DrawerContentScrollView>
 
-      {/* Footer */}
-      <View style={styles.footer}>
-        <Divider style={styles.divider} />
-
-        <TouchableOpacity style={styles.logoutButton} onPress={performLogout}>
-          <View style={styles.logoutIconContainer}>
-            <Text style={styles.logoutIcon}>⎋</Text>
+      {/* ===== Footer ===== */}
+      <View style={[styles.footer, { paddingBottom: insets.bottom + 16 }]}>
+        <TouchableOpacity
+          style={styles.signOut}
+          activeOpacity={0.8}
+          onPress={confirmLogout}
+        >
+          <View style={styles.signOutIconBox}>
+            <Ionicons name="log-out-outline" size={20} color="#fff" />
           </View>
-          <Text style={styles.logoutText}>Sign Out</Text>
+          <Text style={styles.signOutText}>Sign Out</Text>
+          <Ionicons name="chevron-forward" size={18} color={COLORS.error} />
         </TouchableOpacity>
 
         <Text style={styles.version}>Version 1.0.0</Text>
       </View>
+
+      {/* Custom branded sign-out confirmation (replaces the system Alert). */}
+      <Modal
+        visible={showLogoutModal}
+        transparent
+        animationType="fade"
+        statusBarTranslucent
+        onRequestClose={() => setShowLogoutModal(false)}
+      >
+        <TouchableOpacity
+          style={styles.logoutBackdrop}
+          activeOpacity={1}
+          onPress={() => setShowLogoutModal(false)}
+        >
+          <TouchableOpacity
+            style={styles.logoutCard}
+            activeOpacity={1}
+            onPress={() => {}}
+          >
+            <View style={styles.logoutIconCircle}>
+              <Ionicons name="log-out-outline" size={28} color={COLORS.error} />
+            </View>
+            <Text style={styles.logoutTitle}>Sign Out</Text>
+            <Text style={styles.logoutMessage}>
+              Are you sure you want to sign out of your account?
+            </Text>
+            <View style={styles.logoutActions}>
+              <TouchableOpacity
+                style={[styles.logoutBtn, styles.logoutCancelBtn]}
+                activeOpacity={0.85}
+                onPress={() => setShowLogoutModal(false)}
+              >
+                <Text style={styles.logoutCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.logoutBtn, styles.logoutConfirmBtn]}
+                activeOpacity={0.85}
+                onPress={performLogout}
+              >
+                <Text style={styles.logoutConfirmText}>Sign Out</Text>
+              </TouchableOpacity>
+            </View>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
     </View>
   );
 }
@@ -92,143 +350,390 @@ export default function CustomDrawer(props: DrawerContentComponentProps) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.background,
+    backgroundColor: "#F7F9FC",
   },
+
+  // Header notification bell
+  headerBell: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: "rgba(255,255,255,0.16)",
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 8,
+  },
+  headerBellBadge: {
+    position: "absolute",
+    top: 4,
+    right: 4,
+    minWidth: 16,
+    height: 16,
+    paddingHorizontal: 3,
+    borderRadius: 8,
+    backgroundColor: "#EF4444",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1.5,
+    borderColor: "#1E3A8A",
+  },
+  headerBellBadgeText: {
+    color: "#fff",
+    fontSize: 9,
+    fontWeight: "800",
+    lineHeight: 11,
+  },
+
+  // Sign-out confirmation modal
+  logoutBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(15,23,42,0.55)",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 24,
+  },
+  logoutCard: {
+    width: "100%",
+    maxWidth: 360,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 20,
+    padding: 22,
+    alignItems: "center",
+  },
+  logoutIconCircle: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: "#FEF2F2",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 14,
+  },
+  logoutTitle: {
+    fontSize: 19,
+    fontWeight: "800",
+    color: COLORS.text,
+  },
+  logoutMessage: {
+    fontSize: 14,
+    color: COLORS.textSecondary,
+    textAlign: "center",
+    lineHeight: 20,
+    marginTop: 6,
+    marginBottom: 20,
+  },
+  logoutActions: {
+    flexDirection: "row",
+    gap: 12,
+    alignSelf: "stretch",
+  },
+  logoutBtn: {
+    flex: 1,
+    paddingVertical: 13,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  logoutCancelBtn: {
+    backgroundColor: "#F1F5F9",
+  },
+  logoutCancelText: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: COLORS.textSecondary,
+  },
+  logoutConfirmBtn: {
+    backgroundColor: COLORS.error,
+  },
+  logoutConfirmText: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: "#FFFFFF",
+  },
+
+  // Header
   header: {
-    paddingTop: 50,
-    paddingBottom: 24,
+    paddingBottom: 22,
     paddingHorizontal: 20,
     position: "relative",
     overflow: "hidden",
+    borderBottomLeftRadius: 4,
+    borderBottomRightRadius: 4,
   },
   decorCircle1: {
     position: "absolute",
-    top: -30,
+    top: -40,
     right: -30,
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    backgroundColor: "rgba(255,255,255,0.05)",
+    width: 150,
+    height: 150,
+    borderRadius: 75,
+    backgroundColor: "rgba(255,255,255,0.08)",
   },
   decorCircle2: {
     position: "absolute",
-    bottom: -20,
-    left: -20,
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: "rgba(255,255,255,0.03)",
+    bottom: -30,
+    left: -25,
+    width: 90,
+    height: 90,
+    borderRadius: 45,
+    backgroundColor: "rgba(255,255,255,0.05)",
   },
-  avatarContainer: {
+  avatarWrap: {
     position: "relative",
-    marginBottom: 12,
+    marginBottom: 14,
   },
   avatar: {
-    width: 70,
-    height: 70,
-    borderRadius: 35,
+    width: 68,
+    height: 68,
+    borderRadius: 34,
     justifyContent: "center",
     alignItems: "center",
     borderWidth: 3,
-    borderColor: "rgba(255,255,255,0.3)",
+    borderColor: "rgba(255,255,255,0.55)",
   },
   avatarText: {
     fontSize: 28,
-    fontWeight: "700",
-    color: COLORS.textLight,
+    fontWeight: "800",
+    color: "#fff",
   },
-  onlineIndicator: {
+  onlineDot: {
     position: "absolute",
     bottom: 2,
-    right: 2,
+    right: 6,
     width: 16,
     height: 16,
     borderRadius: 8,
     backgroundColor: "#22C55E",
     borderWidth: 3,
-    borderColor: COLORS.primaryDark,
+    borderColor: "#fff",
+  },
+  nameRow: {
+    flexDirection: "row",
+    alignItems: "center",
   },
   userName: {
-    fontSize: 20,
-    fontWeight: "700",
-    color: COLORS.textLight,
-    marginBottom: 2,
+    fontSize: 22,
+    fontWeight: "800",
+    color: "#fff",
   },
   userRole: {
-    fontSize: 13,
-    color: "rgba(255,255,255,0.7)",
+    fontSize: 14,
+    color: "rgba(255,255,255,0.85)",
     textTransform: "capitalize",
-    marginBottom: 12,
+    marginTop: 2,
   },
-  companyBadge: {
-    backgroundColor: "rgba(255,255,255,0.15)",
+  onlinePill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "rgba(255,255,255,0.16)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.28)",
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 20,
-    alignSelf: "flex-start",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.1)",
   },
-  companyText: {
-    fontSize: 11,
+  onlinePillDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: "#4ADE80",
+  },
+  onlinePillText: {
+    fontSize: 12,
     fontWeight: "600",
-    color: COLORS.textLight,
+    color: "#fff",
   },
-  drawerContent: {
-    paddingTop: 12,
-    paddingBottom: 12,
-  },
-  menuSection: {
-    paddingHorizontal: 10,
-  },
-  menuSectionTitle: {
-    fontSize: 11,
-    fontWeight: "600",
-    color: COLORS.textSecondary,
-    letterSpacing: 1,
-    marginLeft: 16,
-    marginBottom: 8,
-    marginTop: 8,
-  },
-  footer: {
-    padding: 20,
-    paddingBottom: 30,
-  },
-  divider: {
-    backgroundColor: COLORS.border,
-    marginBottom: 16,
-  },
-  logoutButton: {
+  companyBadge: {
     flexDirection: "row",
     alignItems: "center",
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: RADIUS.md,
-    backgroundColor: COLORS.errorLight,
+    gap: 7,
+    backgroundColor: "rgba(255,255,255,0.16)",
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 20,
+    alignSelf: "flex-start",
+    marginTop: 14,
     borderWidth: 1,
-    borderColor: "#FECACA",
+    borderColor: "rgba(255,255,255,0.2)",
   },
-  logoutIconContainer: {
-    width: 32,
-    height: 32,
-    borderRadius: 8,
-    backgroundColor: COLORS.error,
-    justifyContent: "center",
-    alignItems: "center",
-    marginRight: 12,
-  },
-  logoutIcon: {
-    fontSize: 16,
-    color: COLORS.textLight,
-  },
-  logoutText: {
-    fontSize: 14,
+  companyText: {
+    fontSize: 12,
     fontWeight: "600",
+    color: "#fff",
+  },
+
+  // Scroll content
+  scrollContent: {
+    paddingTop: 16,
+    paddingHorizontal: 14,
+    paddingBottom: 12,
+  },
+
+  // Dark mode card
+  darkCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 14,
+    backgroundColor: "#fff",
+    borderRadius: 16,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: "#EEF1F6",
+    shadowColor: "#1E3A5F",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 1,
+  },
+  darkIconBox: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(37,99,235,0.1)",
+  },
+  darkTitle: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: "#111827",
+  },
+  darkSub: {
+    fontSize: 12,
+    color: "#6B7280",
+    marginTop: 2,
+  },
+
+  // Menu item
+  item: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 14,
+    paddingVertical: 9,
+    paddingHorizontal: 10,
+    borderRadius: 14,
+    marginBottom: 4,
+  },
+  itemActive: {
+    backgroundColor: "#EAF1FE",
+  },
+  itemIconBox: {
+    width: 40,
+    height: 40,
+    borderRadius: 11,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  itemLabel: {
+    flex: 1,
+    fontSize: 15,
+    fontWeight: "600",
+    color: "#1F2937",
+  },
+  itemLabelActive: {
+    color: COLORS.primary,
+    fontWeight: "700",
+  },
+  itemBadge: {
+    minWidth: 26,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 12,
+    backgroundColor: "#DBEAFE",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  itemBadgeText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: COLORS.primary,
+  },
+  groupDivider: {
+    height: 1,
+    backgroundColor: "#EAEDF2",
+    marginVertical: 10,
+    marginHorizontal: 6,
+  },
+
+  // Footer
+  footer: {
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: "#EAEDF2",
+  },
+  notifRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    backgroundColor: "#F8FAFC",
+    borderWidth: 1,
+    borderColor: "#EAEDF2",
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 10,
+  },
+  notifIconBox: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    backgroundColor: "#EFF6FF",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  notifTitle: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: COLORS.text,
+  },
+  notifStatus: {
+    fontSize: 12,
+    color: COLORS.textSecondary,
+    marginTop: 1,
+  },
+  notifEnableBtn: {
+    backgroundColor: COLORS.primary,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  notifEnableText: {
+    color: "#fff",
+    fontSize: 12.5,
+    fontWeight: "700",
+  },
+  signOut: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 14,
+    backgroundColor: "#FEF2F2",
+    borderWidth: 1,
+    borderColor: "#FBD5D5",
+    borderRadius: 14,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+  },
+  signOutIconBox: {
+    width: 40,
+    height: 40,
+    borderRadius: 11,
+    backgroundColor: COLORS.error,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  signOutText: {
+    flex: 1,
+    fontSize: 15,
+    fontWeight: "700",
     color: COLORS.error,
   },
   version: {
-    fontSize: 11,
-    color: COLORS.textMuted,
+    fontSize: 12,
+    color: "#9CA3AF",
     textAlign: "center",
     marginTop: 16,
   },

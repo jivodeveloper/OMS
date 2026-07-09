@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Drawer } from "expo-router/drawer";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { Ionicons } from "@expo/vector-icons";
@@ -11,7 +11,17 @@ import { COLORS, RADIUS } from "@/src/constants/theme";
 import { orderService } from "@/src/services/order.service";
 import { notificationService } from "@/src/services/notification.service";
 import { storage } from "@/src/utils/storage";
-import { screensFromExtraPages } from "@/src/constants/pages";
+import { screensFromExtraPages, SCREEN_ROLES } from "@/src/constants/pages";
+import {
+  getNotificationDedupeKey,
+  originScreenForRole,
+  resolveNotificationRoute,
+  type OMSNotificationData,
+} from "@/src/utils/notificationRouting";
+import { shouldShowPermissionPrompt } from "@/src/utils/notificationPermission";
+import { isNotificationSuppressed } from "@/src/utils/notificationGate";
+import NotificationPermissionModal from "@/src/components/NotificationPermissionModal";
+import BottomBar from "@/src/components/common/BottomBar";
 
 const HEADER_ICON_HIT_SLOP = { top: 12, right: 12, bottom: 12, left: 12 };
 
@@ -21,6 +31,8 @@ export default function MainLayout() {
   const userRole = user?.role?.toLowerCase() || "";
   const grantedScreens = screensFromExtraPages(user?.extra_pages || []);
   const [unreadNotificationCount, setUnreadNotificationCount] = useState(0);
+  const [showPermissionModal, setShowPermissionModal] = useState(false);
+  const [permissionSubmitting, setPermissionSubmitting] = useState(false);
 
   const loadUnreadNotificationCount = useCallback(async () => {
     if (!user) {
@@ -47,10 +59,93 @@ export default function MainLayout() {
   }, [loadUnreadNotificationCount, pathname]);
 
   useEffect(() => {
-    if (user) {
-      notificationService.registerDeviceToken();
+    if (!user) {
+      return;
     }
+
+    // Make sure the Android channel exists with production settings before any
+    // push arrives, then register this device's token.
+    notificationService.ensureAndroidChannel();
+    notificationService.registerDeviceToken();
+
+    // Keep the backend token current if Expo rotates it while logged in.
+    const tokenRefreshSubscription =
+      notificationService.subscribeToTokenRefresh();
+
+    return () => {
+      tokenRefreshSubscription.remove();
+    };
   }, [user]);
+
+  // Custom "explain first" permission prompt. Never fires during splash/login;
+  // waits ~2.5s after the user reaches Home, and only shows when appropriate
+  // (never asked, or 7 days since the last dismissal). If the OS permission is
+  // already granted, we just record it and stay silent (existing users).
+  useEffect(() => {
+    if (!user) {
+      return;
+    }
+
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      try {
+        const [{ status, canAskAgain }, promptState] = await Promise.all([
+          notificationService.getPermissionStatus(),
+          storage.getNotificationPromptState(),
+        ]);
+        if (cancelled) return;
+
+        if (status === "granted") {
+          // Already granted (incl. existing users) — record and never prompt.
+          if (promptState.status !== "granted") {
+            await storage.saveNotificationPromptState({ status: "granted" });
+          }
+          return;
+        }
+
+        if (shouldShowPermissionPrompt(status, canAskAgain, promptState)) {
+          setShowPermissionModal(true);
+        }
+      } catch (error) {
+        console.log("Permission prompt check failed:", error);
+      }
+    }, 2500);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [user]);
+
+  const handleAllowNotifications = useCallback(async () => {
+    setPermissionSubmitting(true);
+    try {
+      const status = await notificationService.requestPermissionAndRegister();
+      await storage.saveNotificationPromptState({
+        status: status === "granted" ? "granted" : "denied",
+        lastPromptAt: Date.now(),
+      });
+    } catch (error) {
+      console.log("Permission request failed:", error);
+    } finally {
+      setPermissionSubmitting(false);
+      setShowPermissionModal(false);
+    }
+  }, []);
+
+  const handleDismissPermission = useCallback(async () => {
+    setShowPermissionModal(false);
+    try {
+      const current = await storage.getNotificationPromptState();
+      await storage.saveNotificationPromptState({
+        status: "dismissed",
+        lastPromptAt: Date.now(),
+        dismissCount: current.dismissCount + 1,
+      });
+    } catch (error) {
+      console.log("Failed to persist permission dismissal:", error);
+    }
+  }, []);
 
   // Re-pull the profile (incl. extra_pages grants) when the app returns to the
   // foreground, so permissions granted elsewhere — e.g. from the web admin —
@@ -73,6 +168,8 @@ export default function MainLayout() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pathname]);
 
+  // Foreground receipts only refresh the unread badge — the OS itself renders
+  // the banner/sound (see setNotificationHandler in notification.service).
   useEffect(() => {
     if (!user) {
       return;
@@ -84,42 +181,58 @@ export default function MainLayout() {
       },
     );
 
-    const responseSubscription =
-      Notifications.addNotificationResponseReceivedListener((response) => {
-        loadUnreadNotificationCount();
-
-        const screen = response.notification.request.content.data?.screen;
-        if (screen === "notifications") {
-          router.push("/notifications");
-        }
-      });
-
     return () => {
       receivedSubscription.remove();
-      responseSubscription.remove();
     };
   }, [loadUnreadNotificationCount, user]);
 
-  const canSee: Record<string, string[]> = {
-    dashboard: ["admin", "manager", "approver"],
-    "orders/create": ["manager", "billing"],
-    "orders/drafts": ["manager", "billing"],
-    "orders/foc": ["manager", "billing"],
-    "orders/orderlist": ["billing"],
-    "reports/daily-report": ["admin", "billing"],
-    "admin/order-flow": ["admin"],
-    "admin/sales-quotation": ["admin"],
-    "users/create": ["admin"],
-    "users/allUsers": ["admin"],
-    "users/pagePermissions": ["admin"],
-    "users/addScheme": ["admin"],
-    "sap/sap-sync": ["admin"],
-    "sap/party-assignment": ["admin"],
-    "sap/party-product-assignment": ["admin"],
-    "approver/pending_approval": ["approver"],
-    "orders/ordertracking": ["manager", "billing"],
-    "orders/auditorapproval": ["auditor"],
-  };
+  // Single authoritative tap handler for EVERY entry point:
+  //   - app already open   (foreground tap)
+  //   - app in background   (resumed via tap)
+  //   - app terminated      (cold-started via tap)
+  // `useLastNotificationResponse` surfaces the launch notification on cold
+  // start as well as subsequent taps; a ref-based dedupe guarantees each
+  // notification navigates exactly once, avoiding duplicate navigation/races.
+  const lastNotificationResponse = Notifications.useLastNotificationResponse();
+  const handledNotificationKeys = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (!user || !lastNotificationResponse) {
+      return;
+    }
+
+    const request = lastNotificationResponse.notification.request;
+    const data = (request.content.data || {}) as OMSNotificationData;
+    const dedupeKey = getNotificationDedupeKey(request.identifier, data);
+
+    if (handledNotificationKeys.current.has(dedupeKey)) {
+      return;
+    }
+    handledNotificationKeys.current.add(dedupeKey);
+
+    // A notification that launched the app while the user was NOT authenticated
+    // must not deep-link after they log in (CASE 4). It was recorded at startup;
+    // consume it silently so the user stays on Home.
+    if (isNotificationSuppressed(dedupeKey)) {
+      return;
+    }
+
+    loadUnreadNotificationCount();
+
+    // Remember which list this user belongs to, so Back from the order returns
+    // there instead of Home. Prefer an explicit origin_role in the payload (if
+    // a newer backend sends one), else use the logged-in user's role.
+    const originRole =
+      (data as { origin_role?: string | null }).origin_role || user.role;
+    const originScreen = originScreenForRole(originRole);
+    const route = resolveNotificationRoute(data, originScreen);
+    if (route) {
+      router.push(route);
+    }
+  }, [lastNotificationResponse, loadUnreadNotificationCount, user]);
+
+  // Single source of truth shared with the bottom bar (see constants/pages).
+  const canSee = SCREEN_ROLES;
 
   const visibleStyle = {
     borderRadius: RADIUS.md,
@@ -154,13 +267,13 @@ export default function MainLayout() {
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
+      {/* Drawer content sits above the persistent global bottom bar. */}
+      <View style={{ flex: 1 }}>
       <Drawer
         drawerContent={(props) => <CustomDrawer {...props} />}
         screenOptions={({ navigation, route }) => {
           const isDashboard = route.name === "dashboard";
           const isNotifications = route.name === "notifications";
-          const canCreateOrderFromDashboard =
-            isDashboard && ["manager", "billing"].includes(userRole);
 
           return {
             headerShown: true,
@@ -215,25 +328,8 @@ export default function MainLayout() {
 
               return (
                 <View style={styles.headerActions}>
-                  {canCreateOrderFromDashboard ? (
-                    <TouchableOpacity
-                      hitSlop={HEADER_ICON_HIT_SLOP}
-                      onPress={() =>
-                        (navigation as any).navigate("orders/create", {
-                          openMode: "create",
-                          from: "dashboard",
-                          openedAt: String(Date.now()),
-                        })
-                      }
-                      style={styles.headerIconButton}
-                    >
-                      <Ionicons
-                        name="add"
-                        size={20}
-                        color={COLORS.text}
-                      />
-                    </TouchableOpacity>
-                  ) : null}
+                  {/* Top "+" create shortcut removed — the bottom bar's centre
+                      Create button is the single entry point for new orders. */}
                   <TouchableOpacity
                     hitSlop={HEADER_ICON_HIT_SLOP}
                     onPress={() => navigation.navigate("notifications" as never)}
@@ -256,6 +352,14 @@ export default function MainLayout() {
                   </TouchableOpacity>
                 </View>
               );
+            },
+            // Centre every screen's title for a consistent header across pages.
+            headerTitleAlign: "center" as const,
+            headerTitleStyle: {
+              fontSize: 19,
+              fontWeight: "800" as const,
+              color: COLORS.text,
+              letterSpacing: 0.2,
             },
           };
         }}
@@ -545,6 +649,16 @@ export default function MainLayout() {
           }}
         />
       </Drawer>
+        {/* Persistent bottom navigation, shown on every screen. */}
+        <BottomBar />
+      </View>
+
+      <NotificationPermissionModal
+        visible={showPermissionModal}
+        onAllow={handleAllowNotifications}
+        onDismiss={handleDismissPermission}
+        submitting={permissionSubmitting}
+      />
     </GestureHandlerRootView>
   );
 }

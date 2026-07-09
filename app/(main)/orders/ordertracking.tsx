@@ -9,12 +9,15 @@ import {
   RefreshControl,
   Modal,
   Alert,
+  TextInput,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { OrderItemList, orderService, productService, type QuotationStatus } from "@/src/services/order.service";
 import { COLORS } from "@/constants/theme";
 import { useRouter, useLocalSearchParams, useNavigation } from "expo-router";
 import InlineOrderDateFilter, { type DateFilterValue } from "@/src/components/common/InlineOrderDateFilter";
+import { LinearGradient } from "expo-linear-gradient";
+import Dropdown from "@/src/components/common/DropdownProps";
 import { useAuth } from "@/src/context/AuthContext";
 import StateWrapper from "@/src/components/common/StateWrapper";
 
@@ -100,14 +103,16 @@ const isCompletedOrRejectedOrder = (
 export default function OrderTrackingScreen() {
   const { user } = useAuth();
   const userRole = user?.role?.toLowerCase() || "";
-  const { statusFilter, year, month, _t } = useLocalSearchParams<{ statusFilter?: string; year?: string; month?: string; _t?: string }>();
+  const { tab, statusFilter, year, month, _t } = useLocalSearchParams<{ tab?: string; statusFilter?: string; year?: string; month?: string; _t?: string }>();
 
   const initStatuses = (): string[] => {
     const f = statusFilter?.toLowerCase();
     if (f === "rejected") return ["Rejected"];
     if (f === "approved") return ["Completed"];
     if (f === "pending") return ["__PENDING__"];
-    return [];
+    // "Total" card (tab=others) shows everything; otherwise default to Pending.
+    if (tab === "others") return [];
+    return ["__PENDING__"];
   };
 
   const [orders, setOrders] = useState<OrderItemList[]>([]);
@@ -128,6 +133,15 @@ export default function OrderTrackingScreen() {
   );
   const [isFilterModalVisible, setIsFilterModalVisible] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [statusView, setStatusView] = useState<string>(() => {
+    const f = statusFilter?.toLowerCase();
+    if (f === "rejected") return "rejected";
+    if (f === "approved") return "completed";
+    if (f === "pending") return "pending";
+    if (tab === "others") return "all";
+    return "pending";
+  });
   const router = useRouter();
 
   const [parties, setParties] = useState<any[]>([]);
@@ -167,14 +181,21 @@ export default function OrderTrackingScreen() {
       if (hasNewParams) lastConsumedT.current = _t;
 
       const f = hasNewParams ? statusFilter?.toLowerCase() : undefined;
+      // Default the Status filter to Pending (unless a specific status was
+      // requested, or the "Total" card opened this with tab=others).
+      const nextView =
+        f === "rejected" ? "rejected" :
+        f === "approved" ? "completed" :
+        f === "pending" ? "pending" :
+        hasNewParams && tab === "others" ? "all" :
+        "pending";
+      setStatusView(nextView);
       setSelectedStatuses(
-        f === "rejected" ? ["Rejected"] :
-        f === "approved" ? ["Completed"] :
-        f === "pending" ? ["__PENDING__"] : []
+        nextView === "rejected" ? ["Rejected"] :
+        nextView === "completed" ? ["Completed"] :
+        nextView === "pending" ? ["__PENDING__"] : []
       );
-      setSelectedStatus(
-        f === "rejected" || f === "approved" || f === "pending" ? "__STATUS__" : null
-      );
+      setSelectedStatus(nextView !== "all" ? "__STATUS__" : null);
       setSelectedParties([]);
       setTempSelectedParties([]);
       setSelectedItems([]);
@@ -194,7 +215,7 @@ export default function OrderTrackingScreen() {
       loadOrders();
     });
     return unsubscribe;
-  }, [navigation, statusFilter, year, month, _t]);
+  }, [navigation, tab, statusFilter, year, month, _t]);
 
   const loadOrders = async () => {
     try {
@@ -570,6 +591,11 @@ export default function OrderTrackingScreen() {
   };
 
   const filteredOrders = orders.filter((item: OrderItemList) => {
+    if (searchQuery.trim()) {
+      const q = searchQuery.trim().toLowerCase();
+      const haystack = `${item.order_number || ""} ${item.card_name || ""} ${item.card_code || ""}`.toLowerCase();
+      if (!haystack.includes(q)) return false;
+    }
     if (selectedOrderDate) {
       const orderDate = getOrderDateValue(item.created_at);
       if (selectedOrderDate.mode === "date") {
@@ -865,34 +891,97 @@ export default function OrderTrackingScreen() {
   return (
     <StateWrapper loading={(loading || loadingItems) && !refreshing} error={error} onRetry={loadOrders}>
       <View style={styles.container}>
-        <View style={styles.filterWrap}>
-          <View style={styles.filterActionGroup}>
+        <View style={styles.tabContainer}>
+          <View style={styles.statusDropdownWrap}>
+            <Dropdown
+              label="Status"
+              data={[
+                { label: "All", value: "all" },
+                { label: "Pending", value: "pending" },
+                { label: "Completed", value: "completed" },
+                { label: "Rejected", value: "rejected" },
+              ]}
+              value={statusView}
+              onChange={(value) => {
+                setStatusView(value);
+                setSelectedStatuses(
+                  value === "pending"
+                    ? ["__PENDING__"]
+                    : value === "completed"
+                      ? ["Completed"]
+                      : value === "rejected"
+                        ? ["Rejected"]
+                        : [],
+                );
+              }}
+              searchable={false}
+              floatingLabel
+              noBottomSpacing
+            />
+          </View>
+          <View style={styles.fieldWrap}>
+            <Text style={styles.fieldLabel}>Search</Text>
+            <View style={styles.searchWrap}>
+              <Ionicons name="search-outline" size={18} color={COLORS.textSecondary} />
+              <TextInput
+                style={styles.searchInput}
+                value={searchQuery}
+                onChangeText={(value) => setSearchQuery(value.toUpperCase())}
+                placeholder="NAME / CODE"
+                placeholderTextColor={COLORS.textSecondary}
+                autoCapitalize="characters"
+                autoCorrect={false}
+              />
+              {!!searchQuery && (
+                <TouchableOpacity onPress={() => setSearchQuery("")}>
+                  <Ionicons name="close-circle" size={18} color={COLORS.textSecondary} />
+                </TouchableOpacity>
+              )}
+            </View>
+          </View>
+          <View style={styles.dateFieldWrap}>
+            <Text style={styles.fieldLabel}>Date</Text>
             <InlineOrderDateFilter
               value={selectedOrderDate}
               onChange={setSelectedOrderDate}
-              variant="compact"
+              variant="field"
             />
-            <TouchableOpacity
-              style={styles.filterIconButton}
-              onPress={() => setIsFilterModalVisible(true)}
-              activeOpacity={0.8}
-            >
-              <Ionicons name="filter-outline" size={16} color={COLORS.primary} />
-              {(selectedParties.length > 0 || selectedItems.length > 0 || selectedStatuses.length > 0) && (
-                <View style={styles.filterActiveDot} />
-              )}
-            </TouchableOpacity>
           </View>
         </View>
 
-        {/* Orders Count */}
+        {/* Orders Count + Filter */}
         {!loading && filteredOrders.length > 0 && (
-          <View style={styles.countBar}>
-            <Text style={styles.countText}>
-              {filteredOrders.length} order{filteredOrders.length > 1 ? "s" : ""}{" "}
-              found
-            </Text>
-          </View>
+          <LinearGradient
+            colors={[COLORS.primaryDark, COLORS.primary]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.countBar}
+          >
+            <View style={styles.countBarLeft}>
+              <View style={styles.countBarIcon}>
+                <Ionicons name="receipt-outline" size={18} color="#fff" />
+              </View>
+              <View style={styles.countBarTextWrap}>
+                <Text style={styles.countText} numberOfLines={1}>
+                  {filteredOrders.length} order{filteredOrders.length > 1 ? "s" : ""} found
+                </Text>
+                <Text style={styles.countSubText} numberOfLines={1}>
+                  Last updated just now
+                </Text>
+              </View>
+            </View>
+            <TouchableOpacity
+              style={styles.countBarFilterBtn}
+              onPress={() => setIsFilterModalVisible(true)}
+              activeOpacity={0.8}
+            >
+              <Ionicons name="funnel-outline" size={14} color="#fff" />
+              <Text style={styles.countBarFilterText}>Filter</Text>
+              {(selectedParties.length > 0 || selectedItems.length > 0 || selectedStatuses.length > 0) && (
+                <View style={styles.countBarFilterDot} />
+              )}
+            </TouchableOpacity>
+          </LinearGradient>
         )}
 
         {/* Orders List */}
@@ -1168,10 +1257,117 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: COLORS.background,
   },
+  // Filter bar (Status dropdown + Search + Date) — matches the Order List page.
+  tabContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: COLORS.white,
+    padding: 12,
+    gap: 8,
+  },
+  statusDropdownWrap: {
+    width: 126,
+  },
+  fieldWrap: {
+    flex: 1,
+    paddingTop: 8,
+    position: "relative",
+  },
+  dateFieldWrap: {
+    paddingTop: 8,
+    position: "relative",
+  },
+  fieldLabel: {
+    position: "absolute",
+    top: 0,
+    left: 12,
+    zIndex: 2,
+    backgroundColor: COLORS.inputBackground,
+    paddingHorizontal: 4,
+    fontSize: 12,
+    fontWeight: "500",
+    color: COLORS.textSecondary,
+  },
+  searchWrap: {
+    alignSelf: "stretch",
+    height: 56,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 10,
+    borderWidth: 1.5,
+    borderColor: COLORS.border,
+    borderRadius: 12,
+    backgroundColor: COLORS.inputBackground,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 12,
+    fontWeight: "600",
+    color: COLORS.text,
+    paddingVertical: 0,
+  },
+  // Gradient count bar with Filter action — matches the Order List page.
   countBar: {
-    backgroundColor: COLORS.primary,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginHorizontal: 16,
+    marginTop: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 16,
+    shadowColor: COLORS.primaryDark,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.2,
+    shadowRadius: 12,
+    elevation: 6,
+  },
+  countBarLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    flex: 1,
+    marginRight: 10,
+  },
+  countBarIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: "rgba(255,255,255,0.18)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  countBarTextWrap: {
+    flex: 1,
+  },
+  countSubText: {
+    color: "rgba(255,255,255,0.8)",
+    fontSize: 11,
+    marginTop: 2,
+  },
+  countBarFilterBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "rgba(255,255,255,0.2)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.35)",
+    borderRadius: 20,
+    paddingHorizontal: 14,
     paddingVertical: 8,
-    paddingHorizontal: 16,
+  },
+  countBarFilterText: {
+    color: "#fff",
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  countBarFilterDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: "#FFD166",
+    marginLeft: 2,
   },
   filterWrap: {
     backgroundColor: COLORS.white,
@@ -1206,8 +1402,8 @@ const styles = StyleSheet.create({
   },
   countText: {
     color: "#fff",
-    fontWeight: "500",
-    textAlign: "center",
+    fontSize: 15,
+    fontWeight: "800",
   },
   loadingContainer: {
     flex: 1,

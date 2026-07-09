@@ -25,6 +25,8 @@ interface DropdownProps {
   inverted?: boolean;
   autoScroll?: boolean;
   flatListProps?: Omit<FlatListProps<any>, 'renderItem' | 'data'>;
+  floatingLabel?: boolean;
+  noBottomSpacing?: boolean;
 }
 
 export default function Dropdown({
@@ -47,14 +49,20 @@ export default function Dropdown({
   inverted = false,
   autoScroll = false,
   flatListProps,
+  floatingLabel = false,
+  noBottomSpacing = false,
 }: DropdownProps) {
   const normalizedData = Array.isArray(data) ? data : [];
   const showLabel = String(label || '').trim().length > 0;
 
   return (
-    <View style={styles.container}>
+    <View style={[
+      styles.container,
+      floatingLabel && styles.floatingContainer,
+      noBottomSpacing && styles.noBottomSpacing,
+    ]}>
       {showLabel ? (
-        <Text style={styles.label}>
+        <Text style={[styles.label, floatingLabel && styles.floatingLabel]}>
           {label} {required && <Text style={styles.required}>*</Text>}
         </Text>
       ) : null}
@@ -124,11 +132,26 @@ const styles = StyleSheet.create({
   container: {
     marginBottom: SPACING.sm,
   },
+  noBottomSpacing: {
+    marginBottom: 0,
+  },
   label: {
     fontSize: 12,
     fontWeight: '500',
     color: COLORS.textSecondary,
     marginBottom: SPACING.sm,
+  },
+  floatingContainer: {
+    paddingTop: 8,
+  },
+  floatingLabel: {
+    position: 'absolute',
+    top: 0,
+    left: 12,
+    zIndex: 2,
+    backgroundColor: COLORS.inputBackground,
+    paddingHorizontal: 4,
+    marginBottom: 0,
   },
   required: {
     color: COLORS.error,
