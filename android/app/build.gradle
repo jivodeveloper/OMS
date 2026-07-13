@@ -87,9 +87,9 @@ android {
     buildToolsVersion rootProject.ext.buildToolsVersion
     compileSdk rootProject.ext.compileSdkVersion
 
-    namespace "com.omsapp"
+    namespace "com.jivo.oms"
     defaultConfig {
-        applicationId "com.omsapp"
+        applicationId "com.jivo.oms"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
