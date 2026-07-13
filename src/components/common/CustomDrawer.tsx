@@ -56,8 +56,9 @@ const BOTTOM_BAR_ROUTES = new Set<string>([
   "approver/pending_approval", // Orders (approver)
   "orders/auditorapproval", // Orders (auditor)
   "orders/create", // Create
-  "orders/drafts", // Drafts
+  "orders/drafts", // Drafts (feature hidden — kept for future re-enable)
   "reports/daily-report", // Reports
+  "profile", // Profile
 ]);
 
 /** Routes grouped after the primary block get a divider before them. */

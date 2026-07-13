@@ -242,11 +242,21 @@ export default function DashboardScreen() {
   }, [user?.role, chartData]);
 
   // Recent orders shown in every role's dashboard hero list.
+  // Role-neutral fetch: the backend scopes /orders/list/ to whatever the
+  // authenticated user is permitted to see, so every role with dashboard
+  // access gets the same list UI (no billing-only filter that hid orders
+  // for approver/manager/auditor).
   useEffect(() => {
     let active = true;
     (async () => {
       try {
-        const orders = await productService.getOrders(0, undefined, true);
+        const orders = await productService.getOrders(
+          0,
+          undefined,
+          false,
+          false,
+          true,
+        );
         if (active) {
           setRecentOrders((Array.isArray(orders) ? orders : []).slice(0, 5));
         }

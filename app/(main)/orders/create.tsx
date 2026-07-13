@@ -4,7 +4,6 @@ import {
   Text,
   StyleSheet,
   ScrollView,
-  Alert,
   ActivityIndicator,
   TouchableOpacity,
   KeyboardAvoidingView,
@@ -22,6 +21,7 @@ import { useAuth } from "@/src/context/AuthContext";
 import { COLORS, SPACING, RADIUS, GRADIENTS } from "@/src/constants/theme";
 import Dropdown from "@/src/components/common/DropdownProps";
 import StateWrapper from "@/src/components/common/StateWrapper";
+import { appAlert } from "@/src/components/common/AppDialog";
 import { api } from "@/src/services/api";
 import { storage } from "@/src/utils/storage";
 import useAndroidBackOverride from "@/src/hooks/useAndroidBackOverride";
@@ -905,7 +905,7 @@ export function OrderEntryScreen({
           setOrderItems([]); // Pichle confirmed items hata do
         }
       } catch (e) {
-        Alert.alert("Error", "Failed to load template details");
+        appAlert("Error", "Failed to load template details");
       } finally {
         setTemplateLoading(false);
       }
@@ -1987,7 +1987,7 @@ export function OrderEntryScreen({
     );
 
     if (hasIncompleteRow) {
-      Alert.alert(
+      appAlert(
         "Incomplete Item",
         "Please fill all fields in the current item row before adding a new row.",
       );
@@ -2009,12 +2009,12 @@ export function OrderEntryScreen({
     if (!row) return;
 
     if (!row.selectedCategory || !row.selectedProduct || !row.boxes) {
-      Alert.alert("Error", "Please fill all required fields");
+      appAlert("Error", "Please fill all required fields");
       return;
     }
 
     // if ((row.isScheme || row.isComboProduct) && !row.selectedScheme) {
-    //   Alert.alert("Error", "Please select a scheme before confirming this item");
+    //   appAlert("Error", "Please select a scheme before confirming this item");
     //   return;
     // }
 
@@ -2247,24 +2247,24 @@ export function OrderEntryScreen({
 
 
   const handleSubmit = async () => {
-    if (!partyName) return Alert.alert("Error", "Select a party");
-    if (!branch) return Alert.alert("Error", "Select dispatch location");
-    if (!company) return Alert.alert("Error", "Select company");
+    if (!partyName) return appAlert("Error", "Select a party");
+    if (!branch) return appAlert("Error", "Select dispatch location");
+    if (!company) return appAlert("Error", "Select company");
     const resolvedBillToId = selectedBillTo ?? selectedShipTo;
     const resolvedShipToId = selectedShipTo ?? selectedBillTo;
     if (!resolvedBillToId && !resolvedShipToId) {
-      return Alert.alert("Error", "Select at least one address");
+      return appAlert("Error", "Select at least one address");
     }
-    // if (!poNumber) return Alert.alert("Error", "Select Po Number");
-    if (!delivery) return Alert.alert("Error", "Select delivery date");
-    if (!branch) return Alert.alert("Error", "Select dispatch location");
+    // if (!poNumber) return appAlert("Error", "Select Po Number");
+    if (!delivery) return appAlert("Error", "Select delivery date");
+    if (!branch) return appAlert("Error", "Select dispatch location");
 
     if (orderItems.length === 0)
-      return Alert.alert("Error", "Add at least one item");
+      return appAlert("Error", "Add at least one item");
 
     console.log("logdata2 " + !partyName + orderItems.length);
     if (!partyName || orderItems.length === 0) {
-      Alert.alert("Error", "Select a party and add at least one item");
+      appAlert("Error", "Select a party and add at least one item");
       return;
     }
     try {
@@ -2336,7 +2336,7 @@ export function OrderEntryScreen({
           });
           setSuccessModal(true);
         } else {
-          Alert.alert("Error", response?.message || "Failed to update order");
+          appAlert("Error", response?.message || "Failed to update order");
         }
 
       } else {
@@ -2352,12 +2352,12 @@ export function OrderEntryScreen({
           setSuccessModal(true);
           handleClear({ keepSuccessModal: true });
         } else {
-          Alert.alert("Error", "Something went wrong. Please try again.");
+          appAlert("Error", "Something went wrong. Please try again.");
         }
 
       }
     } catch (error) {
-      Alert.alert("Error", isEditMode ? "Failed to update order" : "Failed to create order");
+      appAlert("Error", isEditMode ? "Failed to update order" : "Failed to create order");
     } finally {
       setLoading(false);
     }
@@ -2513,10 +2513,10 @@ export function OrderEntryScreen({
         setSuccessModal(true);
         handleClear({ keepSuccessModal: true });
       } else {
-        Alert.alert("Error", response?.message || "Failed to save draft");
+        appAlert("Error", response?.message || "Failed to save draft");
       }
     } catch (error) {
-      Alert.alert("Error", "Failed to save draft");
+      appAlert("Error", "Failed to save draft");
     } finally {
       setSavingDraft(false);
     }
@@ -3480,7 +3480,9 @@ export function OrderEntryScreen({
                     if (orderResult?.isDraft) {
                       router.navigate({ pathname: "/(main)/orders/drafts" } as never);
                     } else {
-                      router.back();
+                      // "Go to Orders" → open the order list so the user sees
+                      // their order (previously went back to Home/Dashboard).
+                      router.navigate({ pathname: "/(main)/orders/orderlist" } as never);
                     }
                   }}
                 >
@@ -3530,7 +3532,11 @@ export function OrderEntryScreen({
             <Text style={styles.cancelBtnText}>Clear</Text>
           </TouchableOpacity>
 
-          {(!isEditMode || loadedIsDraftOrder) && (
+          {/* Draft feature temporarily hidden — users should not create drafts
+              for now. Kept here (commented) so it can be re-enabled later
+              without rebuilding the flow. handleSaveDraft/saveDraft remain in
+              place for that purpose. */}
+          {/* {(!isEditMode || loadedIsDraftOrder) && (
             <TouchableOpacity
               style={[
                 styles.draftBtn,
@@ -3548,7 +3554,7 @@ export function OrderEntryScreen({
                 </>
               )}
             </TouchableOpacity>
-          )}
+          )} */}
 
           <TouchableOpacity
             onPress={handleSubmit}

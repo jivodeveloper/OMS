@@ -375,6 +375,15 @@ export default function MainLayout() {
             drawerItemStyle: hiddenStyle,
           }}
         />
+        {/* Profile is a bottom-bar tab with its own in-page header, so it is
+            hidden from the drawer and shows no drawer header. */}
+        <Drawer.Screen
+          name="profile"
+          options={{
+            headerShown: false,
+            drawerItemStyle: hiddenStyle,
+          }}
+        />
         <Drawer.Screen
           name="notifications"
           options={{

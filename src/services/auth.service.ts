@@ -18,11 +18,19 @@ export interface User {
   email: string | null;
   phone: string | null;
   role: string | null;
+  role_display?: string | null;
   company: { id: number; name: string } | null;
   main_group: { id: number; name: string } | null;
-  state: UserState | null;
+  state: (UserState & { code?: string }) | null;
   states?: UserState[];
+  category?: { id?: number; category?: string; name?: string } | null;
+  sub_group?: string | null;
   is_active: boolean;
+  // Account flags / timestamps shown on the Profile screen (read-only).
+  is_superuser?: boolean;
+  is_staff?: boolean;
+  last_login?: string | null;
+  date_joined?: string | null;
   created_at: string;
   // Admin-granted page keys giving access beyond the user's role (see ASSIGNABLE_PAGES).
   extra_pages?: string[];

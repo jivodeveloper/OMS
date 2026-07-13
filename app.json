@@ -30,6 +30,7 @@
     "android": {
       "googleServicesFile": "./google-services.json",
       "usesCleartextTraffic": true,
+      "softwareKeyboardLayoutMode": "pan",
       "permissions": [
         "INTERNET", "POST_NOTIFICATIONS"
       ],

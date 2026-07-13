@@ -7,7 +7,6 @@ import {
   TouchableOpacity,
   RefreshControl,
   ActivityIndicator,
-  Alert,
   Modal,
   Pressable,
   KeyboardAvoidingView,
@@ -28,6 +27,7 @@ import Animated, {
   withTiming,
 } from "react-native-reanimated";
 import { COLORS } from "@/constants/theme";
+import { appAlert } from "@/src/components/common/AppDialog";
 import StateWrapper from "@/src/components/common/StateWrapper";
 import { orderService, productService } from "@/src/services/order.service";
 import { useAuth } from "@/src/context/AuthContext";
@@ -84,6 +84,68 @@ const getSchemeQty = (scheme: any) =>
 
 const normalizeStatusText = (value: unknown) =>
   String(value || "").trim().toLowerCase();
+
+// Auto-generated remark text the system stores when a user takes an action
+// WITHOUT typing a remark (e.g. tapping Approve with no note). These are not
+// real comments, so we hide them — only genuinely typed remarks are shown.
+const AUTO_REMARK_PHRASES = new Set([
+  "approved",
+  "rejected",
+  "accepted",
+  "completed",
+  "accepted by billing",
+  "approved by billing",
+  "rejected by billing",
+  "sent to auditor",
+  "rejected by rate approver",
+  "approved by rate approver",
+  "sales quotation created by auditor",
+  "rate approval pending",
+  "order created",
+  "billing",
+  "auditor approval",
+  "need approval",
+  "rate approval",
+]);
+
+const isRealUserRemark = (remark: unknown): boolean => {
+  const text = String(remark ?? "").trim();
+  if (!text) return false;
+  return !AUTO_REMARK_PHRASES.has(text.toLowerCase());
+};
+
+// A reviewer's action is logged on two rows (the stage row + the action row)
+// with the SAME remark, so a comment can appear twice for one person. Collapse
+// to ONE entry per (author + remark text) across the whole list — so each
+// workflow user shows their remark once, while different users (and a user's
+// genuinely different remarks) are all preserved.
+const dedupeRemarks = (logs: any[]): any[] => {
+  const seen = new Set<string>();
+  const result: any[] = [];
+  for (const log of logs) {
+    const author = String(log?.performed_by_name ?? "").trim().toLowerCase();
+    const text = String(log?.remarks ?? "").trim().toLowerCase();
+    const key = `${author}|${text}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(log);
+  }
+  return result;
+};
+
+const REMARK_MONTHS = [
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+];
+const formatRemarkDate = (value: string) => {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const dd = String(date.getDate()).padStart(2, "0");
+  const mon = REMARK_MONTHS[date.getMonth()];
+  const hh = String(date.getHours()).padStart(2, "0");
+  const mm = String(date.getMinutes()).padStart(2, "0");
+  return `${dd} ${mon}, ${hh}:${mm}`;
+};
 
 const getOrderStatusCodes = (order: any) =>
   [
@@ -199,6 +261,10 @@ export default function OrderDetailsScreen() {
   const [approveModalVisible, setApproveModalVisible] = useState(false);
   const [approveRemark, setApproveRemark] = useState("");
   const [expandedItems, setExpandedItems] = useState<Record<string, boolean>>({});
+  // Remarks/comments left across the workflow stages (from the order timeline).
+  const [remarkLogs, setRemarkLogs] = useState<any[]>([]);
+  // Collapsed by default (like the Items card); tap the header to expand.
+  const [remarksExpanded, setRemarksExpanded] = useState(false);
 
   const toggleItem = useCallback((key: string) => {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
@@ -255,8 +321,56 @@ export default function OrderDetailsScreen() {
       setError(null);
 
       const res = await orderService.getorderdetailsbyid(id);
-      console.log("Fetching details for order ID:", JSON.stringify(res));
-      setOrder(res?.data || res);
+      const orderData = res?.data || res;
+      setOrder(orderData);
+
+      // Build the "Remarks & Comments" timeline so every reviewer sees remarks
+      // left by previous users. It starts with the CREATOR's comment (the one
+      // added on Create Order), followed by each approval-stage remark.
+      try {
+        const logsRes = await orderService.getOrderLogs(id);
+        const logs = Array.isArray(logsRes)
+          ? logsRes
+          : logsRes?.data || logsRes?.results || [];
+        // Only real, user-typed remarks — skip the auto "Approved"/"Rejected"
+        // action text so the box shows comments, not status changes.
+        const stageRemarks = (Array.isArray(logs) ? logs : []).filter(
+          (log: any) => isRealUserRemark(log?.remarks),
+        );
+
+        const creationComment = String(orderData?.remarks ?? "").trim();
+        const creationEntry = creationComment
+          ? [
+              {
+                id: "creation-comment",
+                performed_by_name:
+                  orderData?.created_by_name || orderData?.punched_by || "Creator",
+                status_name: "Order Created",
+                remarks: creationComment,
+                created_at: orderData?.created_at,
+              },
+            ]
+          : [];
+
+        setRemarkLogs(dedupeRemarks([...creationEntry, ...stageRemarks]));
+      } catch {
+        // timeline is best-effort; the rest of the screen still works
+        const creationComment = String(orderData?.remarks ?? "").trim();
+        setRemarkLogs(
+          creationComment
+            ? [
+                {
+                  id: "creation-comment",
+                  performed_by_name:
+                    orderData?.created_by_name || orderData?.punched_by || "Creator",
+                  status_name: "Order Created",
+                  remarks: creationComment,
+                  created_at: orderData?.created_at,
+                },
+              ]
+            : [],
+        );
+      }
     } catch (error) {
       console.error("Error fetching order details:", error);
       setError("Failed to load order details.");
@@ -356,7 +470,7 @@ export default function OrderDetailsScreen() {
   };
 
   const showSuccessAndOpenPending = (message: string) => {
-    Alert.alert("Success", message, [{ text: "OK", onPress: openPendingScreen }]);
+    appAlert("Success", message, [{ text: "OK", onPress: openPendingScreen }]);
   };
 
   const handleApprove = async () => {
@@ -378,7 +492,7 @@ export default function OrderDetailsScreen() {
         await productService.updatestatus(parsedOrderId, "9", remark || "Sales quotation created by auditor");
         setApproveModalVisible(false);
         setApproveRemark("");
-        showSuccessAndOpenPending("Sales quotation created successfully");
+        showSuccessAndOpenPending("Sales Order created successfully");
       } else if (userRole === "billing") {
         const response = await productService.updatestatus(
           parsedOrderId,
@@ -395,7 +509,7 @@ export default function OrderDetailsScreen() {
         showSuccessAndOpenPending("Order approved successfully");
       }
     } catch (err) {
-      Alert.alert("Error", err instanceof Error ? err.message : "Approval failed");
+      appAlert("Error", err instanceof Error ? err.message : "Approval failed");
     } finally {
       setActionLoading(null);
     }
@@ -403,7 +517,7 @@ export default function OrderDetailsScreen() {
 
   const handleReject = async () => {
     if (!rejectReason.trim()) {
-      Alert.alert("Error", "Please enter a rejection reason");
+      appAlert("Error", "Please enter a rejection reason");
       return;
     }
     try {
@@ -414,7 +528,7 @@ export default function OrderDetailsScreen() {
       setRejectReason("");
       showSuccessAndOpenPending("Order rejected");
     } catch {
-      Alert.alert("Error", "Failed to reject order");
+      appAlert("Error", "Failed to reject order");
     } finally {
       setActionLoading(null);
     }
@@ -525,8 +639,73 @@ export default function OrderDetailsScreen() {
               <InfoRow label="PO Number" value={order.po_number} />
               <InfoRow label="Bill To" value={order.bill_to_address} />
               <InfoRow label="Ship To" value={order.ship_to_address} />
-              <InfoRow label="Comment" value={order.remarks} />
+              {/* Comment moved to the "Remarks & Comments" section below. */}
             </View>
+
+            {/* ===== Remarks & Comments (collapsed by default) ===== */}
+            {remarkLogs.length > 0 && (
+              <View style={styles.card}>
+                <TouchableOpacity
+                  activeOpacity={0.7}
+                  onPress={() => setRemarksExpanded((v) => !v)}
+                >
+                  <SectionTitle
+                    icon="chatbubbles-outline"
+                    title="Remarks & Comments"
+                    right={
+                      <View style={styles.remarkToggle}>
+                        <View style={styles.remarkCountPill}>
+                          <Text style={styles.remarkCountText}>
+                            {remarkLogs.length}
+                          </Text>
+                        </View>
+                        <Ionicons
+                          name={remarksExpanded ? "chevron-up" : "chevron-down"}
+                          size={18}
+                          color={COLORS.textSecondary}
+                        />
+                      </View>
+                    }
+                  />
+                </TouchableOpacity>
+                {remarksExpanded &&
+                  remarkLogs.map((log: any, index: number) => (
+                  <View
+                    key={log?.id ?? index}
+                    style={[
+                      styles.remarkItem,
+                      index === remarkLogs.length - 1 && styles.remarkItemLast,
+                    ]}
+                  >
+                    <View style={styles.remarkHeaderRow}>
+                      <View style={styles.remarkAvatar}>
+                        <Text style={styles.remarkAvatarText}>
+                          {String(log?.performed_by_name || "?")
+                            .charAt(0)
+                            .toUpperCase()}
+                        </Text>
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.remarkAuthor} numberOfLines={1}>
+                          {log?.performed_by_name || "System"}
+                        </Text>
+                        {!!log?.status_name && (
+                          <Text style={styles.remarkStage} numberOfLines={1}>
+                            {log.status_name}
+                          </Text>
+                        )}
+                      </View>
+                      {!!log?.created_at && (
+                        <Text style={styles.remarkDate}>
+                          {formatRemarkDate(log.created_at)}
+                        </Text>
+                      )}
+                    </View>
+                    <Text style={styles.remarkText}>{log.remarks}</Text>
+                  </View>
+                ))}
+              </View>
+            )}
 
             {/* ===== Items ===== */}
             <View style={styles.card}>
@@ -979,6 +1158,78 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.08,
     shadowRadius: 10,
     elevation: 4,
+  },
+  remarkToggle: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  remarkCountPill: {
+    minWidth: 22,
+    height: 22,
+    borderRadius: 11,
+    paddingHorizontal: 7,
+    backgroundColor: COLORS.primary + "1A",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  remarkCountText: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: COLORS.primary,
+  },
+  remarkItem: {
+    borderBottomWidth: 1,
+    borderBottomColor: "#EEF1F6",
+    paddingVertical: 12,
+  },
+  remarkItemLast: {
+    borderBottomWidth: 0,
+    paddingBottom: 0,
+  },
+  remarkHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    marginBottom: 6,
+  },
+  remarkAvatar: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: COLORS.primary + "1A",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  remarkAvatarText: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: COLORS.primary,
+  },
+  remarkAuthor: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: COLORS.text,
+    textTransform: "capitalize",
+  },
+  remarkStage: {
+    fontSize: 11.5,
+    color: COLORS.textSecondary,
+    marginTop: 1,
+  },
+  remarkDate: {
+    fontSize: 11,
+    color: COLORS.textSecondary,
+  },
+  remarkText: {
+    fontSize: 13.5,
+    color: COLORS.text,
+    lineHeight: 19,
+    backgroundColor: "#F8FAFC",
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    marginLeft: 42,
   },
   sectionTitleRow: {
     flexDirection: "row",

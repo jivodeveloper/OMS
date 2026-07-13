@@ -8,7 +8,7 @@ import { COLORS } from "@/src/constants/theme";
 import { canAccessScreen } from "@/src/constants/pages";
 import { useDrawerOpen } from "@/src/utils/drawerState";
 
-type TabKey = "home" | "orders" | "create" | "drafts" | "reports";
+type TabKey = "home" | "orders" | "create" | "reports" | "profile";
 
 // Each role's own "orders" destination for the Orders tab. A user can always
 // reach their own orders screen, so this tab is never permission-blocked.
@@ -52,7 +52,7 @@ export default function BottomBar({
     if (active) return active;
     const p = (pathname || "").toLowerCase();
     if (p.includes("create")) return "create";
-    if (p.includes("draft")) return "drafts";
+    if (p.includes("profile")) return "profile";
     if (p.includes("report")) return "reports";
     if (
       p.includes("orderlist") ||
@@ -117,21 +117,22 @@ export default function BottomBar({
         ),
     },
     {
-      key: "drafts",
-      label: "Drafts",
-      icon: "document-text-outline",
-      onPress: () =>
-        guarded("orders/drafts", "Drafts", () =>
-          router.push("/orders/drafts" as never),
-        ),
-    },
-    {
       key: "reports",
       label: "Reports",
       icon: "bar-chart-outline",
       onPress: () =>
         guarded("reports/daily-report", "Reports", () =>
           router.push("/reports/daily-report" as never),
+        ),
+    },
+    {
+      key: "profile",
+      label: "Profile",
+      icon: "person-outline",
+      // Every user can always open their own profile.
+      onPress: () =>
+        guarded("profile", "Profile", () =>
+          router.push("/(main)/profile" as never),
         ),
     },
   ];

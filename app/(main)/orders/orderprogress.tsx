@@ -53,6 +53,12 @@ const EDIT_BLUE = "#2563EB";
 const EDIT_LINE = "#93B4F5";
 const EDIT_CARD = "#EFF5FF";
 const EDIT_BORDER = "#C7DBFB";
+// A stage the order has not reached yet (grey, distinct from the orange
+// in-progress current stage).
+const FUTURE_GREY = "#9CA3AF";
+const FUTURE_LINE = "#D1D5DB";
+const FUTURE_CARD = "#F9FAFB";
+const FUTURE_BORDER = "#E5E7EB";
 
 const getOrdinalStageLabel = (position: number) => {
   const stageNumber = position + 1;
@@ -223,6 +229,11 @@ export default function OrderProgressScreen() {
   const [logs, setLogs] = useState<OrderLog[]>([]);
   const [rateApprovals, setRateApprovals] = useState<RateApprovalEntry[]>([]);
   const [orderStatus, setOrderStatus] = useState("");
+  const [orderMeta, setOrderMeta] = useState<{
+    orderNumber: string;
+    createdAt: string;
+    currentStage: string;
+  }>({ orderNumber: "", createdAt: "", currentStage: "" });
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -252,6 +263,13 @@ export default function OrderProgressScreen() {
       setOrderStatus(
         normalizeText(detail?.status_display || detail?.status_name || detail?.status),
       );
+      setOrderMeta({
+        orderNumber: String(detail?.order_number || ""),
+        createdAt: String(detail?.created_at || ""),
+        currentStage: String(
+          detail?.status_display || detail?.status_name || detail?.status || "",
+        ),
+      });
       const approvals: any[] = Array.isArray(detail?.rate_approvals)
         ? detail.rate_approvals
         : [];
@@ -302,6 +320,22 @@ export default function OrderProgressScreen() {
         minute: "2-digit",
         second: "2-digit",
         hour12: false,
+      });
+    } catch {
+      return value;
+    }
+  };
+
+  const formatCreatedOn = (value: string) => {
+    if (!value) return "-";
+    try {
+      return new Date(value).toLocaleString("en-GB", {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: true,
       });
     } catch {
       return value;
@@ -398,25 +432,76 @@ export default function OrderProgressScreen() {
     // An edit log uses its own blue tone with a tick, regardless of whether it
     // carries a performer (e.g. the manager who edited the order).
     const isDoneFinal = isDone && !isEdit;
-    const accent = isEdit ? EDIT_BLUE : isRejected ? REJECTED_RED : isDoneFinal ? DONE_GREEN : PENDING_ORANGE;
-    const connectorColor = isEdit ? EDIT_LINE : isRejected ? REJECTED_LINE : isDoneFinal ? DONE_LINE : PENDING_LINE;
-    const cardColor = isEdit ? EDIT_CARD : isRejected ? REJECTED_CARD : isDoneFinal ? DONE_CARD : PENDING_CARD;
-    const borderColor = isEdit ? EDIT_BORDER : isRejected ? REJECTED_BORDER : isDoneFinal ? DONE_BORDER : PENDING_BORDER;
-    // Edit logs show a pencil (edit) icon; otherwise tick / cross / clock.
-    const timelineIconName = isEdit
-      ? "pencil"
+
+    // Resolve the stage to a single state, which drives the tone, icons and the
+    // top-right badge. "in_progress" is the current stage (orange); "pending" is
+    // a stage the order has not reached yet (grey).
+    type StageState =
+      | "edited"
+      | "rejected"
+      | "approved"
+      | "in_progress"
+      | "pending";
+    const stageState: StageState = isEdit
+      ? "edited"
       : isRejected
-        ? "close"
+        ? "rejected"
         : isDoneFinal
-          ? "checkmark"
-          : "time-outline";
-    const headerIconName = isEdit
-      ? "create-outline"
-      : isRejected
-        ? "close-circle"
-        : isDoneFinal
-          ? "checkmark-done-circle"
-          : "time-outline";
+          ? "approved"
+          : isCurrentStage
+            ? "in_progress"
+            : "pending";
+
+    type IconName = React.ComponentProps<typeof Ionicons>["name"];
+    const STATE_STYLE: Record<
+      StageState,
+      {
+        accent: string;
+        line: string;
+        card: string;
+        border: string;
+        badge: string;
+        timelineIcon: IconName;
+        headerIcon: IconName;
+      }
+    > = {
+      edited: { accent: EDIT_BLUE, line: EDIT_LINE, card: EDIT_CARD, border: EDIT_BORDER, badge: "Edited", timelineIcon: "pencil", headerIcon: "create-outline" },
+      rejected: { accent: REJECTED_RED, line: REJECTED_LINE, card: REJECTED_CARD, border: REJECTED_BORDER, badge: "Rejected", timelineIcon: "close", headerIcon: "close-circle" },
+      approved: { accent: DONE_GREEN, line: DONE_LINE, card: DONE_CARD, border: DONE_BORDER, badge: "Approved", timelineIcon: "checkmark", headerIcon: "checkmark-done-circle" },
+      in_progress: { accent: PENDING_ORANGE, line: PENDING_LINE, card: PENDING_CARD, border: PENDING_BORDER, badge: "In Progress", timelineIcon: "time-outline", headerIcon: "time-outline" },
+      pending: { accent: FUTURE_GREY, line: FUTURE_LINE, card: FUTURE_CARD, border: FUTURE_BORDER, badge: "Pending", timelineIcon: "hourglass-outline", headerIcon: "hourglass-outline" },
+    };
+
+    const sv = STATE_STYLE[stageState];
+    const accent = sv.accent;
+    const connectorColor = sv.line;
+    const cardColor = sv.card;
+    const borderColor = sv.border;
+    const timelineIconName = sv.timelineIcon;
+    const headerIconName = sv.headerIcon;
+    const badgeLabel = sv.badge;
+
+    // The actor's role at this stage, shown as a sub-label under their name.
+    const roleLabel =
+      item.stage_key === "rate_approval"
+        ? "Rate Approver"
+        : item.stage_key === "billing"
+          ? "Billing Reviewer"
+          : item.stage_key === "auditor_approval"
+            ? "Auditor"
+            : /final/i.test(item.display_status_name)
+              ? "Final Approver"
+              : null;
+
+    // Short right-aligned decision shown next to the reviewer.
+    const reviewerDecision =
+      stageState === "approved"
+        ? "Approved"
+        : stageState === "rejected"
+          ? "Rejected"
+          : isCurrentStage
+            ? "Awaiting action"
+            : "Pending";
 
     return (
       <View style={styles.timelineRow}>
@@ -450,6 +535,11 @@ export default function OrderProgressScreen() {
               style={styles.headerIcon}
             />
             <Text style={styles.statusText}>{item.display_status_name}</Text>
+            <View style={[styles.stageBadge, { backgroundColor: accent + "1A" }]}>
+              <Text style={[styles.stageBadgeText, { color: accent }]}>
+                {badgeLabel}
+              </Text>
+            </View>
           </View>
 
           {!!item.action_name && (
@@ -497,10 +587,26 @@ export default function OrderProgressScreen() {
             <View style={styles.detailRow}>
               <Ionicons name="person-outline" size={18} color="#1E1E1E" style={styles.detailIcon} />
               <View style={styles.detailTextWrap}>
-                <Text style={styles.detailLabel}>Reviewer</Text>
-                <Text style={styles.detailValue}>
-                  {isCurrentStage && !isDone ? "Awaiting action" : getReviewerText(item)}
+                <Text style={styles.detailLabel}>
+                  {item.stage_key === "billing" ? "Reviewer" : "Approver"}
                 </Text>
+                <View style={styles.reviewerRow}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.detailValue}>
+                      {isCurrentStage && !isDone
+                        ? "Awaiting action"
+                        : getReviewerText(item)}
+                    </Text>
+                    {!!roleLabel && (
+                      <Text style={styles.roleSub}>{roleLabel}</Text>
+                    )}
+                  </View>
+                  {!!item.performed_by_name && (
+                    <Text style={[styles.reviewerDecision, { color: accent }]}>
+                      {reviewerDecision}
+                    </Text>
+                  )}
+                </View>
               </View>
             </View>
           )}
@@ -548,6 +654,36 @@ export default function OrderProgressScreen() {
       </View> */}
 
       <View style={styles.content}>
+        {!!orderMeta.orderNumber && (
+          <View style={styles.summaryCard}>
+            <View style={styles.summaryIconWrap}>
+              <Ionicons name="document-text-outline" size={20} color="#2563EB" />
+            </View>
+            <View style={styles.summaryMain}>
+              <Text style={styles.summaryLabel}>Order ID</Text>
+              <Text style={styles.summaryOrderNo} numberOfLines={1}>
+                {orderMeta.orderNumber}
+              </Text>
+              {!!orderMeta.createdAt && (
+                <Text style={styles.summaryCreated} numberOfLines={1}>
+                  Created on {formatCreatedOn(orderMeta.createdAt)}
+                </Text>
+              )}
+            </View>
+            {!!orderMeta.currentStage && (
+              <View style={styles.summaryStageWrap}>
+                <Text style={styles.summaryLabel}>Current Stage</Text>
+                <View style={styles.currentStageBadge}>
+                  <Ionicons name="time-outline" size={13} color="#EA8C00" />
+                  <Text style={styles.currentStageText} numberOfLines={1}>
+                    {orderMeta.currentStage}
+                  </Text>
+                </View>
+              </View>
+            )}
+          </View>
+        )}
+
         <View style={styles.subtitleCard}>
           <View style={styles.subtitleIconWrap}>
             <Ionicons name="git-branch-outline" size={15} color="#2563EB" />
@@ -681,6 +817,96 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "800",
     color: "#1F2937",
+  },
+  stageBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 20,
+    marginLeft: 8,
+  },
+  stageBadgeText: {
+    fontSize: 11,
+    fontWeight: "800",
+  },
+  reviewerRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 8,
+  },
+  roleSub: {
+    fontSize: 11,
+    color: "#94A3B8",
+    marginTop: 1,
+  },
+  reviewerDecision: {
+    fontSize: 12,
+    fontWeight: "700",
+    marginTop: 1,
+  },
+  summaryCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#FFFFFF",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#EEF1F6",
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    marginBottom: 12,
+    gap: 12,
+    shadowColor: "#A7B0C0",
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 2,
+  },
+  summaryIconWrap: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: "#EEF4FF",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  summaryMain: {
+    flex: 1,
+  },
+  summaryLabel: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#94A3B8",
+    textTransform: "uppercase",
+    letterSpacing: 0.3,
+  },
+  summaryOrderNo: {
+    fontSize: 16,
+    fontWeight: "800",
+    color: "#2563EB",
+    marginTop: 2,
+  },
+  summaryCreated: {
+    fontSize: 12,
+    color: "#64748B",
+    marginTop: 2,
+  },
+  summaryStageWrap: {
+    alignItems: "flex-end",
+  },
+  currentStageBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "#FFF7ED",
+    borderRadius: 20,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    marginTop: 4,
+  },
+  currentStageText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#EA8C00",
+    maxWidth: 110,
   },
   detailRow: {
     flexDirection: "row",

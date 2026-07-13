@@ -68,7 +68,7 @@ const getTimeoutForEndpoint = (endpoint: string): number => {
 
   if (
     endpoint.startsWith('/sap/sync/') ||
-    endpoint.startsWith('/sap/approve-order/') ||
+    endpoint.startsWith('/sap/approve-sales-order/') ||
     endpoint.startsWith('/sap/push-quotation/')
   ) {
     return SAP_SYNC_REQUEST_TIMEOUT_MS;

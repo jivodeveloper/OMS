@@ -679,6 +679,43 @@ export default function AuditorApprovalScreen() {
     return status;
   };
 
+  // Colored status tag (Pending / Approved / Rejected) shown on each card,
+  // mirroring the Order List screen instead of a bare progress icon.
+  const getCardStatusBadge = (
+    item: OrderItemList,
+  ): {
+    label: string;
+    color: string;
+    bg: string;
+    icon: React.ComponentProps<typeof Ionicons>["name"];
+  } => {
+    // Pending tab: every order is awaiting the auditor's action, so it is always
+    // "Pending Approval". (The stage status name is literally "Auditor Approval",
+    // which contains "approv" — matching on that text would wrongly read as
+    // Approved, so we never inspect the status name here.)
+    if (activeTab === "pending") {
+      return { label: "Pending Approval", color: "#EA8C00", bg: "#FFF7ED", icon: "time-outline" };
+    }
+
+    // Others tab: reflect the auditor's actual decision.
+    const decision = getAuditorDecisionSummary(item);
+    if (decision?.decision === "Auditor Approved") {
+      return { label: "Approved", color: COLORS.success, bg: "#ECFDF3", icon: "checkmark-circle-outline" };
+    }
+    if (decision?.decision === "Auditor Rejected") {
+      return { label: "Rejected", color: COLORS.error, bg: "#FEF2F2", icon: "close-circle-outline" };
+    }
+
+    const raw = getStatusName(item).toLowerCase();
+    if (raw.includes("reject")) {
+      return { label: "Rejected", color: COLORS.error, bg: "#FEF2F2", icon: "close-circle-outline" };
+    }
+    if (raw.includes("approv") || raw.includes("accept") || raw.includes("complete")) {
+      return { label: "Approved", color: COLORS.success, bg: "#ECFDF3", icon: "checkmark-circle-outline" };
+    }
+    return { label: "Pending Approval", color: "#EA8C00", bg: "#FFF7ED", icon: "time-outline" };
+  };
+
   useEffect(() => {
     let isActive = true;
 
@@ -772,7 +809,7 @@ export default function AuditorApprovalScreen() {
         const quotationNumber =
           res?.data?.DocNum ?? res?.data?.doc_num ?? res?.data?.DocEntry;
         setApprovalResult({
-          message: "Sales quotation created successfully",
+          message: "Sales Order created successfully",
           orderNumber,
           sapDocNum: quotationNumber ?? null,
         });
@@ -863,24 +900,20 @@ export default function AuditorApprovalScreen() {
             Created: {formatDateTime(item.created_at)}
           </Text>
         </View>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-          {userRole === "manager" && (
-            <View style={styles.statusBadge}>
-              <Text style={styles.statusText}>
-                {getStatusBadgeText(item)}
+        {(() => {
+          const badge = getCardStatusBadge(item);
+          return (
+            <View style={[styles.cardStatusBadge, { backgroundColor: badge.bg }]}>
+              <Ionicons name={badge.icon} size={13} color={badge.color} />
+              <Text
+                style={[styles.cardStatusText, { color: badge.color }]}
+                numberOfLines={1}
+              >
+                {badge.label}
               </Text>
             </View>
-          )}
-          <TouchableOpacity
-            onPress={(e) => {
-              e.stopPropagation();
-              router.push({ pathname: "/orders/orderprogress", params: { orderId: item.id, from: "orders/auditorapproval" } });
-            }}
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-          >
-            <Ionicons name="git-branch-outline" size={22} color={COLORS.primary} />
-          </TouchableOpacity>
-        </View>
+          );
+        })()}
       </View>
 
       <Text style={styles.cardName}>{item.card_name}</Text>
@@ -1215,7 +1248,7 @@ export default function AuditorApprovalScreen() {
 
                 <Text style={styles.successHeaderTitle}>Approved In SAP</Text>
                 <Text style={styles.successHeaderSub}>
-                  Sales quotation created successfully
+                  Sales Order created successfully
                 </Text>
               </LinearGradient>
 
@@ -1850,6 +1883,19 @@ const styles = StyleSheet.create({
   statusText: {
     color: COLORS.primaryDark,
     fontSize: 10,
+    fontWeight: "700",
+  },
+  cardStatusBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 20,
+    maxWidth: 150,
+  },
+  cardStatusText: {
+    fontSize: 11,
     fontWeight: "700",
   },
   cardName: {

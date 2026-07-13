@@ -613,7 +613,7 @@ export const productService = {
  },
 
  sapApproveOrder:async(order:ApproveOr):Promise<any>=>{
- return await api.post(`/sap/approve-order/`, order);
+ return await api.post(`/sap/approve-sales-order/`, order);
  },
  
 };

@@ -65,7 +65,8 @@ export const canAccessScreen = (
   role: string | null | undefined,
   extraPages: string[] = [],
 ): boolean => {
-  if (screen === "dashboard") return true;
+  // Home (dashboard) and the user's own Profile are always reachable.
+  if (screen === "dashboard" || screen === "profile") return true;
   const normalizedRole = (role || "").toLowerCase();
   if (screensFromExtraPages(extraPages).has(screen)) return true;
   const roles = SCREEN_ROLES[screen];

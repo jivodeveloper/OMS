@@ -3,6 +3,7 @@ import { Stack } from "expo-router";
 import { StatusBar } from "react-native";
 import { PaperProvider } from "react-native-paper";
 import { AuthProvider } from "@/src/context/AuthContext";
+import AppDialogHost from "@/src/components/common/AppDialog";
 import {
   darkNavigationTheme,
   darkPaperTheme,
@@ -32,6 +33,8 @@ function ThemedApplication() {
           <Stack.Screen name="(auth)" />
           <Stack.Screen name="(main)" />
         </Stack>
+        {/* App-wide branded dialog (replaces OS Alert/confirm boxes). */}
+        <AppDialogHost />
       </PaperProvider>
     </NavigationThemeProvider>
   );
