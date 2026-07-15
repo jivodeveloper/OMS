@@ -2,7 +2,13 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Drawer } from "expo-router/drawer";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { Ionicons } from "@expo/vector-icons";
-import { AppState, Text, TouchableOpacity, View } from "react-native";
+import {
+  ActivityIndicator,
+  AppState,
+  Text,
+  TouchableOpacity,
+  View,
+} from "react-native";
 import * as Notifications from "expo-notifications";
 import { router, usePathname } from "expo-router";
 import CustomDrawer from "@/src/components/common/CustomDrawer";
@@ -20,6 +26,8 @@ import {
 } from "@/src/utils/notificationRouting";
 import { shouldShowPermissionPrompt } from "@/src/utils/notificationPermission";
 import { isNotificationSuppressed } from "@/src/utils/notificationGate";
+import { useHeaderRefresh } from "@/src/utils/headerRefresh";
+import { refreshLiveData, refreshNotifications } from "@/src/cache";
 import NotificationPermissionModal from "@/src/components/NotificationPermissionModal";
 import BottomBar from "@/src/components/common/BottomBar";
 
@@ -30,6 +38,9 @@ export default function MainLayout() {
   const pathname = usePathname();
   const userRole = user?.role?.toLowerCase() || "";
   const grantedScreens = screensFromExtraPages(user?.extra_pages || []);
+  // A screen (e.g. Create Order) can publish a refresh action; when present it
+  // renders as a header button just before the notification bell.
+  const headerRefresh = useHeaderRefresh();
   const [unreadNotificationCount, setUnreadNotificationCount] = useState(0);
   const [showPermissionModal, setShowPermissionModal] = useState(false);
   const [permissionSubmitting, setPermissionSubmitting] = useState(false);
@@ -154,6 +165,11 @@ export default function MainLayout() {
     const subscription = AppState.addEventListener("change", (nextState) => {
       if (nextState === "active") {
         refreshUser();
+        // Drop cached order/notification payloads on foreground so the screen
+        // the user lands on re-fetches instead of showing what was on screen
+        // when they switched away.
+        void refreshLiveData();
+        loadUnreadNotificationCount();
       }
     });
 
@@ -176,7 +192,10 @@ export default function MainLayout() {
     }
 
     const receivedSubscription = Notifications.addNotificationReceivedListener(
-      () => {
+      async () => {
+        // A push means the server state just changed — drop the cached
+        // notification payload so the badge reflects it immediately.
+        await refreshNotifications();
         loadUnreadNotificationCount();
       },
     );
@@ -330,6 +349,25 @@ export default function MainLayout() {
                 <View style={styles.headerActions}>
                   {/* Top "+" create shortcut removed — the bottom bar's centre
                       Create button is the single entry point for new orders. */}
+                  {headerRefresh.available ? (
+                    <TouchableOpacity
+                      hitSlop={HEADER_ICON_HIT_SLOP}
+                      onPress={() => headerRefresh.run()}
+                      disabled={headerRefresh.refreshing}
+                      style={styles.headerBellButton}
+                      accessibilityLabel="Refresh items"
+                    >
+                      {headerRefresh.refreshing ? (
+                        <ActivityIndicator size="small" color={COLORS.primary} />
+                      ) : (
+                        <Ionicons
+                          name="refresh-outline"
+                          size={22}
+                          color={COLORS.text}
+                        />
+                      )}
+                    </TouchableOpacity>
+                  ) : null}
                   <TouchableOpacity
                     hitSlop={HEADER_ICON_HIT_SLOP}
                     onPress={() => navigation.navigate("notifications" as never)}

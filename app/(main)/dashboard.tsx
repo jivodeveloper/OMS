@@ -31,6 +31,7 @@ import StatewiseBarChart from "@/src/components/dashboard/StateWiseBarChart";
 import AnimatedCard from "@/src/components/dashboard/AnimatedCard";
 import AnimatedNumber from "@/src/components/dashboard/AnimatedNumber";
 import StateWrapper from "@/src/components/common/StateWrapper";
+import { refreshLiveData } from "@/src/cache";
 import {
   OrderItemList,
   productService,
@@ -410,6 +411,9 @@ export default function DashboardScreen() {
     isRefreshing.current = true;
     setRefreshing(true);
     try {
+      // Explicit refresh: drop cached order/notification payloads so the
+      // dashboard re-reads live data rather than the cache.
+      await refreshLiveData();
       await refreshDashboardScreen();
     } finally {
       isRefreshing.current = false;

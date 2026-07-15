@@ -16,6 +16,7 @@ import {
   type OMSNotificationData,
 } from "../utils/notificationRouting";
 import { suppressPendingNotification } from "../utils/notificationGate";
+import { bindCacheToUser, refreshLiveData, resetCache } from "../cache";
 import {
   api,
   ensureFreshAccessToken,
@@ -83,6 +84,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
   useEffect(() => {
     checkAuth();
   }, []);
+
+  // Scope the API cache to the signed-in user, so cached payloads can never be
+  // read across accounts on a shared device.
+  useEffect(() => {
+    bindCacheToUser(user?.id ?? null);
+  }, [user?.id]);
 
   // When a refresh ultimately fails, the API layer hands off here to end the
   // session cleanly (tokens are already cleared): drop the user and route to
@@ -254,6 +261,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 
     // Instantly drop the user so the UI/guards reflect sign-out immediately.
     setUser(null);
+
+    // Drop every cached API payload so the next account on this device can
+    // never be served the previous user's data.
+    void resetCache();
 
     // Everything else is best-effort and runs in the BACKGROUND so logout feels
     // instant and a slow/offline network never blocks it:

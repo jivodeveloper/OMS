@@ -1,6 +1,8 @@
 import { Platform } from 'react-native';
 import { storage } from '../utils/storage';
 import Constants from 'expo-constants';
+import { getGetCacheTtl, getInvalidationPrefixes } from '../cache/policy';
+import { fetchQuery, invalidateQueries } from '../cache/queryClient';
   
 const DEFAULT_BASE_URL = Platform.select({
 
@@ -359,21 +361,108 @@ const sendAuthed = async (
   return result;
 };
 
+/**
+ * Only responses that actually succeeded are worth caching. The client returns
+ * parsed payloads (arrays/objects) rather than throwing on every failure, so
+ * guard against storing an error envelope and serving it back as "data".
+ */
+const isCacheableResponse = (result: any): boolean => {
+  if (result == null) return false;
+  if (Array.isArray(result)) return true;
+  if (typeof result !== 'object') return false;
+  if (result.success === false) return false;
+  if (result.status === 401 || result.status === 403) return false;
+  if ('error' in result && result.error) return false;
+  return true;
+};
+
+export type ApiGetOptions = {
+  /**
+   * 'default'  – stale-while-revalidate (cache first, refresh in background)
+   * 'reload'   – bypass the cache, fetch fresh, then update the cache
+   * 'no-store' – never touch the cache
+   */
+  cache?: 'default' | 'reload' | 'no-store';
+};
+
+/**
+ * GET with transparent stale-while-revalidate caching.
+ *
+ * Caching is opt-in per endpoint via the allowlist in `cache/policy.ts`, so any
+ * endpoint without a rule behaves exactly as it did before this layer existed.
+ * The signature is unchanged, which keeps every existing call site working.
+ */
+const cachedGet = async (
+  endpoint: string,
+  token?: string,
+  options?: ApiGetOptions,
+): Promise<any> => {
+  const mode = options?.cache ?? 'default';
+  const ttlMs = mode === 'no-store' ? null : getGetCacheTtl(endpoint);
+
+  // Not cacheable (or explicitly opted out) → original behaviour.
+  if (ttlMs == null) return sendAuthed('GET', endpoint, undefined, token);
+
+  return fetchQuery(
+    endpoint,
+    async () => {
+      const result = await sendAuthed('GET', endpoint, undefined, token);
+      if (!isCacheableResponse(result)) {
+        // Surface the failure to the caller without poisoning the cache.
+        throw new ApiResponseNotCacheable(result);
+      }
+      return result;
+    },
+    { ttlMs, force: mode === 'reload' },
+  ).catch((error) => {
+    if (error instanceof ApiResponseNotCacheable) return error.payload;
+    throw error;
+  });
+};
+
+/** Carries a non-cacheable payload back to the caller unchanged. */
+class ApiResponseNotCacheable extends Error {
+  payload: any;
+  constructor(payload: any) {
+    super('response not cacheable');
+    this.payload = payload;
+  }
+}
+
+/** Run a mutation, then drop the caches it makes stale. */
+const mutate = async (
+  method: 'POST' | 'PUT' | 'PATCH' | 'DELETE',
+  endpoint: string,
+  body?: object,
+  token?: string,
+): Promise<any> => {
+  const result = await sendAuthed(method, endpoint, body, token);
+
+  // Only invalidate when the write plausibly succeeded — a failed request must
+  // not throw away cache the user can still read.
+  if (result?.success !== false && result?.status !== 401) {
+    const prefixes = getInvalidationPrefixes(method, endpoint);
+    if (prefixes.length) void invalidateQueries(prefixes).catch(() => undefined);
+  }
+
+  return result;
+};
+
 export const api = {
-  get: (endpoint: string, token?: string): Promise<any> =>
-    sendAuthed('GET', endpoint, undefined, token),
+  get: (endpoint: string, token?: string, options?: ApiGetOptions): Promise<any> =>
+    cachedGet(endpoint, token, options),
 
   post: (endpoint: string, body: object, token?: string): Promise<any> =>
-    sendAuthed('POST', endpoint, body, token),
+    mutate('POST', endpoint, body, token),
 
   put: (endpoint: string, body: object, token?: string): Promise<any> =>
-    sendAuthed('PUT', endpoint, body, token),
+    mutate('PUT', endpoint, body, token),
 
   patch: (endpoint: string, body?: object, token?: string): Promise<any> =>
-    sendAuthed('PATCH', endpoint, body, token),
+    mutate('PATCH', endpoint, body, token),
 
   delete: (endpoint: string, body?: object, token?: string): Promise<any> =>
-    sendAuthed('DELETE', endpoint, body, token),
+    mutate('DELETE', endpoint, body, token),
 
   //   delete: async (endpoint: string, token?: string): Promise<any> => {
   //   const headers: Record<string, string> = {

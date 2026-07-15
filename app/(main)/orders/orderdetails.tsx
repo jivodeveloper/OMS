@@ -32,6 +32,7 @@ import StateWrapper from "@/src/components/common/StateWrapper";
 import { orderService, productService } from "@/src/services/order.service";
 import { useAuth } from "@/src/context/AuthContext";
 import useAndroidBackOverride from "@/src/hooks/useAndroidBackOverride";
+import { refreshOrderData } from "@/src/cache";
 
 if (
   Platform.OS === "android" &&
@@ -414,8 +415,10 @@ export default function OrderDetailsScreen() {
       ? `Includes tax of ₹${formatCurrencyAmount(calculatedTaxAmount)}`
       : "Inclusive of tax amount";
 
-  const onRefresh = useCallback(() => {
+  const onRefresh = useCallback(async () => {
     if (!parsedOrderId) return;
+    // Explicit refresh: drop cached order detail/logs so this re-reads live.
+    await refreshOrderData();
     fetchOrder(parsedOrderId, true);
   }, [fetchOrder, parsedOrderId]);
 

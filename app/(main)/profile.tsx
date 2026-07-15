@@ -22,6 +22,7 @@ import {
   SCREEN_ROLES,
   canAccessScreen,
 } from "@/src/constants/pages";
+import { CacheKeys, invalidateQueries } from "@/src/cache";
 
 // USR-000123 style id shown on the card.
 const formatUserId = (id?: number | null) =>
@@ -98,8 +99,10 @@ export default function ProfileScreen() {
     loadUnread();
   }, [loadProfile, loadUnread]);
 
-  const onRefresh = () => {
+  const onRefresh = async () => {
     setRefreshing(true);
+    // Explicit refresh: drop cached profile/notification payloads first.
+    await invalidateQueries([CacheKeys.profile, CacheKeys.notifications]);
     loadProfile(true);
     loadUnread();
   };

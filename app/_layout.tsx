@@ -4,6 +4,7 @@ import { StatusBar } from "react-native";
 import { PaperProvider } from "react-native-paper";
 import { AuthProvider } from "@/src/context/AuthContext";
 import AppDialogHost from "@/src/components/common/AppDialog";
+import ToastHost from "@/src/components/common/Toast";
 import {
   darkNavigationTheme,
   darkPaperTheme,
@@ -35,6 +36,8 @@ function ThemedApplication() {
         </Stack>
         {/* App-wide branded dialog (replaces OS Alert/confirm boxes). */}
         <AppDialogHost />
+        {/* App-wide non-blocking toast (success/error feedback). */}
+        <ToastHost />
       </PaperProvider>
     </NavigationThemeProvider>
   );

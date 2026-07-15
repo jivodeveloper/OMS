@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import {
   View,
   Text,
@@ -22,9 +22,22 @@ import { COLORS, SPACING, RADIUS, GRADIENTS } from "@/src/constants/theme";
 import Dropdown from "@/src/components/common/DropdownProps";
 import StateWrapper from "@/src/components/common/StateWrapper";
 import { appAlert } from "@/src/components/common/AppDialog";
+import { showToast } from "@/src/components/common/Toast";
 import { api } from "@/src/services/api";
 import { storage } from "@/src/utils/storage";
+import {
+  setHeaderRefreshHandler,
+  setHeaderRefreshing,
+} from "@/src/utils/headerRefresh";
+import {
+  clearOrderDraft,
+  isDraftMeaningful,
+  loadOrderDraft,
+  saveOrderDraft,
+  type OrderDraftPayload,
+} from "@/src/utils/orderDraft";
 import useAndroidBackOverride from "@/src/hooks/useAndroidBackOverride";
+import { refreshPartyProducts } from "@/src/cache";
 import {
   orderService,
   schemeService,
@@ -1272,6 +1285,138 @@ export function OrderEntryScreen({
     }
   }, [dataLoading, parties.length, isEditMode, editOrderLoaded, shouldAllowSchemes]);
 
+  /**
+   * Fetch everything that is derived from the selected party (addresses +
+   * assignable products/categories). Pure fetch: it returns the data and never
+   * touches state, so callers decide what to keep. Used by the header Refresh
+   * action and by draft restore, both of which must preserve what the user has
+   * already typed.
+   */
+  const fetchPartyDataset = useCallback(
+    async (partyValue: string) => {
+      const selectedParty = findSelectedParty(partyValue);
+      const parsedParty = parsePartyValue(partyValue);
+      const cardCode = selectedParty?.cardCode || parsedParty.cardCode;
+      const partyCategory = selectedParty?.category || parsedParty.category;
+      if (!cardCode) return null;
+
+      const [addressData, productsResponse] = await Promise.all([
+        orderService.getAddresses(cardCode, partyCategory),
+        orderService.getPartyProducts(cardCode, partyCategory),
+      ]);
+
+      const { billTo, shipTo } = buildAddressOptions(addressData);
+
+      const allProducts = Array.isArray(productsResponse)
+        ? productsResponse
+        : productsResponse?.data?.products || productsResponse?.data || [];
+
+      const filteredProducts = allProducts.filter((p: any) => {
+        const pCat = String(p.category || "").toUpperCase().trim();
+        return (
+          pCat &&
+          ACTIVE_CATEGORIES.includes(pCat) &&
+          (userCategories.length ? userCategories.includes(pCat) : true)
+        );
+      });
+
+      const products = dedupePartyProducts(filteredProducts);
+      const uniqueCategories = [
+        ...new Set<string>(products.map((p: any) => p.category).filter(Boolean)),
+      ];
+
+      return {
+        products,
+        categories: uniqueCategories.sort().map((c) => ({ label: c, value: c })),
+        billTo,
+        shipTo,
+        stateCode: selectedParty?.state || "",
+      };
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [parties, userCategories],
+  );
+
+  /**
+   * Header "Refresh" action: pull the party's latest items/price list/schemes
+   * without disturbing the form. Everything the user typed (delivery date,
+   * boxes, comment, confirmed items, …) is intentionally left untouched — the
+   * whole point is to pick up newly-assigned items without re-entering data.
+   */
+  const refreshPartyData = useCallback(async () => {
+    if (!partyName) {
+      showToast("Select a party first to refresh its items", "info");
+      return;
+    }
+
+    setHeaderRefreshing(true);
+    try {
+      // The whole point of this button is "the admin just assigned new items" —
+      // so drop the cached party payloads first and go to the network.
+      await refreshPartyProducts();
+      const data = await fetchPartyDataset(partyName);
+      if (!data) {
+        showToast("Could not refresh items for this party", "error");
+        return;
+      }
+
+      // Party-derived reference data only.
+      setPartyProducts(data.products);
+      setCategories(data.categories);
+      setBillToAddresses(data.billTo);
+      setShipToAddresses(data.shipTo);
+      if (data.stateCode) setAssignedStateCode(data.stateCode);
+
+      // Keep the user's address choice when it still exists; otherwise fall
+      // back to the first option so the form stays valid.
+      setSelectedBillTo((prev) =>
+        prev != null && data.billTo.some((o: AddressOption) => o.value === prev)
+          ? prev
+          : (data.billTo[0]?.value ?? null),
+      );
+      setSelectedShipTo((prev) =>
+        prev != null && data.shipTo.some((o: AddressOption) => o.value === prev)
+          ? prev
+          : (data.shipTo[0]?.value ?? null),
+      );
+
+      if (shouldAllowSchemes) {
+        try {
+          const schemeData = await schemeService.getSchemes(
+            data.stateCode || assignedStateCode || "DEFAULT",
+          );
+          setAllSchemes(
+            (schemeData || []).map((s: any) => ({
+              label: s.scheme_name,
+              value: String(s.scheme_id),
+            })),
+          );
+        } catch {
+          // Schemes are secondary — a failure here shouldn't fail the refresh.
+        }
+      }
+
+      showToast(
+        `Items updated — ${data.products.length} available`,
+        "success",
+      );
+    } catch {
+      showToast("Failed to refresh. Check your connection.", "error");
+    } finally {
+      setHeaderRefreshing(false);
+    }
+  }, [partyName, fetchPartyDataset, shouldAllowSchemes, assignedStateCode]);
+
+  // Publish the refresh action into the shared drawer header (renders just
+  // before the notification bell) while this screen is mounted.
+  useEffect(() => {
+    setHeaderRefreshHandler(refreshPartyData);
+    return () => {
+      setHeaderRefreshHandler(null);
+      setHeaderRefreshing(false);
+    };
+  }, [refreshPartyData]);
+
   const handlePartyChange = async (selectedPartyValue: string) => {
     setPartyName(selectedPartyValue);
 
@@ -2351,6 +2496,8 @@ export function OrderEntryScreen({
           });
           setSuccessModal(true);
           handleClear({ keepSuccessModal: true });
+          // Order is on the server now — the local draft must not come back.
+          discardDraft();
         } else {
           appAlert("Error", "Something went wrong. Please try again.");
         }
@@ -2552,7 +2699,140 @@ export function OrderEntryScreen({
     }
   }, [branches, companies]);
 
+  // ─── Draft auto-save ───────────────────────────────────────────────────────
+  // This screen unmounts whenever the user navigates away (drawer uses
+  // `unmountOnBlur`), which used to wipe a half-filled order. We mirror the
+  // form to device storage as it changes and restore it on return. Editing an
+  // existing order never touches the draft.
+  const draftVariant = isFocMode ? "foc" : "order";
+  const draftHydratedRef = useRef(false);
+  const [draftReady, setDraftReady] = useState(false);
+
+  const draftSnapshot: OrderDraftPayload = useMemo(
+    () => ({
+      partyName,
+      company,
+      branch,
+      poNumber,
+      comment,
+      delivery,
+      selectedBillTo,
+      selectedShipTo,
+      assignedStateCode,
+      itemRows,
+      orderItems,
+    }),
+    [
+      partyName,
+      company,
+      branch,
+      poNumber,
+      comment,
+      delivery,
+      selectedBillTo,
+      selectedShipTo,
+      assignedStateCode,
+      itemRows,
+      orderItems,
+    ],
+  );
+
+  // Latest snapshot for flushes that must happen outside the render cycle
+  // (unmount / back press), where state is already gone or about to be.
+  const draftSnapshotRef = useRef(draftSnapshot);
+  draftSnapshotRef.current = draftSnapshot;
+
+  // Remove the stored draft (order submitted, or user tapped Clear). Auto-save
+  // stays armed: handleClear() empties the form first, and an empty form is
+  // never persisted, so nothing re-writes what we just removed. If the user
+  // then starts a new order, auto-save resumes on its own.
+  const discardDraft = useCallback(() => {
+    void clearOrderDraft(draftVariant);
+  }, [draftVariant]);
+
+  // Restore once the reference data (parties/branches) is in place, mirroring
+  // how an edited order is loaded.
+  useEffect(() => {
+    if (dataLoading || isEditMode || draftHydratedRef.current) return;
+    draftHydratedRef.current = true;
+
+    let active = true;
+    (async () => {
+      try {
+        const draft = await loadOrderDraft(draftVariant);
+        if (!active) return;
+        if (!draft) return;
+
+        setPartyName(draft.partyName);
+        setCompany(draft.company);
+        setBranch(draft.branch);
+        setPoNumber(draft.poNumber || "");
+        setComment(draft.comment || "");
+        if (draft.delivery) setDeliveryDate(draft.delivery);
+        if (draft.assignedStateCode) setAssignedStateCode(draft.assignedStateCode);
+
+        // Re-fetch the party's reference data so the dropdowns work, then
+        // re-apply the saved selections (fetch must not clobber them).
+        if (draft.partyName) {
+          try {
+            const data = await fetchPartyDataset(draft.partyName);
+            if (!active) return;
+            if (data) {
+              setPartyProducts(data.products);
+              setCategories(data.categories);
+              setBillToAddresses(data.billTo);
+              setShipToAddresses(data.shipTo);
+              if (data.stateCode) setAssignedStateCode(data.stateCode);
+            }
+          } catch {
+            // Offline: still restore what the user typed.
+          }
+        }
+
+        if (!active) return;
+        setSelectedBillTo(draft.selectedBillTo);
+        setSelectedShipTo(draft.selectedShipTo);
+        setItemRows((draft.itemRows as ItemRow[]) || []);
+        setOrderItems((draft.orderItems as OrderItemType[]) || []);
+        showToast("Restored your unfinished order", "info");
+      } finally {
+        if (active) setDraftReady(true);
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [dataLoading, isEditMode, draftVariant, fetchPartyDataset]);
+
+  // Debounced auto-save. Only runs after hydration so the empty initial form
+  // can never overwrite a stored draft.
+  useEffect(() => {
+    if (!draftReady || isEditMode) return;
+    if (!isDraftMeaningful(draftSnapshot)) return;
+
+    const timer = setTimeout(() => {
+      void saveOrderDraft(draftVariant, draftSnapshot);
+    }, 400);
+
+    return () => clearTimeout(timer);
+  }, [draftReady, isEditMode, draftVariant, draftSnapshot]);
+
+  // Flush on unmount so a navigation that happens inside the debounce window
+  // (e.g. header back) still persists the newest values.
+  useEffect(() => {
+    return () => {
+      if (isEditMode) return;
+      if (!draftReady) return;
+      void saveOrderDraft(draftVariant, draftSnapshotRef.current);
+    };
+  }, [isEditMode, draftReady, draftVariant]);
+
   const handleBack = useCallback(() => {
+    // Persist before handleClear() wipes the in-memory form.
+    if (!isEditMode && draftReady) {
+      void saveOrderDraft(draftVariant, draftSnapshotRef.current);
+    }
     handleClear();
 
     if (isEditMode && from) {
@@ -2569,7 +2849,16 @@ export function OrderEntryScreen({
     }
 
     router.back();
-  }, [from, fromOrderId, isEditMode, navigation, router]);
+  }, [
+    from,
+    fromOrderId,
+    isEditMode,
+    navigation,
+    router,
+    handleClear,
+    draftReady,
+    draftVariant,
+  ]);
 
   useAndroidBackOverride(
     useCallback(() => {
@@ -3528,7 +3817,14 @@ export function OrderEntryScreen({
 
         {/* ── Bottom Actions ─────────────────────────────────────────────── */}
         <View style={styles.bottomBar}>
-          <TouchableOpacity style={styles.cancelBtn} onPress={() => handleClear()}>
+          <TouchableOpacity
+            style={styles.cancelBtn}
+            onPress={() => {
+              // Explicit user intent to start over — drop the saved draft too.
+              handleClear();
+              discardDraft();
+            }}
+          >
             <Text style={styles.cancelBtnText}>Clear</Text>
           </TouchableOpacity>
 

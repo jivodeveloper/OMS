@@ -19,6 +19,7 @@ import { useAuth } from "@/src/context/AuthContext";
 import { OrderNotification, orderService } from "@/src/services/order.service";
 import { storage } from "@/src/utils/storage";
 import { COLORS, GRADIENTS, RADIUS, SHADOWS, SPACING } from "@/src/constants/theme";
+import { refreshNotifications } from "@/src/cache";
 
 type NotificationFilter = "all" | "unread" | "read";
 type DateGroup = "Today" | "Yesterday" | "Older";
@@ -184,12 +185,17 @@ export default function NotificationsScreen() {
   );
 
   useEffect(() => {
-    const received = Notifications.addNotificationReceivedListener(() =>
-      loadNotifications("silent"),
-    );
-    const response = Notifications.addNotificationResponseReceivedListener(() =>
-      loadNotifications("silent"),
-    );
+    // A push just arrived, so whatever is cached is by definition out of date —
+    // drop it before re-reading or the new notification wouldn't show until the
+    // cache expired.
+    const reloadLive = async () => {
+      await refreshNotifications();
+      loadNotifications("silent");
+    };
+
+    const received = Notifications.addNotificationReceivedListener(reloadLive);
+    const response =
+      Notifications.addNotificationResponseReceivedListener(reloadLive);
     return () => {
       received.remove();
       response.remove();
@@ -469,7 +475,14 @@ export default function NotificationsScreen() {
         contentContainerStyle={styles.contentContainer}
         stickySectionHeadersEnabled={false}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={() => loadNotifications("refresh")} />
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={async () => {
+              // Explicit refresh: bypass the cached notification payload.
+              await refreshNotifications();
+              loadNotifications("refresh");
+            }}
+          />
         }
         ListHeaderComponent={renderHeader}
         renderSectionHeader={({ section }) => (

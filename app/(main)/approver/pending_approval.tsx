@@ -25,6 +25,7 @@ import { router, useLocalSearchParams, useNavigation } from "expo-router";
 import { api } from "@/src/services/api";
 import { storage } from "@/src/utils/storage";
 import { useAuth } from "@/src/context/AuthContext";
+import { refreshOrderData } from "@/src/cache";
 
 type ApprovalTab = "pending" | "others";
 type RateApproverDecisionFilter =
@@ -381,6 +382,8 @@ export default function PendingApprovalScreen() {
 
   const onRefresh = async () => {
     setRefreshing(true);
+    // Explicit refresh: bypass the cache so the network is the source of truth.
+    await refreshOrderData();
     await loadOrders();
   };
 

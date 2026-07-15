@@ -14,6 +14,7 @@ import { router, useFocusEffect } from "expo-router";
 import { orderService } from "@/src/services/order.service";
 import { COLORS, SPACING, RADIUS } from "@/src/constants/theme";
 import StateWrapper from "@/src/components/common/StateWrapper";
+import { refreshOrderData } from "@/src/cache";
 
 const formatDateTime = (value?: string | null) => {
   if (!value) return "-";
@@ -57,8 +58,10 @@ export default function DraftsScreen() {
     }, [loadDrafts]),
   );
 
-  const onRefresh = () => {
+  const onRefresh = async () => {
     setRefreshing(true);
+    // Explicit refresh: bypass the cache so the network is the source of truth.
+    await refreshOrderData();
     loadDrafts();
   };
 

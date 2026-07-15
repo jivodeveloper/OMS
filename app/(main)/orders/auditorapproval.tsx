@@ -23,6 +23,7 @@ import { api } from "@/src/services/api";
 import StateWrapper from "@/src/components/common/StateWrapper";
 import { storage } from "@/src/utils/storage";
 import { useAuth } from "@/src/context/AuthContext";
+import { refreshOrderData } from "@/src/cache";
 
 type AuditorTab = "pending" | "others";
 type AuditorDecisionFilter = "Auditor Approved" | "Auditor Rejected";
@@ -320,8 +321,10 @@ export default function AuditorApprovalScreen() {
     return unsubscribe;
   }, [navigation, tab, statusFilter, year, month, _t]);
 
-  const onRefresh = () => {
+  const onRefresh = async () => {
     setRefreshing(true);
+    // Explicit refresh: bypass the cache so the network is the source of truth.
+    await refreshOrderData();
     loadOrders();
   };
 

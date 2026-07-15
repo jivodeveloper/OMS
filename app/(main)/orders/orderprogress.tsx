@@ -12,6 +12,7 @@ import { useLocalSearchParams, useFocusEffect } from "expo-router";
 import { useNavigation } from "@react-navigation/native";
 import { orderService } from "@/src/services/order.service";
 import useAndroidBackOverride from "@/src/hooks/useAndroidBackOverride";
+import { refreshOrderData } from "@/src/cache";
 
 interface OrderLog {
   id: number;
@@ -295,6 +296,8 @@ export default function OrderProgressScreen() {
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
+    // Explicit refresh: drop cached order logs so this re-reads live.
+    await refreshOrderData();
     await fetchLogs();
     setRefreshing(false);
   }, [fetchLogs]);

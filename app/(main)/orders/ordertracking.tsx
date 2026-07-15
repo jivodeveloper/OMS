@@ -20,6 +20,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import Dropdown from "@/src/components/common/DropdownProps";
 import { useAuth } from "@/src/context/AuthContext";
 import StateWrapper from "@/src/components/common/StateWrapper";
+import { refreshOrderData } from "@/src/cache";
 
 type TrackingStatusFilter = "Completed" | "Rejected";
 
@@ -461,8 +462,10 @@ export default function OrderTrackingScreen() {
     );
   };
 
-  const onRefresh = () => {
+  const onRefresh = async () => {
     setRefreshing(true);
+    // Explicit refresh: bypass the cache so the network is the source of truth.
+    await refreshOrderData();
     loadOrders();
   };
 

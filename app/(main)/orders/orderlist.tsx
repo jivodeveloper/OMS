@@ -35,6 +35,7 @@ import { storage } from "@/src/utils/storage";
 import StateWrapper from "@/src/components/common/StateWrapper";
 import { useAuth } from "@/src/context/AuthContext";
 import Dropdown from "@/src/components/common/DropdownProps";
+import { refreshOrderData } from "@/src/cache";
 
 type OrderListTab = "pending" | "others";
 type BillingDecisionFilter = "Billing Approved" | "Billing Rejected";
@@ -425,8 +426,11 @@ export default function BillingOrderList() {
     return unsubscribe;
   }, [navigation, tab, statusFilter, year, month, _t]);
 
-  const onRefresh = () => {
+  const onRefresh = async () => {
     setRefreshing(true);
+    // The user explicitly asked for fresh data — drop cached order payloads so
+    // loadOrders() goes to the network instead of re-reading the cache.
+    await refreshOrderData();
     loadOrders();
   };
 
