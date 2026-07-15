@@ -293,6 +293,12 @@ export default function MainLayout() {
         screenOptions={({ navigation, route }) => {
           const isDashboard = route.name === "dashboard";
           const isNotifications = route.name === "notifications";
+          // The refresh action belongs to the order-entry screens only. Gate on
+          // the route (not just "a handler is registered"), because the screen
+          // can still be mounted mid-transition and would otherwise leak the
+          // button onto Home/Orders.
+          const isOrderEntry =
+            route.name === "orders/create" || route.name === "orders/foc";
 
           return {
             headerShown: true,
@@ -349,7 +355,7 @@ export default function MainLayout() {
                 <View style={styles.headerActions}>
                   {/* Top "+" create shortcut removed — the bottom bar's centre
                       Create button is the single entry point for new orders. */}
-                  {headerRefresh.available ? (
+                  {isOrderEntry && headerRefresh.available ? (
                     <TouchableOpacity
                       hitSlop={HEADER_ICON_HIT_SLOP}
                       onPress={() => headerRefresh.run()}
@@ -361,7 +367,7 @@ export default function MainLayout() {
                         <ActivityIndicator size="small" color={COLORS.primary} />
                       ) : (
                         <Ionicons
-                          name="refresh-outline"
+                          name="sync-outline"
                           size={22}
                           color={COLORS.text}
                         />
