@@ -75,6 +75,9 @@ export default function Dropdown({
         ]}
         placeholderStyle={styles.placeholder}
         selectedTextStyle={styles.selectedText}
+        // Keep the selected value on one line — in a narrow field a long option
+        // (e.g. "Completed") otherwise wraps to "Comple / ted" and breaks the row.
+        selectedTextProps={{ numberOfLines: 1 }}
         inputSearchStyle={styles.inputSearch}
         iconStyle={styles.iconStyle}
         containerStyle={styles.dropdownPopup}

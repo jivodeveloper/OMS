@@ -11,6 +11,7 @@ import { router } from "expo-router";
 import { storage } from "../utils/storage";
 import { authService, User, LoginRequest } from "../services/auth.service";
 import { notificationService } from "../services/notification.service";
+import { deviceService } from "../services/device.service";
 import {
   getNotificationDedupeKey,
   type OMSNotificationData,
@@ -123,6 +124,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 
   const checkAuth = async () => {
     try {
+      // Wire DeviceService once at startup so version/device headers ride on
+      // every request (including the login request) and the post-refresh retry
+      // hook is armed. Non-blocking and idempotent.
+      void deviceService.init();
+
       // Startup (Task 7): if the access token is expired but the refresh token
       // is still valid, refresh silently so no login screen appears.
       await ensureFreshAccessToken();
@@ -137,6 +143,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
         if (!isAccessTokenExpired(token)) {
           suppressSessionAlert.current = false;
         }
+        // Restored a valid session — register/refresh this device in the
+        // background. Never blocks startup, never throws.
+        void deviceService.onAuthenticated("startup");
       } else {
         // App launched UNAUTHENTICATED. If a notification opened the app, its
         // deep-link must NOT fire after the user logs in (Task: CASE 4). Record
@@ -195,6 +204,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
         // Fresh healthy session — arm the genuine-expiry alert going forward.
         suppressSessionAlert.current = false;
         setUser(user);
+
+        // Register/refresh this device with the backend. Fire-and-forget: it is
+        // best-effort, never blocks login, never throws, and retries on the
+        // next successful auth if it fails now.
+        void deviceService.onAuthenticated("login");
 
         return { success: true, message: "Login successful" };
       }
@@ -261,6 +275,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 
     // Instantly drop the user so the UI/guards reflect sign-out immediately.
     setUser(null);
+
+    // Clear per-session device state so the next login re-registers cleanly.
+    // The stable device id itself is preserved (storage.clear() keeps it).
+    deviceService.reset();
 
     // Drop every cached API payload so the next account on this device can
     // never be served the previous user's data.

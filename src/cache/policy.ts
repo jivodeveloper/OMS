@@ -109,6 +109,12 @@ export const getInvalidationPrefixes = (
   ) {
     ORDER_STATE_PREFIXES.forEach((p) => prefixes.add(p));
     prefixes.add("/orders/templates/");
+
+    // NOTE: editing an order also POSTs to /orders/create/ (the id travels in
+    // the body as `order_id`, not in the URL), so the id-based rule above can't
+    // see it. Drop the whole order-detail/timeline family instead — otherwise a
+    // just-edited order would still read from its cached copy.
+    prefixes.add("/orders/orderdetailsbyid/");
   }
 
   // Notification read/dismiss.

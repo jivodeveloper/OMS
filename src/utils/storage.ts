@@ -6,6 +6,9 @@ const KEYS = {
   USER: 'user',
   HIDDEN_NOTIFICATION_IDS: 'hidden_notification_ids',
   NOTIFICATION_PERMISSION: 'notification_permission_state',
+  // Stable per-install device identifier. Created once, then persisted for the
+  // life of the install — deliberately NOT cleared on logout (see clear()).
+  DEVICE_ID: 'device_id',
 };
 
 // Persisted state for our custom notification-permission prompt.
@@ -83,6 +86,16 @@ export const storage = {
     );
   },
 
+  // Device identifier. Read once at startup by DeviceService, which creates it
+  // if absent. Kept separate from the auth keys so it outlives logout.
+  getDeviceId: async (): Promise<string | null> => {
+    return AsyncStorage.getItem(KEYS.DEVICE_ID);
+  },
+
+  setDeviceId: async (deviceId: string): Promise<void> => {
+    await AsyncStorage.setItem(KEYS.DEVICE_ID, deviceId);
+  },
+
   // Notification permission prompt state
   getNotificationPromptState: async (): Promise<NotificationPromptState> => {
     try {
@@ -112,9 +125,13 @@ export const storage = {
     );
   },
 
-  // Clear all. NOTE: the notification permission prompt state is intentionally
-  // NOT cleared on logout, so a returning/other user on the same device isn't
-  // re-nagged if permission is already granted at the OS level.
+  // Clear all. NOTE: two keys are intentionally NOT cleared on logout:
+  //   • the notification permission prompt state — so a returning/other user on
+  //     the same device isn't re-nagged if permission is already granted; and
+  //   • the device id — one physical install must keep ONE id across logins, or
+  //     every logout/login would mint a new "device" in the backend. It is only
+  //     ever removed by an app reinstall or a manual storage wipe.
+  // Both are simply omitted from the removal list below.
   clear: async () => {
     await AsyncStorage.multiRemove([
       KEYS.ACCESS_TOKEN,

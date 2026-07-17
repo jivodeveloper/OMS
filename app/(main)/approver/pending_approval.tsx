@@ -26,8 +26,11 @@ import { api } from "@/src/services/api";
 import { storage } from "@/src/utils/storage";
 import { useAuth } from "@/src/context/AuthContext";
 import { refreshOrderData } from "@/src/cache";
+import { fs, ms, sp } from "@/src/utils/responsive";
 
-type ApprovalTab = "pending" | "others";
+// "all" shows the approver's whole queue — pending AND already-decided —
+// so the Status filter's "All" is genuinely everything, not just decided.
+type ApprovalTab = "pending" | "others" | "all";
 type RateApproverDecisionFilter =
   | "Rate Approver Approved"
   | "Rate Approver Rejected";
@@ -279,11 +282,18 @@ export default function PendingApprovalScreen() {
         );
         loadedOrders = Array.isArray(data) ? data : [];
       } else {
-        const results = await Promise.all(
-          OTHER_APPROVAL_STATUS_CODES.map((statusCode) =>
-            productService.getOrders(0, statusCode),
-          ),
+        // "others" = already decided. "all" additionally pulls the pending
+        // feed, because pending orders are only returned by the
+        // approval_pending call — without it "All" could never show them.
+        const requests: Promise<any>[] = OTHER_APPROVAL_STATUS_CODES.map(
+          (statusCode) => productService.getOrders(0, statusCode),
         );
+        if (activeTab === "all") {
+          requests.push(
+            productService.getOrders(0, PENDING_APPROVAL_STATUS_CODE, false, true),
+          );
+        }
+        const results = await Promise.all(requests);
 
         const orderMap = new Map<number, OrderItemList>();
         results.forEach((result) => {
@@ -650,7 +660,7 @@ export default function PendingApprovalScreen() {
     let isActive = true;
 
     const loadRateApproverDecisionSummary = async () => {
-      if (activeTab !== "others" || orders.length === 0) {
+      if (activeTab === "pending" || orders.length === 0) {
         setRateApproverDecisionByOrderId({});
         setLoadingRateApproverDecisions(false);
         return;
@@ -711,8 +721,10 @@ export default function PendingApprovalScreen() {
 
   const filteredOrders = orders.filter((item) => {
     const rateApproverDecisionSummary =
-      activeTab === "others" ? rateApproverDecisionByOrderId[item.id] : null;
+      activeTab === "pending" ? null : rateApproverDecisionByOrderId[item.id];
 
+    // "others" is the decided-only view, so an order this approver hasn't acted
+    // on is excluded. "all" keeps them — that is the whole point of All.
     if (activeTab === "others" && !rateApproverDecisionSummary) {
       return false;
     }
@@ -777,6 +789,38 @@ export default function PendingApprovalScreen() {
       return `${status}: ${rejectedByName}`;
     }
     return status;
+  };
+
+  // Colored status tag shown on every card: red = rejected, green = approved,
+  // amber = still awaiting a decision.
+  const getCardStatusBadge = (
+    item: OrderItemList,
+  ): {
+    label: string;
+    color: string;
+    bg: string;
+    icon: React.ComponentProps<typeof Ionicons>["name"];
+  } => {
+    // Driven by THIS approver's recorded decision — the only reliable signal.
+    // The stage name is literally "Rate Approval", which contains "approv", so
+    // matching on status text would paint every pending order green.
+    const decision = rateApproverDecisionByOrderId[item.id];
+    if (decision?.decision === "Rate Approver Approved") {
+      return { label: "Approved", color: COLORS.success, bg: "#ECFDF3", icon: "checkmark-circle-outline" };
+    }
+    if (decision?.decision === "Rate Approver Rejected") {
+      return { label: "Rejected", color: COLORS.error, bg: "#FEF2F2", icon: "close-circle-outline" };
+    }
+
+    // A rejected/cancelled order still reads as Rejected even with no decision
+    // recorded against this approver (e.g. someone else rejected it).
+    const raw = getStatusName(item).toLowerCase();
+    if (raw.includes("reject") || raw.includes("cancel")) {
+      return { label: "Rejected", color: COLORS.error, bg: "#FEF2F2", icon: "close-circle-outline" };
+    }
+
+    // No decision yet -> still awaiting action.
+    return { label: "Pending", color: "#EA8C00", bg: "#FFF7ED", icon: "time-outline" };
   };
 
   useEffect(() => {
@@ -913,18 +957,27 @@ export default function PendingApprovalScreen() {
       >
       <View style={styles.orderHeader}>
         <View style={styles.orderNumberWrap}>
-          <Text style={styles.orderNumber}>{item.order_number}</Text>
-          <Text style={styles.createdText}>
+          <Text style={styles.orderNumber} numberOfLines={1}>
+            {item.order_number}
+          </Text>
+          <Text style={styles.createdText} numberOfLines={1}>
             Created: {formatDateTime(item.created_at)}
           </Text>
         </View>
-        {userRole === "manager" && (
-          <View style={styles.statusBadge}>
-            <Text style={styles.statusText}>
-              {getStatusBadgeText(item)}
-            </Text>
-          </View>
-        )}
+        {(() => {
+          const badge = getCardStatusBadge(item);
+          return (
+            <View style={[styles.cardStatusBadge, { backgroundColor: badge.bg }]}>
+              <Ionicons name={badge.icon} size={ms(13)} color={badge.color} />
+              <Text
+                style={[styles.cardStatusText, { color: badge.color }]}
+                numberOfLines={1}
+              >
+                {badge.label}
+              </Text>
+            </View>
+          );
+        })()}
       </View>
 
       <Text style={styles.cardName}>{item.card_name}</Text>
@@ -994,7 +1047,10 @@ export default function PendingApprovalScreen() {
         <Text style={styles.amountValue}>₹{item.total_amount}</Text>
       </View>
 
-      {activeTab === "pending" && (
+      {/* Actionable while this approver hasn't decided yet — so pending orders
+          keep Approve/Reject in the "All" view, and decided ones don't. */}
+      {(activeTab === "pending" ||
+        (activeTab === "all" && !rateApproverDecisionByOrderId[item.id])) && (
         <View style={styles.actionRow}>
           {(() => {
             const isRejectLoading =
@@ -1080,7 +1136,8 @@ export default function PendingApprovalScreen() {
             value={statusView}
             onChange={(value) => {
               setStatusView(value);
-              const nextTab = value === "pending" ? "pending" : "others";
+              const nextTab =
+                value === "pending" ? "pending" : value === "all" ? "all" : "others";
               if (nextTab !== activeTab) setLoading(true);
               setActiveTab(nextTab);
               setSelectedStatuses(
@@ -1119,36 +1176,22 @@ export default function PendingApprovalScreen() {
             )}
           </View>
         </View>
-        <View style={styles.dateFieldWrap}>
-          <Text style={styles.fieldLabel}>Date</Text>
-          <InlineOrderDateFilter
-            value={selectedOrderDate}
-            onChange={setSelectedOrderDate}
-            variant="field"
-          />
-        </View>
+        {/* Date moved into the count bar below so Search can use the rest of
+            the row and long text stays fully visible. */}
       </View>
 
-      {!loading && filteredOrders.length > 0 && (
+      {/* Always rendered once loading finishes, even with zero results: this bar
+            holds the Filter control, so hiding it on an empty list would leave the
+            user unable to change the filter that emptied it. */}
+        {!loading && (
         <LinearGradient
           colors={[COLORS.primaryDark, COLORS.primary]}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
           style={styles.countBar}
         >
-          <View style={styles.countBarLeft}>
-            <View style={styles.countBarIcon}>
-              <Ionicons name="receipt-outline" size={18} color="#fff" />
-            </View>
-            <View style={styles.countBarTextWrap}>
-              <Text style={styles.countText} numberOfLines={1}>
-                {filteredOrders.length} order{filteredOrders.length > 1 ? "s" : ""} found
-              </Text>
-              <Text style={styles.countSubText} numberOfLines={1}>
-                Last updated just now
-              </Text>
-            </View>
-          </View>
+          {/* 1) Filter · 2) result count · 3) Date — each sized so they never
+              collide on narrow screens. */}
           <TouchableOpacity
             style={styles.countBarFilterBtn}
             onPress={() => setIsFilterModalVisible(true)}
@@ -1162,6 +1205,23 @@ export default function PendingApprovalScreen() {
               <View style={styles.countBarFilterDot} />
             )}
           </TouchableOpacity>
+
+          <View style={styles.countBarTextWrap}>
+            <Text style={styles.countText} numberOfLines={1} adjustsFontSizeToFit>
+              {filteredOrders.length} order{filteredOrders.length === 1 ? "" : "s"} found
+            </Text>
+            <Text style={styles.countSubText} numberOfLines={1}>
+              Last updated just now
+            </Text>
+          </View>
+
+          <View style={styles.countBarDateWrap}>
+            <InlineOrderDateFilter
+              value={selectedOrderDate}
+              onChange={setSelectedOrderDate}
+              variant="onDark"
+            />
+          </View>
         </LinearGradient>
       )}
 
@@ -1169,7 +1229,7 @@ export default function PendingApprovalScreen() {
         loading ||
         loadingOrderItems ||
         loadingStatuses ||
-        (activeTab === "others" && loadingRateApproverDecisions)
+        (activeTab !== "pending" && loadingRateApproverDecisions)
       ) && !refreshing ? (
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color={COLORS.primary} />
@@ -1625,19 +1685,23 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: COLORS.white,
-    padding: 12,
-    gap: 8,
+    paddingHorizontal: sp(12),
+    paddingVertical: sp(12),
+    gap: sp(8),
   },
+  // Fixed width: the Status box must not grow/shrink when a value is picked,
+  // and must be wide enough to keep the longest option on one line.
   statusDropdownWrap: {
-    width: 126,
+    width: ms(124),
+    flexGrow: 0,
+    flexShrink: 0,
   },
+  // Search takes every remaining pixel (~3/4 of the row); minWidth:0 lets it
+  // shrink rather than push Status off-screen.
   fieldWrap: {
     flex: 1,
-    paddingTop: 8,
-    position: "relative",
-  },
-  dateFieldWrap: {
-    paddingTop: 8,
+    minWidth: 0,
+    paddingTop: sp(8),
     position: "relative",
   },
   fieldLabel: {
@@ -1647,25 +1711,26 @@ const styles = StyleSheet.create({
     zIndex: 2,
     backgroundColor: COLORS.inputBackground,
     paddingHorizontal: 4,
-    fontSize: 12,
+    fontSize: fs(12),
     fontWeight: "500",
     color: COLORS.textSecondary,
   },
   searchWrap: {
     alignSelf: "stretch",
-    height: 56,
+    height: ms(56),
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
-    paddingHorizontal: 10,
+    paddingHorizontal: sp(10),
     borderWidth: 1.5,
     borderColor: COLORS.border,
-    borderRadius: 12,
+    borderRadius: sp(12),
     backgroundColor: COLORS.inputBackground,
   },
   searchInput: {
     flex: 1,
-    fontSize: 12,
+    minWidth: 0,
+    fontSize: fs(12),
     fontWeight: "600",
     color: COLORS.text,
     paddingVertical: 0,
@@ -1740,60 +1805,54 @@ const styles = StyleSheet.create({
   countBar: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
-    marginHorizontal: 16,
-    marginTop: 12,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    borderRadius: 16,
+    marginHorizontal: sp(16),
+    marginTop: sp(12),
+    paddingVertical: sp(12),
+    paddingHorizontal: sp(12),
+    borderRadius: sp(16),
+    gap: sp(10),
     shadowColor: COLORS.primaryDark,
     shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 0.2,
     shadowRadius: 12,
     elevation: 6,
   },
-  countBarLeft: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    flex: 1,
-    marginRight: 10,
-  },
-  countBarIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    backgroundColor: "rgba(255,255,255,0.18)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
+  // Middle column: the only flexible one, so Filter and Date keep their size
+  // and the count text absorbs whatever width is left.
   countBarTextWrap: {
     flex: 1,
+    minWidth: 0,
+  },
+  countBarDateWrap: {
+    flexGrow: 0,
+    flexShrink: 0,
   },
   countText: {
     color: "#fff",
-    fontSize: 15,
+    fontSize: fs(14),
     fontWeight: "800",
   },
   countSubText: {
     color: "rgba(255,255,255,0.8)",
-    fontSize: 11,
+    fontSize: fs(11),
     marginTop: 2,
   },
   countBarFilterBtn: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
+    gap: 5,
+    flexGrow: 0,
+    flexShrink: 0,
     backgroundColor: "rgba(255,255,255,0.2)",
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.35)",
     borderRadius: 20,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
+    paddingHorizontal: sp(10),
+    paddingVertical: sp(8),
   },
   countBarFilterText: {
     color: "#fff",
-    fontSize: 13,
+    fontSize: fs(12),
     fontWeight: "700",
   },
   countBarFilterDot: {
@@ -1808,14 +1867,14 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   listContent: {
-    padding: 16,
+    padding: sp(16),
     flexGrow: 1,
   },
   orderCard: {
     backgroundColor: COLORS.white,
-    borderRadius: 14,
-    padding: 16,
-    marginBottom: 12,
+    borderRadius: sp(14),
+    padding: sp(16),
+    marginBottom: sp(12),
     borderWidth: 1,
     borderColor: COLORS.border,
     shadowColor: "#000",
@@ -1828,21 +1887,44 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "flex-start",
-    marginBottom: 8,
+    marginBottom: sp(8),
+    gap: sp(8),
   },
   orderNumberWrap: {
     flex: 1,
-    paddingRight: 8,
+    minWidth: 0,
   },
   orderNumber: {
-    fontSize: 16,
+    fontSize: fs(16),
     fontWeight: "700",
     color: COLORS.text,
   },
   createdText: {
-    fontSize: 12,
+    fontSize: fs(12),
     color: COLORS.textMuted,
     marginTop: 4,
+  },
+  // Background/text colour applied inline per status (see getCardStatusBadge).
+  // The pill must stay on ONE line: `nowrap` + a non-shrinking label stop the
+  // icon and text from stacking, `alignSelf` keeps it hugging its content, and
+  // no maxWidth means it is never measured narrower than the label needs.
+  cardStatusBadge: {
+    flexDirection: "row",
+    flexWrap: "nowrap",
+    alignItems: "center",
+    alignSelf: "flex-start",
+    gap: 4,
+    paddingHorizontal: sp(10),
+    paddingVertical: sp(5),
+    borderRadius: 999,
+    flexGrow: 0,
+    flexShrink: 0,
+  },
+  cardStatusText: {
+    fontSize: fs(11),
+    fontWeight: "700",
+    flexShrink: 0,
+    includeFontPadding: false,
   },
   statusBadge: {
     paddingHorizontal: 10,
@@ -1856,20 +1938,20 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
   cardName: {
-    fontSize: 14,
+    fontSize: fs(14),
     fontWeight: "600",
     color: COLORS.text,
   },
   cardCode: {
-    fontSize: 12,
+    fontSize: fs(12),
     color: COLORS.textSecondary,
-    marginBottom: 10,
+    marginBottom: sp(10),
   },
   metaWrap: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 8,
-    marginBottom: 8,
+    gap: sp(8),
+    marginBottom: sp(8),
   },
   metaChip: {
     flexDirection: "row",
@@ -1878,16 +1960,16 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.background,
     borderWidth: 1,
     borderColor: COLORS.border,
-    borderRadius: 14,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
+    borderRadius: sp(14),
+    paddingHorizontal: sp(10),
+    paddingVertical: sp(6),
   },
   focChip: {
     backgroundColor: "#FFF7E6",
     borderColor: "#F59E0B",
   },
   metaText: {
-    fontSize: 12,
+    fontSize: fs(12),
     color: COLORS.textSecondary,
   },
   focText: {
@@ -1898,31 +1980,34 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
+    gap: sp(8),
     marginTop: 4,
-    paddingTop: 12,
+    paddingTop: sp(12),
     borderTopWidth: 1,
     borderTopColor: COLORS.border,
   },
   amountLabel: {
-    fontSize: 14,
+    fontSize: fs(14),
     color: COLORS.textSecondary,
   },
   amountValue: {
-    fontSize: 20,
+    fontSize: fs(20),
+    flexShrink: 1,
     fontWeight: "700",
     color: COLORS.text,
   },
   actionRow: {
     flexDirection: "row",
-    gap: 12,
-    marginTop: 16,
+    gap: sp(12),
+    marginTop: sp(16),
   },
   actionBtn: {
     flex: 1,
+    minWidth: 0,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    paddingVertical: 12,
+    paddingVertical: sp(12),
     borderRadius: 8,
     gap: 6,
   },
@@ -1934,6 +2019,7 @@ const styles = StyleSheet.create({
   },
   actionBtnText: {
     color: "#fff",
+    fontSize: fs(14),
     fontWeight: "600",
   },
   emptyContainer: {
@@ -1944,7 +2030,7 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   emptyText: {
-    fontSize: 16,
+    fontSize: fs(16),
     color: COLORS.textSecondary,
     marginTop: 6,
   },

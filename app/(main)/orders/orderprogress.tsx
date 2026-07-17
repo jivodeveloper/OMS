@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
@@ -12,7 +12,8 @@ import { useLocalSearchParams, useFocusEffect } from "expo-router";
 import { useNavigation } from "@react-navigation/native";
 import { orderService } from "@/src/services/order.service";
 import useAndroidBackOverride from "@/src/hooks/useAndroidBackOverride";
-import { refreshOrderData } from "@/src/cache";
+import { invalidateQueries, refreshOrderData } from "@/src/cache";
+import { fs, ms, sp } from "@/src/utils/responsive";
 
 interface OrderLog {
   id: number;
@@ -238,6 +239,17 @@ export default function OrderProgressScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
+  // Switching to a different order must never leave the previous order's
+  // timeline on screen while the new one loads — blank it out the moment the id
+  // changes, and show the loader again.
+  useEffect(() => {
+    setLogs([]);
+    setRateApprovals([]);
+    setOrderStatus("");
+    setOrderMeta({ orderNumber: "", createdAt: "", currentStage: "" });
+    setLoading(true);
+  }, [orderId]);
+
   const fetchLogs = useCallback(async () => {
     if (!orderId) {
       setLogs([]);
@@ -246,6 +258,13 @@ export default function OrderProgressScreen() {
     }
 
     try {
+      // Progress is a live view of the approval workflow, so it must not be
+      // served from cache — drop this order's cached timeline/detail first.
+      await invalidateQueries([
+        `/orders/${Number(orderId)}/orderlogs/`,
+        `/orders/${Number(orderId)}/orderdetails/`,
+      ]);
+
       const [logsResponse, detailResponse] = await Promise.all([
         orderService.getOrderLogs(Number(orderId)),
         orderService.getOrderDetails(Number(orderId)),
@@ -562,28 +581,45 @@ export default function OrderProgressScreen() {
 
           {item.stage_key === "rate_approval" && rateApproverList.length > 0 ? (
             <View style={styles.detailRow}>
-              <Ionicons name="people-outline" size={18} color="#1E1E1E" style={styles.detailIcon} />
+              <Ionicons name="people-outline" size={ms(18)} color="#1E1E1E" style={styles.detailIcon} />
               <View style={styles.detailTextWrap}>
                 <Text style={styles.detailLabel}>Approvers</Text>
-                {rateApproverList.map((a, i) => (
-                  <View key={i} style={styles.approverRow}>
-                    <Text style={styles.detailValue}>{a.approver_name}</Text>
-                    <Text
-                      style={[
-                        styles.approverStatusText,
-                        a.status === "APPROVED" && { color: DONE_GREEN },
-                        a.status === "REJECTED" && { color: REJECTED_RED },
-                        a.status === "PENDING" && { color: PENDING_ORANGE },
-                      ]}
-                    >
-                      {a.status === "PENDING"
-                        ? "Pending"
-                        : a.status === "APPROVED"
-                        ? "Approved"
-                        : "Rejected"}
-                    </Text>
-                  </View>
-                ))}
+                {rateApproverList.map((a, i) => {
+                  const tone =
+                    a.status === "APPROVED"
+                      ? DONE_GREEN
+                      : a.status === "REJECTED"
+                        ? REJECTED_RED
+                        : PENDING_ORANGE;
+                  const icon =
+                    a.status === "APPROVED"
+                      ? "checkmark-circle"
+                      : a.status === "REJECTED"
+                        ? "close-circle"
+                        : "time-outline";
+                  return (
+                    <View key={i} style={styles.approverRow}>
+                      <View style={[styles.approverAvatar, { backgroundColor: tone + "1A" }]}>
+                        <Text style={[styles.approverAvatarText, { color: tone }]}>
+                          {String(a.approver_name || "?").charAt(0).toUpperCase()}
+                        </Text>
+                      </View>
+                      <Text style={styles.approverName} numberOfLines={1}>
+                        {a.approver_name}
+                      </Text>
+                      <View style={[styles.approverStatusChip, { backgroundColor: tone + "1A" }]}>
+                        <Ionicons name={icon} size={ms(11)} color={tone} />
+                        <Text style={[styles.approverStatusText, { color: tone }]}>
+                          {a.status === "PENDING"
+                            ? "Pending"
+                            : a.status === "APPROVED"
+                              ? "Approved"
+                              : "Rejected"}
+                        </Text>
+                      </View>
+                    </View>
+                  );
+                })}
               </View>
             </View>
           ) : (
@@ -657,14 +693,17 @@ export default function OrderProgressScreen() {
       </View> */}
 
       <View style={styles.content}>
+        {/* Current Stage is dropped here — each timeline card below already
+            carries its own status badge, so repeating it at the top only stole
+            width from the order id and created date. */}
         {!!orderMeta.orderNumber && (
           <View style={styles.summaryCard}>
             <View style={styles.summaryIconWrap}>
-              <Ionicons name="document-text-outline" size={20} color="#2563EB" />
+              <Ionicons name="document-text-outline" size={ms(20)} color="#2563EB" />
             </View>
             <View style={styles.summaryMain}>
               <Text style={styles.summaryLabel}>Order ID</Text>
-              <Text style={styles.summaryOrderNo} numberOfLines={1}>
+              <Text style={styles.summaryOrderNo} numberOfLines={1} adjustsFontSizeToFit>
                 {orderMeta.orderNumber}
               </Text>
               {!!orderMeta.createdAt && (
@@ -673,26 +712,8 @@ export default function OrderProgressScreen() {
                 </Text>
               )}
             </View>
-            {!!orderMeta.currentStage && (
-              <View style={styles.summaryStageWrap}>
-                <Text style={styles.summaryLabel}>Current Stage</Text>
-                <View style={styles.currentStageBadge}>
-                  <Ionicons name="time-outline" size={13} color="#EA8C00" />
-                  <Text style={styles.currentStageText} numberOfLines={1}>
-                    {orderMeta.currentStage}
-                  </Text>
-                </View>
-              </View>
-            )}
           </View>
         )}
-
-        <View style={styles.subtitleCard}>
-          <View style={styles.subtitleIconWrap}>
-            <Ionicons name="git-branch-outline" size={15} color="#2563EB" />
-          </View>
-          <Text style={styles.subtitle}>Track your order through approval stages</Text>
-        </View>
 
         <FlatList
           data={progressLogs}
@@ -744,26 +765,6 @@ const styles = StyleSheet.create({
     color: "#334155",
     fontWeight: "600",
   },
-  subtitleCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    backgroundColor: "#EFF6FF",
-    borderWidth: 1,
-    borderColor: "#DBEAFE",
-    borderRadius: 14,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    marginBottom: 16,
-  },
-  subtitleIconWrap: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: "#DBEAFE",
-    alignItems: "center",
-    justifyContent: "center",
-  },
   listContent: {
     paddingBottom: 28,
   },
@@ -797,9 +798,10 @@ const styles = StyleSheet.create({
   },
   card: {
     flex: 1,
-    borderRadius: 18,
-    paddingHorizontal: 14,
-    paddingVertical: 14,
+    minWidth: 0,
+    borderRadius: sp(18),
+    paddingHorizontal: sp(14),
+    paddingVertical: sp(14),
     borderWidth: 1,
     shadowColor: "#A7B0C0",
     shadowOpacity: 0.1,
@@ -817,24 +819,26 @@ const styles = StyleSheet.create({
   },
   statusText: {
     flex: 1,
-    fontSize: 16,
+    minWidth: 0,
+    fontSize: fs(16),
     fontWeight: "800",
     color: "#1F2937",
   },
   stageBadge: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
+    paddingHorizontal: sp(10),
+    paddingVertical: sp(4),
     borderRadius: 20,
-    marginLeft: 8,
+    marginLeft: sp(8),
+    flexShrink: 0,
   },
   stageBadgeText: {
-    fontSize: 11,
+    fontSize: fs(11),
     fontWeight: "800",
   },
   reviewerRow: {
     flexDirection: "row",
     alignItems: "flex-start",
-    gap: 8,
+    gap: sp(8),
   },
   roleSub: {
     fontSize: 11,
@@ -850,13 +854,13 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: "#FFFFFF",
-    borderRadius: 16,
+    borderRadius: sp(16),
     borderWidth: 1,
     borderColor: "#EEF1F6",
-    paddingHorizontal: 14,
-    paddingVertical: 14,
-    marginBottom: 12,
-    gap: 12,
+    paddingHorizontal: sp(14),
+    paddingVertical: sp(14),
+    marginBottom: sp(12),
+    gap: sp(12),
     shadowColor: "#A7B0C0",
     shadowOpacity: 0.1,
     shadowRadius: 8,
@@ -864,25 +868,26 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   summaryIconWrap: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
+    width: ms(44),
+    height: ms(44),
+    borderRadius: sp(12),
     backgroundColor: "#EEF4FF",
     alignItems: "center",
     justifyContent: "center",
   },
   summaryMain: {
     flex: 1,
+    minWidth: 0,
   },
   summaryLabel: {
-    fontSize: 11,
+    fontSize: fs(11),
     fontWeight: "700",
     color: "#94A3B8",
     textTransform: "uppercase",
     letterSpacing: 0.3,
   },
   summaryOrderNo: {
-    fontSize: 16,
+    fontSize: fs(16),
     fontWeight: "800",
     color: "#2563EB",
     marginTop: 2,
@@ -891,25 +896,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: "#64748B",
     marginTop: 2,
-  },
-  summaryStageWrap: {
-    alignItems: "flex-end",
-  },
-  currentStageBadge: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    backgroundColor: "#FFF7ED",
-    borderRadius: 20,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    marginTop: 4,
-  },
-  currentStageText: {
-    fontSize: 12,
-    fontWeight: "700",
-    color: "#EA8C00",
-    maxWidth: 110,
   },
   detailRow: {
     flexDirection: "row",
@@ -924,14 +910,14 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   detailLabel: {
-    fontSize: 12,
+    fontSize: fs(12),
     fontWeight: "700",
     color: "#111827",
     marginBottom: 1,
   },
   detailValue: {
-    fontSize: 13,
-    lineHeight: 18,
+    fontSize: fs(13),
+    lineHeight: fs(18),
     color: "#4B5563",
   },
   center: {
@@ -943,15 +929,43 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: "#6B7280",
   },
+  // Name sits inline with its own avatar + status chip, so a stage with several
+  // rate approvers reads as a list of people rather than a wall of text.
   approverRow: {
     flexDirection: "row",
-    justifyContent: "space-between",
     alignItems: "center",
-    marginTop: 3,
+    gap: sp(8),
+    marginTop: sp(6),
+  },
+  approverAvatar: {
+    width: ms(22),
+    height: ms(22),
+    borderRadius: ms(11),
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  approverAvatarText: {
+    fontSize: fs(11),
+    fontWeight: "800",
+  },
+  approverName: {
+    flex: 1,
+    minWidth: 0,
+    fontSize: fs(13),
+    color: "#374151",
+    fontWeight: "600",
+  },
+  approverStatusChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+    paddingHorizontal: sp(8),
+    paddingVertical: sp(3),
+    borderRadius: 20,
+    flexShrink: 0,
   },
   approverStatusText: {
-    fontSize: 12,
+    fontSize: fs(11),
     fontWeight: "700",
-    color: PENDING_ORANGE,
   },
 });

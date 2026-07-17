@@ -29,6 +29,7 @@ import Animated, {
 } from "react-native-reanimated";
 import { COLORS } from "@/src/constants/theme";
 import { APP_CONFIG } from "@/src/constants/config";
+import { deviceService } from "@/src/services/device.service";
 import { useAuth } from "@/src/context/AuthContext";
 import CustomDialog from "@/src/components/common/CustomDialog";
 
@@ -453,7 +454,7 @@ export default function LoginScreen() {
             </Animated.View>
           </Animated.View>
 
-          <Text style={styles.footer}>{APP_CONFIG.APP_NAME} v{APP_CONFIG.VERSION}</Text>
+          <Text style={styles.footer}>{APP_CONFIG.APP_NAME} v{deviceService.getAppVersion()}</Text>
         </ScrollView>
       </KeyboardAvoidingView>
       <CustomDialog visible={dialogVisible} title={dialogTitle} message={dialogMessage} onClose={() => setDialogVisible(false)} />

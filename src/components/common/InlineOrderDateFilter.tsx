@@ -23,7 +23,12 @@ export type DateFilterValue = {
 type InlineOrderDateFilterProps = {
   value: DateFilterValue;
   onChange: (value: DateFilterValue) => void;
-  variant?: "compact" | "field";
+  /**
+   * compact – small pill for a toolbar row
+   * field   – 56px form field, matches Status/Search inputs
+   * onDark  – translucent pill for use on a dark/gradient bar
+   */
+  variant?: "compact" | "field" | "onDark";
 };
 
 const MONTH_SHORT = [
@@ -286,7 +291,31 @@ export default function InlineOrderDateFilter({
     </TouchableOpacity>
   );
 
-  const trigger = variant === "field" ? fieldButton : mainButton;
+  // --- Pill for a dark/gradient bar (matches the adjacent Filter button) ---
+  const onDarkButton = (
+    <TouchableOpacity
+      style={styles.onDarkButton}
+      onPress={() => setShowModeMenu(true)}
+      activeOpacity={0.8}
+    >
+      <Ionicons name="calendar-outline" size={14} color="#fff" />
+      <Text style={styles.onDarkText} numberOfLines={1}>
+        {isActive ? displayLabel : "Date"}
+      </Text>
+      {isActive ? (
+        <Pressable onPress={handleClear} hitSlop={8}>
+          <Ionicons name="close-circle" size={14} color="#fff" />
+        </Pressable>
+      ) : null}
+    </TouchableOpacity>
+  );
+
+  const trigger =
+    variant === "field"
+      ? fieldButton
+      : variant === "onDark"
+        ? onDarkButton
+        : mainButton;
 
   // --- WEB ---
   if (Platform.OS === "web") {
@@ -359,6 +388,24 @@ const styles = StyleSheet.create({
   filterButtonActive: {
     backgroundColor: COLORS.primaryLight,
     borderColor: COLORS.primary,
+  },
+  // Sits on the blue count bar, so it mirrors the Filter button's treatment.
+  onDarkButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    backgroundColor: "rgba(255,255,255,0.2)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.35)",
+    borderRadius: 20,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  onDarkText: {
+    color: "#fff",
+    fontSize: 12,
+    fontWeight: "700",
+    maxWidth: 92,
   },
   fieldButton: {
     flexDirection: "row",

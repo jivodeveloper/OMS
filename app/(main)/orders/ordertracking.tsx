@@ -21,6 +21,7 @@ import Dropdown from "@/src/components/common/DropdownProps";
 import { useAuth } from "@/src/context/AuthContext";
 import StateWrapper from "@/src/components/common/StateWrapper";
 import { refreshOrderData } from "@/src/cache";
+import { fs, ms, sp } from "@/src/utils/responsive";
 
 type TrackingStatusFilter = "Completed" | "Rejected";
 
@@ -480,6 +481,23 @@ export default function OrderTrackingScreen() {
     return status;
   };
 
+  // Colour the badge by outcome instead of one flat blue: red = rejected,
+  // green = approved/completed, amber = still in the approval flow.
+  const getStatusBadgeTone = (item: OrderItemList) => {
+    const status = getStatusName(item).toLowerCase();
+    if (status.includes("reject") || status.includes("cancel")) {
+      return { bg: "#FEF2F2", color: "#DC2626" };
+    }
+    if (
+      status.includes("complete") ||
+      status.includes("approv") ||
+      status.includes("accept")
+    ) {
+      return { bg: "#ECFDF3", color: "#16A34A" };
+    }
+    return { bg: "#FFF7ED", color: "#B45309" };
+  };
+
   const formatDate = (value?: string) => {
     if (!value) return "-";
     const parsed = new Date(value);
@@ -533,9 +551,10 @@ export default function OrderTrackingScreen() {
       : `${selectedStatuses.length} Status Selected`;
   }
 
+  // Status is owned by the Status dropdown at the top of the screen, so it is
+  // deliberately NOT offered here as well.
   const dropdownOptions = [
     { label: "All Orders", value: "ALL" },
-    { label: statusLabel, value: "__STATUS__" },
     { label: partyLabel, value: "__PARTY__" },
     { label: itemLabel, value: "__ITEM__" },
   ];
@@ -549,13 +568,12 @@ export default function OrderTrackingScreen() {
     } else if (val === "__ITEM__") {
       setTempSelectedItems(selectedItems);
       setIsItemModalVisible(true);
-    } else if (val === "__STATUS__") {
-      setTempSelectedStatuses(selectedStatuses);
-      setIsStatusModalVisible(true);
     } else {
+      // "All Orders" clears only what this modal owns — it must NOT reset
+      // selectedStatuses, or the top Status dropdown would silently disagree
+      // with the list it is filtering.
       setSelectedParties([]);
       setSelectedItems([]);
-      setSelectedStatuses([]);
     }
   };
 
@@ -721,9 +739,19 @@ export default function OrderTrackingScreen() {
             Created: {formatDateTime(item.created_at)}
           </Text>
         </View>
-        <View style={styles.statusBadge}>
-          <Text style={styles.statusText}>{getStatusBadgeText(item)}</Text>
-        </View>
+        {(() => {
+          const tone = getStatusBadgeTone(item);
+          return (
+            <View style={[styles.statusBadge, { backgroundColor: tone.bg }]}>
+              <Text
+                style={[styles.statusText, { color: tone.color }]}
+                numberOfLines={1}
+              >
+                {getStatusBadgeText(item)}
+              </Text>
+            </View>
+          );
+        })()}
       </View>
 
       {/* Party Info */}
@@ -942,37 +970,23 @@ export default function OrderTrackingScreen() {
               )}
             </View>
           </View>
-          <View style={styles.dateFieldWrap}>
-            <Text style={styles.fieldLabel}>Date</Text>
-            <InlineOrderDateFilter
-              value={selectedOrderDate}
-              onChange={setSelectedOrderDate}
-              variant="field"
-            />
-          </View>
+          {/* Date moved into the count bar below so Search can use the rest of
+              the row and long text stays fully visible. */}
         </View>
 
-        {/* Orders Count + Filter */}
-        {!loading && filteredOrders.length > 0 && (
+        {/* Orders Count + Filter — always rendered once loading finishes, even
+            with zero results: this bar holds the Filter and Date controls, so
+            hiding it on an empty result set would leave the user stuck with no
+            way to widen the filter that emptied the list. */}
+        {!loading && (
           <LinearGradient
             colors={[COLORS.primaryDark, COLORS.primary]}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
             style={styles.countBar}
           >
-            <View style={styles.countBarLeft}>
-              <View style={styles.countBarIcon}>
-                <Ionicons name="receipt-outline" size={18} color="#fff" />
-              </View>
-              <View style={styles.countBarTextWrap}>
-                <Text style={styles.countText} numberOfLines={1}>
-                  {filteredOrders.length} order{filteredOrders.length > 1 ? "s" : ""} found
-                </Text>
-                <Text style={styles.countSubText} numberOfLines={1}>
-                  Last updated just now
-                </Text>
-              </View>
-            </View>
+            {/* 1) Filter · 2) result count · 3) Date — each sized so they never
+                collide on narrow screens. */}
             <TouchableOpacity
               style={styles.countBarFilterBtn}
               onPress={() => setIsFilterModalVisible(true)}
@@ -980,10 +994,27 @@ export default function OrderTrackingScreen() {
             >
               <Ionicons name="funnel-outline" size={14} color="#fff" />
               <Text style={styles.countBarFilterText}>Filter</Text>
-              {(selectedParties.length > 0 || selectedItems.length > 0 || selectedStatuses.length > 0) && (
+              {(selectedParties.length > 0 || selectedItems.length > 0) && (
                 <View style={styles.countBarFilterDot} />
               )}
             </TouchableOpacity>
+
+            <View style={styles.countBarTextWrap}>
+              <Text style={styles.countText} numberOfLines={1} adjustsFontSizeToFit>
+                {filteredOrders.length} order{filteredOrders.length === 1 ? "" : "s"} found
+              </Text>
+              <Text style={styles.countSubText} numberOfLines={1}>
+                Last updated just now
+              </Text>
+            </View>
+
+            <View style={styles.countBarDateWrap}>
+              <InlineOrderDateFilter
+                value={selectedOrderDate}
+                onChange={setSelectedOrderDate}
+                variant="onDark"
+              />
+            </View>
           </LinearGradient>
         )}
 
@@ -1265,19 +1296,24 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: COLORS.white,
-    padding: 12,
-    gap: 8,
+    paddingHorizontal: sp(12),
+    paddingVertical: sp(12),
+    gap: sp(8),
   },
+  // Fixed width: the Status box must not grow/shrink when a value is picked.
+  // Wide enough that the longest option ("Completed") stays on one line — at
+  // ms(104) it wrapped to "Comple / ted".
   statusDropdownWrap: {
-    width: 126,
+    width: ms(124),
+    flexGrow: 0,
+    flexShrink: 0,
   },
+  // Search takes every remaining pixel (~3/4 of the row) so long text stays
+  // readable, and minWidth:0 lets it shrink rather than push Status off-screen.
   fieldWrap: {
     flex: 1,
-    paddingTop: 8,
-    position: "relative",
-  },
-  dateFieldWrap: {
-    paddingTop: 8,
+    minWidth: 0,
+    paddingTop: sp(8),
     position: "relative",
   },
   fieldLabel: {
@@ -1287,25 +1323,26 @@ const styles = StyleSheet.create({
     zIndex: 2,
     backgroundColor: COLORS.inputBackground,
     paddingHorizontal: 4,
-    fontSize: 12,
+    fontSize: fs(12),
     fontWeight: "500",
     color: COLORS.textSecondary,
   },
   searchWrap: {
     alignSelf: "stretch",
-    height: 56,
+    height: ms(56),
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
-    paddingHorizontal: 10,
+    paddingHorizontal: sp(10),
     borderWidth: 1.5,
     borderColor: COLORS.border,
-    borderRadius: 12,
+    borderRadius: sp(12),
     backgroundColor: COLORS.inputBackground,
   },
   searchInput: {
     flex: 1,
-    fontSize: 12,
+    minWidth: 0,
+    fontSize: fs(12),
     fontWeight: "600",
     color: COLORS.text,
     paddingVertical: 0,
@@ -1314,55 +1351,49 @@ const styles = StyleSheet.create({
   countBar: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
-    marginHorizontal: 16,
-    marginTop: 12,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    borderRadius: 16,
+    marginHorizontal: sp(16),
+    marginTop: sp(12),
+    paddingVertical: sp(12),
+    paddingHorizontal: sp(12),
+    borderRadius: sp(16),
+    gap: sp(10),
     shadowColor: COLORS.primaryDark,
     shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 0.2,
     shadowRadius: 12,
     elevation: 6,
   },
-  countBarLeft: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    flex: 1,
-    marginRight: 10,
-  },
-  countBarIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    backgroundColor: "rgba(255,255,255,0.18)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
+  // Middle column: the only flexible one, so Filter and Date keep their size
+  // and the count text absorbs whatever width is left.
   countBarTextWrap: {
     flex: 1,
+    minWidth: 0,
+  },
+  countBarDateWrap: {
+    flexGrow: 0,
+    flexShrink: 0,
   },
   countSubText: {
     color: "rgba(255,255,255,0.8)",
-    fontSize: 11,
+    fontSize: fs(11),
     marginTop: 2,
   },
   countBarFilterBtn: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
+    gap: 5,
+    flexGrow: 0,
+    flexShrink: 0,
     backgroundColor: "rgba(255,255,255,0.2)",
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.35)",
     borderRadius: 20,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
+    paddingHorizontal: sp(10),
+    paddingVertical: sp(8),
   },
   countBarFilterText: {
     color: "#fff",
-    fontSize: 13,
+    fontSize: fs(12),
     fontWeight: "700",
   },
   countBarFilterDot: {
@@ -1405,7 +1436,7 @@ const styles = StyleSheet.create({
   },
   countText: {
     color: "#fff",
-    fontSize: 15,
+    fontSize: fs(14),
     fontWeight: "800",
   },
   loadingContainer: {
@@ -1450,15 +1481,17 @@ const styles = StyleSheet.create({
     color: COLORS.textMuted,
     marginTop: 4,
   },
+  // Background/text colour are applied inline per status (see
+  // getStatusBadgeTone) — red / green / amber by outcome.
   statusBadge: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
+    paddingHorizontal: sp(10),
+    paddingVertical: sp(4),
     borderRadius: 12,
-    backgroundColor: COLORS.primaryLight,
+    maxWidth: ms(160),
+    flexShrink: 1,
   },
   statusText: {
-    color: COLORS.primaryDark,
-    fontSize: 10,
+    fontSize: fs(10),
     fontWeight: "700",
   },
   cardName: {

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   View,
   Text,
@@ -14,15 +14,12 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { COLORS } from "@/constants/theme";
 import { useAuth } from "@/src/context/AuthContext";
 import { authService, type User } from "@/src/services/auth.service";
+import { deviceService } from "@/src/services/device.service";
 import { orderService } from "@/src/services/order.service";
 import { storage } from "@/src/utils/storage";
 import { appAlert } from "@/src/components/common/AppDialog";
-import {
-  ASSIGNABLE_PAGES,
-  SCREEN_ROLES,
-  canAccessScreen,
-} from "@/src/constants/pages";
 import { CacheKeys, invalidateQueries } from "@/src/cache";
+import { fs, ms, sp } from "@/src/utils/responsive";
 
 // USR-000123 style id shown on the card.
 const formatUserId = (id?: number | null) =>
@@ -44,14 +41,6 @@ const formatDateTime = (value?: string | null) => {
   }
 };
 
-// Turn a screen key ("orders/orderlist") into a readable label ("Orderlist").
-const prettyScreen = (screen: string) => {
-  const last = screen.split("/").pop() || screen;
-  return last
-    .replace(/[-_]/g, " ")
-    .replace(/\b\w/g, (c) => c.toUpperCase());
-};
-
 type IconName = React.ComponentProps<typeof Ionicons>["name"];
 
 export default function ProfileScreen() {
@@ -61,8 +50,6 @@ export default function ProfileScreen() {
   const [loading, setLoading] = useState(!authUser);
   const [refreshing, setRefreshing] = useState(false);
   const [unread, setUnread] = useState(0);
-  const [extraExpanded, setExtraExpanded] = useState(false);
-  const [permsExpanded, setPermsExpanded] = useState(false);
 
   const loadProfile = useCallback(async (isRefresh = false) => {
     try {
@@ -107,25 +94,9 @@ export default function ProfileScreen() {
     loadUnread();
   };
 
-  const role = (profile?.role || "").toLowerCase();
-  const extraPages = profile?.extra_pages || [];
-
-  const extraPageLabels = useMemo(
-    () =>
-      ASSIGNABLE_PAGES.filter((p) => extraPages.includes(p.key)).map(
-        (p) => p.label,
-      ),
-    [extraPages],
-  );
-
-  const accessibleScreens = useMemo(() => {
-    const screens = ["dashboard", ...Object.keys(SCREEN_ROLES)].filter(
-      (s, i, arr) => arr.indexOf(s) === i,
-    );
-    return screens.filter((s) => canAccessScreen(s, role, extraPages));
-  }, [role, extraPages]);
-
-  const yesNo = (value?: boolean) => (value ? "Yes" : "No");
+  const handleEditProfile = useCallback(() => {
+    appAlert("Edit Profile", "Profile editing will be available soon.");
+  }, []);
 
   if (loading && !profile) {
     return (
@@ -136,7 +107,6 @@ export default function ProfileScreen() {
   }
 
   const displayName = profile?.name || profile?.username || "User";
-  const initial = displayName.charAt(0).toUpperCase();
 
   const companyText = profile?.company
     ? `${profile.company.name}${profile.company.id != null ? ` (${profile.company.id})` : ""}`
@@ -152,6 +122,15 @@ export default function ProfileScreen() {
   const subGroupText = profile?.sub_group || "-";
   const roleText = profile?.role_display || profile?.role || "-";
 
+  // Read-only build/device facts for support triage. Sourced from native app
+  // metadata via DeviceService — never a hand-maintained string.
+  const device = deviceService.getSummary();
+  const platformLabel =
+    device.platform === "ANDROID"
+      ? "Android"
+      : device.platform === "IOS"
+        ? "iOS"
+        : device.platform;
   return (
     <View style={styles.container}>
       {/* Header */}
@@ -192,40 +171,34 @@ export default function ProfileScreen() {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
         }
       >
-        {/* Profile summary card */}
-        <View style={styles.profileCard}>
+        {/* Profile summary card — the whole card is tappable (not just the
+            button), so the primary action has a full-card touch target. The
+            "Active" chip is gone: the avatar's green dot already conveys it and
+            a signed-in user is active by definition. */}
+        <TouchableOpacity
+          style={styles.profileCard}
+          activeOpacity={0.85}
+          onPress={handleEditProfile}
+          accessibilityRole="button"
+          accessibilityLabel="Edit profile"
+        >
           <View style={styles.avatar}>
-            <Ionicons name="person" size={34} color={COLORS.primary} />
+            <Ionicons name="person" size={ms(34)} color={COLORS.primary} />
             <View style={styles.avatarDot} />
           </View>
           <View style={styles.profileMain}>
             <Text style={styles.profileName} numberOfLines={1}>
               {displayName}
             </Text>
-            <View style={styles.statusRow}>
-              <View style={styles.statusDot} />
-              <Text style={styles.statusText}>
-                {profile?.is_active === false ? "Inactive" : "Active"}
-              </Text>
-            </View>
             <Text style={styles.profileUsername} numberOfLines={1}>
               {profile?.username || ""}
             </Text>
           </View>
-          <TouchableOpacity
-            style={styles.editBtn}
-            activeOpacity={0.85}
-            onPress={() =>
-              appAlert(
-                "Edit Profile",
-                "Profile editing will be available soon.",
-              )
-            }
-          >
-            <Ionicons name="create-outline" size={16} color={COLORS.primary} />
-            <Text style={styles.editBtnText}>Edit Profile</Text>
-          </TouchableOpacity>
-        </View>
+          <View style={styles.editBtn}>
+            <Ionicons name="pencil" size={ms(14)} color={COLORS.primary} />
+            <Text style={styles.editBtnText}>Edit</Text>
+          </View>
+        </TouchableOpacity>
 
         {/* Account Information */}
         <Section icon="id-card-outline" iconBg="#EAF1FF" iconColor={COLORS.primary} title="Account Information">
@@ -233,8 +206,7 @@ export default function ProfileScreen() {
           <InfoRow icon="person-outline" label="Username" value={profile?.username || "-"} />
           <InfoRow icon="mail-outline" label="Email" value={profile?.email || "-"} valueColor={COLORS.primary} />
           <InfoRow icon="call-outline" label="Phone" value={profile?.phone || "-"} valueColor={COLORS.primary} />
-          <InfoRow icon="calendar-outline" label="Date Joined" value={formatDateTime(profile?.date_joined || profile?.created_at)} />
-          <InfoRow icon="checkmark-circle-outline" label="Is Active" pill={yesNo(profile?.is_active)} pillOn={!!profile?.is_active} last />
+          <InfoRow icon="calendar-outline" label="Date Joined" value={formatDateTime(profile?.date_joined || profile?.created_at)} last />
         </Section>
 
         {/* Organization Information */}
@@ -247,45 +219,12 @@ export default function ProfileScreen() {
           <InfoRow icon="share-social-outline" iconColor="#7C3AED" label="Sub Group" value={subGroupText} chevron last />
         </Section>
 
-        {/* Additional Information */}
-        <Section icon="document-text-outline" iconBg="#FFF3E6" iconColor="#EA8C00" title="Additional Information" defaultExpanded={false}>
-          <InfoRow
-            icon="copy-outline"
-            iconColor="#EA8C00"
-            label="Extra Pages"
-            value={extraPageLabels.length ? extraPageLabels.join(", ") : "None"}
-            chevron
-            onPress={extraPageLabels.length ? () => setExtraExpanded((v) => !v) : undefined}
-          />
-          {extraExpanded && extraPageLabels.length > 0 && (
-            <View style={styles.expandList}>
-              {extraPageLabels.map((label) => (
-                <View key={label} style={styles.expandChip}>
-                  <Ionicons name="checkmark" size={13} color="#EA8C00" />
-                  <Text style={styles.expandChipText}>{label}</Text>
-                </View>
-              ))}
-            </View>
-          )}
-          <InfoRow
-            icon="lock-closed-outline"
-            iconColor="#EA8C00"
-            label="Permissions"
-            value={`${accessibleScreens.length} Permission${accessibleScreens.length === 1 ? "" : "s"}`}
-            chevron
-            onPress={() => setPermsExpanded((v) => !v)}
-            last
-          />
-          {permsExpanded && (
-            <View style={styles.expandList}>
-              {accessibleScreens.map((screen) => (
-                <View key={screen} style={styles.expandChip}>
-                  <Ionicons name="key-outline" size={13} color="#EA8C00" />
-                  <Text style={styles.expandChipText}>{prettyScreen(screen)}</Text>
-                </View>
-              ))}
-            </View>
-          )}
+        {/* App & Device — read-only build info to help users and support
+            identify exactly which build is running. */}
+        <Section icon="phone-portrait-outline" iconBg="#E6F7F1" iconColor="#0EA47A" title="App & Device Info" defaultExpanded={false}>
+          <InfoRow icon="pricetag-outline" iconColor="#0EA47A" label="App Version" value={device.appVersion || "-"} />
+          <InfoRow icon="construct-outline" iconColor="#0EA47A" label="Build Number" value={String(device.buildNumber)} />
+          <InfoRow icon="phone-portrait-outline" iconColor="#0EA47A" label="Platform" value={platformLabel || "-"} last />
         </Section>
 
         <View style={{ height: insets.bottom + 90 }} />
@@ -417,8 +356,8 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   headerCenter: { flex: 1, alignItems: "center", paddingHorizontal: 8 },
-  headerTitle: { fontSize: 20, fontWeight: "800", color: COLORS.text },
-  headerSubtitle: { fontSize: 12, color: "#64748B", marginTop: 2 },
+  headerTitle: { fontSize: fs(20), fontWeight: "800", color: COLORS.text },
+  headerSubtitle: { fontSize: fs(12), color: "#64748B", marginTop: 2 },
   headerBellBadge: {
     position: "absolute",
     top: 2,
@@ -435,7 +374,7 @@ const styles = StyleSheet.create({
   },
   headerBellBadgeText: { color: "#fff", fontSize: 9, fontWeight: "800" },
 
-  content: { padding: 16 },
+  content: { padding: sp(16) },
 
   profileCard: {
     flexDirection: "row",
@@ -471,11 +410,8 @@ const styles = StyleSheet.create({
     borderColor: "#fff",
   },
   profileMain: { flex: 1 },
-  profileName: { fontSize: 18, fontWeight: "800", color: COLORS.text },
-  statusRow: { flexDirection: "row", alignItems: "center", gap: 5, marginTop: 4 },
-  statusDot: { width: 7, height: 7, borderRadius: 3.5, backgroundColor: "#22C55E" },
-  statusText: { fontSize: 13, fontWeight: "700", color: "#16A34A" },
-  profileUsername: { fontSize: 13, color: "#94A3B8", marginTop: 4 },
+  profileName: { fontSize: fs(18), fontWeight: "800", color: COLORS.text },
+  profileUsername: { fontSize: fs(13), color: "#94A3B8", marginTop: 4 },
   editBtn: {
     flexDirection: "row",
     alignItems: "center",
@@ -485,7 +421,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 9,
   },
-  editBtnText: { fontSize: 13, fontWeight: "700", color: COLORS.primary },
+  editBtnText: { fontSize: fs(13), fontWeight: "700", color: COLORS.primary },
 
   sectionCard: {
     backgroundColor: "#FFFFFF",
@@ -513,7 +449,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  sectionTitle: { flex: 1, fontSize: 16, fontWeight: "800", color: COLORS.text },
+  sectionTitle: { flex: 1, fontSize: fs(16), fontWeight: "800", color: COLORS.text },
 
   row: {
     flexDirection: "row",
@@ -524,7 +460,7 @@ const styles = StyleSheet.create({
   },
   rowLast: { borderBottomWidth: 0 },
   rowIcon: { marginRight: 12 },
-  rowLabel: { fontSize: 14, color: "#475569", fontWeight: "500" },
+  rowLabel: { fontSize: fs(14), color: "#475569", fontWeight: "500" },
   rowRight: {
     flex: 1,
     flexDirection: "row",
@@ -545,25 +481,8 @@ const styles = StyleSheet.create({
   },
   pillOn: { backgroundColor: "#DCFCE7" },
   pillOff: { backgroundColor: "#FEE2E2" },
-  pillText: { fontSize: 13, fontWeight: "700" },
+  pillText: { fontSize: fs(13), fontWeight: "700" },
   pillTextOn: { color: "#16A34A" },
   pillTextOff: { color: "#DC2626" },
 
-  expandList: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-    paddingBottom: 12,
-    paddingTop: 2,
-  },
-  expandChip: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    backgroundColor: "#FFF7ED",
-    borderRadius: 20,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-  },
-  expandChipText: { fontSize: 12, fontWeight: "600", color: "#B45309" },
 });

@@ -12,7 +12,7 @@ import {
   Modal,
   ActivityIndicator,
 } from "react-native";
-import { PieChart } from "react-native-gifted-charts";
+import { LineChart, PieChart } from "react-native-gifted-charts";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -32,6 +32,8 @@ import AnimatedCard from "@/src/components/dashboard/AnimatedCard";
 import AnimatedNumber from "@/src/components/dashboard/AnimatedNumber";
 import StateWrapper from "@/src/components/common/StateWrapper";
 import { refreshLiveData } from "@/src/cache";
+import { fs, ms, sp, SCREEN_WIDTH } from "@/src/utils/responsive";
+import { canAccessScreen } from "@/src/constants/pages";
 import {
   OrderItemList,
   productService,
@@ -1437,7 +1439,6 @@ export default function DashboardScreen() {
             ? "Good Evening"
             : "Good Night";
   const displayName = user?.name || user?.username || "User";
-  const initial = displayName.charAt(0).toUpperCase();
   const ROLE_LABELS: Record<string, string> = {
     manager: "Manager",
     auditor: "Auditor",
@@ -1461,6 +1462,14 @@ export default function DashboardScreen() {
         })
       : "—";
 
+  // Reports is role- and grant-gated, so the "View full report" shortcut is only
+  // shown to users who can actually open it.
+  const canViewReports = canAccessScreen(
+    "reports/daily-report",
+    user?.role,
+    user?.extra_pages || [],
+  );
+
   const {
     total: bTotal,
     pending: bPending,
@@ -1476,23 +1485,36 @@ export default function DashboardScreen() {
   const avgOrderValue =
     bTotal > 0 ? Math.round(Number(data?.total_revenue ?? 0) / bTotal) : 0;
 
-  // Real Avg. Order Value trend for the Insights sparkline: average order value
-  // (revenue / count) per month from the charts endpoint, last 8 months,
-  // normalised to bar heights. No dummy data — empty when there's nothing yet.
-  const avgValueSeries = (chartData?.monthly_sales || [])
-    .map((m) => (Number(m.count) > 0 ? Number(m.revenue) / Number(m.count) : 0))
+  // Order VOLUME trend for the Insights sparkline: how many orders were placed
+  // per month (last 8 months) from the charts endpoint, normalised to bar
+  // heights. Deliberately a count, not money — the Insights card shows activity
+  // trend without exposing revenue figures. No dummy data: empty until real
+  // months exist.
+  const volumeSeries = (chartData?.monthly_sales || [])
+    .map((m) => Number(m.count) || 0)
     .slice(-8);
-  const avgValueMax = Math.max(...avgValueSeries, 1);
-  const sparkHeights = avgValueSeries.map((v) =>
-    Math.max(6, Math.round((v / avgValueMax) * 22)),
+  const volumeMax = Math.max(...volumeSeries, 1);
+  const sparkMaxHeight = ms(40);
+  // Insights cards are a 2-up grid inside a padded card: screen − card margins
+  // (16*2) − card padding (16*2) − grid gap (12), halved, − box padding (12*2).
+  const insightChartWidth = Math.max(
+    ms(70),
+    (SCREEN_WIDTH - sp(16) * 2 - sp(16) * 2 - sp(12)) / 2 - sp(12) * 2,
   );
-  // Month-over-month change in avg order value (real), used as the trend chip.
-  const avgValueTrend =
-    avgValueSeries.length >= 2 && avgValueSeries[avgValueSeries.length - 2] > 0
+  // Points for the Insights trend chart. Tapping a point reveals that month's
+  // order count, so the trend stays readable without printing figures on the
+  // card itself.
+  // Value only — no `label`, otherwise gifted-charts renders an x-axis caption
+  // per point and the month keys ("2026-07") truncate to unreadable "2…" text.
+  // The card is a trend line; the month/count is revealed by touching a point.
+  const volumePoints = volumeSeries.map((v) => ({ value: v }));
+  // Month-over-month change in order count (real), used as the trend chip.
+  const volumeTrend =
+    volumeSeries.length >= 2 && volumeSeries[volumeSeries.length - 2] > 0
       ? Math.round(
-          ((avgValueSeries[avgValueSeries.length - 1] -
-            avgValueSeries[avgValueSeries.length - 2]) /
-            avgValueSeries[avgValueSeries.length - 2]) *
+          ((volumeSeries[volumeSeries.length - 1] -
+            volumeSeries[volumeSeries.length - 2]) /
+            volumeSeries[volumeSeries.length - 2]) *
             100,
         )
       : null;
@@ -1597,11 +1619,9 @@ export default function DashboardScreen() {
         >
           <View style={bStyles.heroDecor} />
           <View style={bStyles.heroTopRow}>
-            <View style={bStyles.heroAvatar}>
-              <Text style={bStyles.heroAvatarText}>{initial}</Text>
-              <View style={bStyles.heroAvatarDot} />
-            </View>
-            <View style={{ flex: 1, marginLeft: 14 }}>
+            {/* Avatar removed: it only repeated the name's first letter while
+                taking width the greeting, name and chips needed. */}
+            <View style={{ flex: 1, minWidth: 0 }}>
               <Text style={bStyles.heroGreeting}>{greeting},</Text>
               <Text style={bStyles.heroName} numberOfLines={1}>
                 {displayName}! 👋
@@ -1631,26 +1651,38 @@ export default function DashboardScreen() {
 
           <View style={bStyles.heroStatsRow}>
             <View style={bStyles.heroStat}>
-              <Ionicons name="calendar-outline" size={16} color="rgba(255,255,255,0.85)" />
-              <View style={{ marginLeft: 8 }}>
-                <Text style={bStyles.heroStatLabel}>Member Since</Text>
-                <Text style={bStyles.heroStatValue}>{memberSince}</Text>
+              <Ionicons name="calendar-outline" size={ms(16)} color="rgba(255,255,255,0.85)" />
+              <View style={bStyles.heroStatTextWrap}>
+                <Text style={bStyles.heroStatLabel} numberOfLines={1}>
+                  Member Since
+                </Text>
+                <Text style={bStyles.heroStatValue} numberOfLines={1} adjustsFontSizeToFit>
+                  {memberSince}
+                </Text>
               </View>
             </View>
             <View style={bStyles.heroStatDivider} />
             <View style={bStyles.heroStat}>
-              <Ionicons name="document-text-outline" size={16} color="rgba(255,255,255,0.85)" />
-              <View style={{ marginLeft: 8 }}>
-                <Text style={bStyles.heroStatLabel}>Total Orders</Text>
-                <Text style={bStyles.heroStatValue}>{bTotal}</Text>
+              <Ionicons name="document-text-outline" size={ms(16)} color="rgba(255,255,255,0.85)" />
+              <View style={bStyles.heroStatTextWrap}>
+                <Text style={bStyles.heroStatLabel} numberOfLines={1}>
+                  Total Orders
+                </Text>
+                <Text style={bStyles.heroStatValue} numberOfLines={1}>
+                  {bTotal}
+                </Text>
               </View>
             </View>
             <View style={bStyles.heroStatDivider} />
             <View style={bStyles.heroStat}>
-              <Ionicons name="ribbon-outline" size={16} color="rgba(255,255,255,0.85)" />
-              <View style={{ marginLeft: 8 }}>
-                <Text style={bStyles.heroStatLabel}>Approval Rate</Text>
-                <Text style={bStyles.heroStatValue}>{approvalRate}%</Text>
+              <Ionicons name="ribbon-outline" size={ms(16)} color="rgba(255,255,255,0.85)" />
+              <View style={bStyles.heroStatTextWrap}>
+                <Text style={bStyles.heroStatLabel} numberOfLines={1}>
+                  Approval Rate
+                </Text>
+                <Text style={bStyles.heroStatValue} numberOfLines={1}>
+                  {approvalRate}%
+                </Text>
               </View>
             </View>
           </View>
@@ -1713,66 +1745,118 @@ export default function DashboardScreen() {
         <View style={bStyles.card}>
           <View style={bStyles.cardHeaderRow}>
             <Text style={bStyles.cardTitle}>Insights</Text>
-            <TouchableOpacity
-              style={bStyles.linkRow}
-              onPress={() => router.push("/reports/daily-report" as any)}
-            >
-              <Text style={bStyles.linkText}>View full report</Text>
-              <Ionicons name="chevron-forward" size={16} color={COLORS.primary} />
-            </TouchableOpacity>
+            {/* Only offered when the user can actually open Reports — otherwise
+                the link led to a page they'd be blocked from, and the Insights
+                cards simply stand on their own. */}
+            {canViewReports && (
+              <TouchableOpacity
+                style={bStyles.linkRow}
+                onPress={() => router.push("/reports/daily-report" as any)}
+              >
+                <Text style={bStyles.linkText}>View full report</Text>
+                <Ionicons name="chevron-forward" size={ms(16)} color={COLORS.primary} />
+              </TouchableOpacity>
+            )}
           </View>
           <View style={bStyles.insightsRow}>
+            {/* Approval Rate keeps its % — a rate isn't a sensitive figure and
+                the donut is meaningless without it. Order Volume replaces the
+                old ₹ Avg. Order Value: it shows activity trend as a COUNT, so
+                no revenue is exposed on the home screen. */}
             <View style={bStyles.insightBox}>
               <Text style={bStyles.insightLabel}>Approval Rate</Text>
               <View style={bStyles.insightBody}>
                 <Text style={bStyles.insightValue}>{approvalRate}%</Text>
                 <PieChart
                   donut
-                  radius={30}
-                  innerRadius={20}
+                  radius={ms(30)}
+                  innerRadius={ms(20)}
                   innerCircleColor="#fff"
                   data={[
                     { value: Math.max(approvalRate, 0.001), color: "#16A34A" },
                     { value: Math.max(100 - approvalRate, 0.001), color: "#E5E7EB" },
                   ]}
                   centerLabelComponent={() => (
-                    <Ionicons name="checkmark" size={16} color="#16A34A" />
+                    <Ionicons name="checkmark" size={ms(16)} color="#16A34A" />
                   )}
                 />
               </View>
             </View>
             <View style={bStyles.insightBox}>
-              <Text style={bStyles.insightLabel}>Avg. Order Value</Text>
-              <View style={bStyles.insightBody}>
-                <View style={{ flex: 1 }}>
-                  <Text style={bStyles.insightValue}>
-                    ₹{avgOrderValue.toLocaleString("en-IN")}
-                  </Text>
-                  {avgValueTrend !== null && (
-                    <View style={bStyles.trendChip}>
-                      <Ionicons
-                        name={avgValueTrend >= 0 ? "arrow-up" : "arrow-down"}
-                        size={11}
-                        color={avgValueTrend >= 0 ? "#16A34A" : "#DC2626"}
-                      />
-                      <Text
-                        style={[
-                          bStyles.trendChipText,
-                          { color: avgValueTrend >= 0 ? "#16A34A" : "#DC2626" },
-                        ]}
-                      >
-                        {Math.abs(avgValueTrend)}% vs last month
-                      </Text>
-                    </View>
-                  )}
-                </View>
-                {sparkHeights.length > 0 ? (
-                  <View style={bStyles.sparkline}>
-                    {sparkHeights.map((h, i) => (
-                      <View key={i} style={[bStyles.sparkBar, { height: h }]} />
-                    ))}
+              <Text style={bStyles.insightLabel}>Order Volume</Text>
+              <View style={bStyles.insightChartOnly}>
+                {volumePoints.length > 1 ? (
+                  <LineChart
+                    data={volumePoints}
+                    height={sparkMaxHeight}
+                    width={insightChartWidth}
+                    initialSpacing={ms(6)}
+                    endSpacing={ms(6)}
+                    spacing={
+                      (insightChartWidth - ms(12)) /
+                      Math.max(volumePoints.length - 1, 1)
+                    }
+                    curved
+                    areaChart
+                    startFillColor="#8B5CF6"
+                    endFillColor="#8B5CF6"
+                    startOpacity={0.28}
+                    endOpacity={0.02}
+                    color="#8B5CF6"
+                    thickness={2}
+                    dataPointsColor="#8B5CF6"
+                    dataPointsRadius={ms(2.5)}
+                    hideRules
+                    hideYAxisText
+                    hideAxesAndRules
+                    xAxisLabelsHeight={0}
+                    yAxisThickness={0}
+                    xAxisThickness={0}
+                    adjustToWidth
+                    disableScroll
+                    maxValue={volumeMax * 1.15}
+                    pointerConfig={{
+                      pointerStripHeight: sparkMaxHeight,
+                      pointerStripColor: "#C4B5FD",
+                      pointerStripWidth: 1,
+                      pointerColor: "#8B5CF6",
+                      radius: ms(3.5),
+                      pointerLabelWidth: ms(78),
+                      pointerLabelHeight: ms(30),
+                      activatePointersOnLongPress: false,
+                      autoAdjustPointerLabelPosition: true,
+                      pointerLabelComponent: (items: any[]) => (
+                        <View style={bStyles.pointerLabel}>
+                          <Text style={bStyles.pointerLabelText}>
+                            {items?.[0]?.value ?? 0} orders
+                          </Text>
+                        </View>
+                      ),
+                    }}
+                  />
+                ) : (
+                  <Text style={bStyles.insightMuted}>No trend yet</Text>
+                )}
+                {volumeTrend !== null ? (
+                  <View style={bStyles.trendChip}>
+                    <Ionicons
+                      name={volumeTrend >= 0 ? "arrow-up" : "arrow-down"}
+                      size={ms(11)}
+                      color={volumeTrend >= 0 ? "#16A34A" : "#DC2626"}
+                    />
+                    <Text
+                      style={[
+                        bStyles.trendChipText,
+                        { color: volumeTrend >= 0 ? "#16A34A" : "#DC2626" },
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {Math.abs(volumeTrend)}% vs last month
+                    </Text>
                   </View>
-                ) : null}
+                ) : (
+                  <Text style={bStyles.insightMuted}>Last 8 months</Text>
+                )}
               </View>
             </View>
           </View>
@@ -1796,7 +1880,7 @@ export default function DashboardScreen() {
                 ? { label: "Rejected", color: "#DC2626", bg: "#FEF2F2", icon: "close-circle-outline" }
                 : s.includes("approv") || s.includes("complete") || s.includes("accept")
                   ? { label: "Approved", color: "#16A34A", bg: "#ECFDF3", icon: "checkmark-circle-outline" }
-                  : { label: "Pending Approval", color: "#EA8C00", bg: "#FFF7ED", icon: "time-outline" };
+                  : { label: "Pending", color: "#EA8C00", bg: "#FFF7ED", icon: "time-outline" };
               return (
                 <TouchableOpacity
                   key={o.id}
@@ -1809,8 +1893,11 @@ export default function DashboardScreen() {
                     })
                   }
                 >
-                  <View style={bStyles.recentIcon}>
-                    <Ionicons name="document-text-outline" size={18} color={COLORS.primary} />
+                  {/* The leading icon now carries the status (colour + glyph),
+                      so the separate status tag is redundant — dropping it
+                      gives the order number and party room to breathe. */}
+                  <View style={[bStyles.recentIcon, { backgroundColor: pill.bg }]}>
+                    <Ionicons name={pill.icon as any} size={ms(18)} color={pill.color} />
                   </View>
                   <View style={bStyles.recentTextWrap}>
                     <Text style={bStyles.recentNumber} numberOfLines={1}>
@@ -1820,16 +1907,10 @@ export default function DashboardScreen() {
                       {o.card_name}
                     </Text>
                   </View>
-                  <View style={[bStyles.recentPill, { backgroundColor: pill.bg }]}>
-                    <Ionicons name={pill.icon as any} size={12} color={pill.color} />
-                    <Text style={[bStyles.recentPillText, { color: pill.color }]} numberOfLines={1}>
-                      {pill.label}
-                    </Text>
-                  </View>
-                  <Text style={bStyles.recentAmount}>
+                  <Text style={bStyles.recentAmount} numberOfLines={1}>
                     ₹{Number(o.total_amount || 0).toLocaleString("en-IN")}
                   </Text>
-                  <Ionicons name="chevron-forward" size={16} color="#9CA3AF" />
+                  <Ionicons name="chevron-forward" size={ms(16)} color="#9CA3AF" />
                 </TouchableOpacity>
               );
             })
@@ -3195,11 +3276,11 @@ const bStyles = StyleSheet.create({
 
   // Hero
   hero: {
-    marginHorizontal: 16,
-    marginTop: 14,
+    marginHorizontal: sp(16),
+    marginTop: sp(14),
     marginBottom: 6,
-    borderRadius: 22,
-    padding: 18,
+    borderRadius: sp(22),
+    padding: sp(18),
     overflow: "hidden",
     position: "relative",
     shadowColor: "#1E3A8A",
@@ -3221,39 +3302,12 @@ const bStyles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "flex-start",
   },
-  heroAvatar: {
-    width: 58,
-    height: 58,
-    borderRadius: 29,
-    backgroundColor: "rgba(255,255,255,0.22)",
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 2,
-    borderColor: "rgba(255,255,255,0.4)",
-    position: "relative",
-  },
-  heroAvatarText: {
-    fontSize: 24,
-    fontWeight: "800",
-    color: "#fff",
-  },
-  heroAvatarDot: {
-    position: "absolute",
-    bottom: 0,
-    right: 2,
-    width: 14,
-    height: 14,
-    borderRadius: 7,
-    backgroundColor: "#22C55E",
-    borderWidth: 2,
-    borderColor: "#1E3A8A",
-  },
   heroGreeting: {
-    fontSize: 14,
+    fontSize: fs(14),
     color: "rgba(255,255,255,0.88)",
   },
   heroName: {
-    fontSize: 21,
+    fontSize: fs(21),
     fontWeight: "800",
     color: "#fff",
     marginTop: 1,
@@ -3272,15 +3326,17 @@ const bStyles = StyleSheet.create({
     gap: 5,
     alignSelf: "flex-start",
     maxWidth: "100%",
+    flexShrink: 1,
     backgroundColor: "rgba(255,255,255,0.16)",
-    borderRadius: 14,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
+    borderRadius: sp(14),
+    paddingHorizontal: sp(10),
+    paddingVertical: sp(5),
   },
   heroChipText: {
-    fontSize: 12,
+    fontSize: fs(12),
     fontWeight: "600",
     color: "#fff",
+    flexShrink: 1,
   },
   heroLogoWrap: {
     backgroundColor: "transparent",
@@ -3292,28 +3348,36 @@ const bStyles = StyleSheet.create({
   heroStatsRow: {
     flexDirection: "row",
     alignItems: "center",
-    marginTop: 16,
-    paddingTop: 14,
+    marginTop: sp(16),
+    paddingTop: sp(14),
     borderTopWidth: 1,
     borderTopColor: "rgba(255,255,255,0.2)",
   },
+  // Three stats share the row. minWidth:0 lets each shrink instead of pushing
+  // its neighbour off-screen on narrow phones.
   heroStat: {
     flex: 1,
+    minWidth: 0,
     flexDirection: "row",
     alignItems: "center",
   },
+  heroStatTextWrap: {
+    flex: 1,
+    minWidth: 0,
+    marginLeft: sp(8),
+  },
   heroStatDivider: {
     width: 1,
-    height: 30,
+    height: ms(30),
     backgroundColor: "rgba(255,255,255,0.2)",
-    marginHorizontal: 6,
+    marginHorizontal: sp(6),
   },
   heroStatLabel: {
-    fontSize: 10.5,
+    fontSize: fs(10.5),
     color: "rgba(255,255,255,0.8)",
   },
   heroStatValue: {
-    fontSize: 14,
+    fontSize: fs(14),
     fontWeight: "800",
     color: "#fff",
     marginTop: 1,
@@ -3325,46 +3389,47 @@ const bStyles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 16,
-    marginTop: 14,
-    marginBottom: 10,
-    gap: 10,
+    marginTop: sp(14),
+    marginBottom: sp(10),
+    gap: sp(10),
   },
   sectionTitle: {
-    fontSize: 18,
+    fontSize: fs(18),
     fontWeight: "800",
     color: "#0F172A",
+    flexShrink: 1,
   },
 
   // Activity grid
   activityGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
-    paddingHorizontal: 16,
-    gap: 10,
+    paddingHorizontal: sp(16),
+    gap: sp(10),
     justifyContent: "space-between",
   },
   // Compact status boxes (Total / Pending / Approved / Rejected).
   activityCard: {
     width: "48%",
-    borderRadius: 14,
-    padding: 11,
+    borderRadius: sp(14),
+    padding: sp(11),
     borderWidth: 1,
   },
   activityIcon: {
-    width: 32,
-    height: 32,
-    borderRadius: 10,
+    width: ms(32),
+    height: ms(32),
+    borderRadius: sp(10),
     alignItems: "center",
     justifyContent: "center",
-    marginBottom: 7,
+    marginBottom: sp(7),
   },
   activityValue: {
-    fontSize: 21,
+    fontSize: fs(21),
     fontWeight: "800",
     color: "#0F172A",
   },
   activityLabel: {
-    fontSize: 12,
+    fontSize: fs(12),
     color: "#64748B",
     marginTop: 1,
     fontWeight: "500",
@@ -3396,10 +3461,10 @@ const bStyles = StyleSheet.create({
   // Generic card
   card: {
     backgroundColor: "#fff",
-    marginHorizontal: 16,
-    marginTop: 16,
-    borderRadius: 18,
-    padding: 16,
+    marginHorizontal: sp(16),
+    marginTop: sp(16),
+    borderRadius: sp(18),
+    padding: sp(16),
     borderWidth: 1,
     borderColor: "#EEF1F6",
     shadowColor: "#1E3A5F",
@@ -3412,20 +3477,23 @@ const bStyles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginBottom: 14,
+    marginBottom: sp(14),
+    gap: sp(8),
   },
   cardTitle: {
-    fontSize: 17,
+    fontSize: fs(17),
     fontWeight: "800",
     color: "#0F172A",
+    flexShrink: 1,
   },
   linkRow: {
     flexDirection: "row",
     alignItems: "center",
     gap: 2,
+    flexShrink: 0,
   },
   linkText: {
-    fontSize: 13,
+    fontSize: fs(13),
     fontWeight: "700",
     color: COLORS.primary,
   },
@@ -3433,51 +3501,70 @@ const bStyles = StyleSheet.create({
   // Insights
   insightsRow: {
     flexDirection: "row",
-    gap: 12,
+    gap: sp(12),
   },
   insightBox: {
     flex: 1,
     borderWidth: 1,
     borderColor: "#EEF1F6",
-    borderRadius: 14,
-    padding: 12,
+    borderRadius: sp(14),
+    padding: sp(12),
   },
   insightLabel: {
-    fontSize: 12,
+    fontSize: fs(12),
     color: "#64748B",
     fontWeight: "600",
   },
+  // Value + chart side by side (Approval Rate).
   insightBody: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginTop: 10,
+    marginTop: sp(10),
+    minHeight: ms(72),
   },
   insightValue: {
-    fontSize: 20,
+    fontSize: fs(20),
     fontWeight: "800",
     color: "#0F172A",
     flexShrink: 1,
   },
-  sparkline: {
-    flexDirection: "row",
-    alignItems: "flex-end",
-    gap: 3,
-    height: 22,
+  // Trend-only body: the chart is the content, so it is centred rather than
+  // sitting beside a number.
+  insightChartOnly: {
+    marginTop: sp(10),
+    minHeight: ms(72),
+    alignItems: "center",
+    justifyContent: "center",
+    gap: sp(6),
   },
-  sparkBar: {
-    width: 4,
-    borderRadius: 2,
-    backgroundColor: "#8B5CF6",
+  insightMuted: {
+    fontSize: fs(12),
+    color: "#94A3B8",
+    fontWeight: "600",
+  },
+  // Tooltip shown when a point on the Order Volume trend is touched.
+  pointerLabel: {
+    backgroundColor: "#0F172A",
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  pointerLabelText: {
+    color: "#fff",
+    fontSize: fs(11),
+    fontWeight: "700",
   },
   trendChip: {
     flexDirection: "row",
     alignItems: "center",
     gap: 2,
-    marginTop: 4,
+    marginTop: sp(4),
   },
   trendChipText: {
-    fontSize: 10.5,
+    fontSize: fs(10.5),
     fontWeight: "700",
   },
 
@@ -3485,18 +3572,18 @@ const bStyles = StyleSheet.create({
   recentRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
-    paddingVertical: 11,
+    gap: sp(10),
+    paddingVertical: sp(11),
   },
   recentRowBordered: {
     borderTopWidth: 1,
     borderTopColor: "#F1F5F9",
   },
+  // Now the status indicator: background colour is applied inline per status.
   recentIcon: {
-    width: 38,
-    height: 38,
-    borderRadius: 10,
-    backgroundColor: COLORS.primaryLight,
+    width: ms(38),
+    height: ms(38),
+    borderRadius: sp(10),
     alignItems: "center",
     justifyContent: "center",
   },
@@ -3505,32 +3592,20 @@ const bStyles = StyleSheet.create({
     minWidth: 0,
   },
   recentNumber: {
-    fontSize: 13.5,
+    fontSize: fs(13.5),
     fontWeight: "700",
     color: "#0F172A",
   },
   recentParty: {
-    fontSize: 12,
+    fontSize: fs(12),
     color: "#64748B",
     marginTop: 2,
   },
-  recentPill: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
-    maxWidth: 128,
-  },
-  recentPillText: {
-    fontSize: 10.5,
-    fontWeight: "700",
-  },
   recentAmount: {
-    fontSize: 13.5,
+    fontSize: fs(13.5),
     fontWeight: "800",
     color: COLORS.primary,
+    flexShrink: 0,
   },
   emptyText: {
     fontSize: 13,

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   View,
   Text,
@@ -15,9 +15,9 @@ import {
   UIManager,
   TextInput,
 } from "react-native";
-import { useLocalSearchParams, router } from "expo-router";
+import { useLocalSearchParams, router, useFocusEffect } from "expo-router";
 import { useNavigation } from "@react-navigation/native";
-import { Ionicons } from "@expo/vector-icons";
+import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Animated, {
@@ -33,6 +33,7 @@ import { orderService, productService } from "@/src/services/order.service";
 import { useAuth } from "@/src/context/AuthContext";
 import useAndroidBackOverride from "@/src/hooks/useAndroidBackOverride";
 import { refreshOrderData } from "@/src/cache";
+import { fs, ms, sp } from "@/src/utils/responsive";
 
 if (
   Platform.OS === "android" &&
@@ -108,6 +109,26 @@ const AUTO_REMARK_PHRASES = new Set([
   "need approval",
   "rate approval",
 ]);
+
+// Items are grouped by the backend's `variety_type` (PREMIUM / COMMODITY /
+// OTHERS) — the same classification the web Rate Approver screen uses, so both
+// apps bucket an order identically. Anything unrecognised falls into OTHERS so
+// an item can never be filtered out of view entirely.
+const VARIETY_ORDER = ["PREMIUM", "COMMODITY", "OTHERS"] as const;
+type VarietyKey = (typeof VARIETY_ORDER)[number];
+
+const VARIETY_LABEL: Record<VarietyKey, string> = {
+  PREMIUM: "Premium",
+  COMMODITY: "Commodity",
+  OTHERS: "Others",
+};
+
+const varietyKeyOf = (item: any): VarietyKey => {
+  const key = String(item?.variety_type || "").toUpperCase();
+  return (VARIETY_ORDER as readonly string[]).includes(key)
+    ? (key as VarietyKey)
+    : "OTHERS";
+};
 
 const isRealUserRemark = (remark: unknown): boolean => {
   const text = String(remark ?? "").trim();
@@ -305,7 +326,14 @@ export default function OrderDetailsScreen() {
           }
           style={{ marginRight: 16 }}
         >
-          <Ionicons name="create-outline" size={24} color={COLORS.primary} />
+          {/* Page-with-pencil: says "edit THIS document", which a bare pencil
+              (or the compose glyph) doesn't. Ionicons has no equivalent, so
+              this one comes from MaterialCommunityIcons. */}
+          <MaterialCommunityIcons
+            name="file-document-edit-outline"
+            size={24}
+            color={COLORS.primary}
+          />
         </TouchableOpacity>
       ),
     });
@@ -333,10 +361,15 @@ export default function OrderDetailsScreen() {
         const logs = Array.isArray(logsRes)
           ? logsRes
           : logsRes?.data || logsRes?.results || [];
-        // Only real, user-typed remarks — skip the auto "Approved"/"Rejected"
-        // action text so the box shows comments, not status changes.
+        // Only remarks a PERSON actually typed. Two filters:
+        //  • isRealUserRemark  – drops auto action text ("Approved", …)
+        //  • performed_by_name – drops system-authored rows (e.g. the generated
+        //    rate-approval reason listing price-list vs basic rates). Those have
+        //    no performer and rendered as "System", which means nothing to a user.
         const stageRemarks = (Array.isArray(logs) ? logs : []).filter(
-          (log: any) => isRealUserRemark(log?.remarks),
+          (log: any) =>
+            isRealUserRemark(log?.remarks) &&
+            String(log?.performed_by_name ?? "").trim().length > 0,
         );
 
         const creationComment = String(orderData?.remarks ?? "").trim();
@@ -387,17 +420,66 @@ export default function OrderDetailsScreen() {
     }
   }, []);
 
-  useEffect(() => {
-    const parsedOrderId = Number(Array.isArray(orderId) ? orderId[0] : orderId);
-    if (!parsedOrderId) {
-      setOrder(null);
-      setLoading(false);
-      return;
-    }
-    fetchOrder(parsedOrderId);
-  }, [fetchOrder, orderId]);
+  // Re-fetch whenever the screen gains focus, not only when orderId changes.
+  // This is what makes an edit auto-reflect: after "Update Order" navigates
+  // here (with the SAME orderId), focus fires and we re-read the order. The
+  // create screen invalidated this order's cache first, so the read is fresh.
+  // A silent refresh (isRefresh=true) is used once the order is already loaded,
+  // so returning to the screen updates in place instead of flashing a loader.
+  const loadedOrderIdRef = useRef<number | null>(null);
+  useFocusEffect(
+    useCallback(() => {
+      const parsedOrderId = Number(
+        Array.isArray(orderId) ? orderId[0] : orderId,
+      );
+      if (!parsedOrderId) {
+        setOrder(null);
+        setLoading(false);
+        return;
+      }
+      const silent = loadedOrderIdRef.current === parsedOrderId;
+      loadedOrderIdRef.current = parsedOrderId;
+      fetchOrder(parsedOrderId, silent);
+    }, [fetchOrder, orderId]),
+  );
 
   const itemsList = order?.items || order?.order_items || order?.orderItems || [];
+
+  // Bucket the order's items by variety, keeping Premium → Commodity → Others
+  // order. Only buckets that actually have items become tabs.
+  const varietyGroups = useMemo(() => {
+    const buckets = new Map<VarietyKey, any[]>();
+    (itemsList as any[]).forEach((item) => {
+      const key = varietyKeyOf(item);
+      if (!buckets.has(key)) buckets.set(key, []);
+      buckets.get(key)!.push(item);
+    });
+    return VARIETY_ORDER.filter((key) => buckets.has(key)).map((key) => ({
+      key,
+      label: VARIETY_LABEL[key],
+      items: buckets.get(key)!,
+    }));
+  }, [itemsList]);
+
+  const [activeVariety, setActiveVariety] = useState<VarietyKey | null>(null);
+
+  // Default to the first available group (Premium wins by VARIETY_ORDER), and
+  // re-point if the current tab disappears when a different order loads.
+  useEffect(() => {
+    if (varietyGroups.length === 0) {
+      setActiveVariety(null);
+      return;
+    }
+    setActiveVariety((current) =>
+      current && varietyGroups.some((g) => g.key === current)
+        ? current
+        : varietyGroups[0].key,
+    );
+  }, [varietyGroups]);
+
+  const visibleItems =
+    varietyGroups.find((g) => g.key === activeVariety)?.items ?? itemsList;
+
   const parsedOrderId = Number(Array.isArray(orderId) ? orderId[0] : orderId);
   const subtotalAmount = itemsList.reduce(
     (sum: number, item: any) => sum + toNumber(item?.total),
@@ -585,7 +667,7 @@ export default function OrderDetailsScreen() {
                       numberOfLines={1}
                     >
                       {canActOnOrder
-                        ? "Pending Approval"
+                        ? "Pending"
                         : order.status_name || order.status_display || order.status || "Order"}
                     </Text>
                   </View>
@@ -605,23 +687,9 @@ export default function OrderDetailsScreen() {
                   )}
                 </View>
 
-                {/* Creator's edit window has closed — order is now read-only. */}
-                {isCreator && !awaitingApprover && (
-                  <View style={styles.readOnlyChip}>
-                    <Ionicons name="lock-closed" size={12} color="rgba(255,255,255,0.92)" />
-                    <Text style={styles.readOnlyChipText}>
-                      View only · locked after approval action
-                    </Text>
-                  </View>
-                )}
-                {canCreatorEdit && (
-                  <View style={styles.readOnlyChip}>
-                    <Ionicons name="create-outline" size={12} color="rgba(255,255,255,0.92)" />
-                    <Text style={styles.readOnlyChipText}>
-                      Editable until the approver acts
-                    </Text>
-                  </View>
-                )}
+                {/* No "editable"/"locked" chips: the header's edit action is
+                    itself the signal — it is shown only while the order can be
+                    edited and hidden once an approver has acted. */}
               </View>
             </LinearGradient>
 
@@ -715,8 +783,53 @@ export default function OrderDetailsScreen() {
               <SectionTitle
                 icon="cube-outline"
                 title={`Items (${order.items_count || itemsList.length})`}
+                right={
+                  varietyGroups.length > 0 ? (
+                    <View style={styles.varietyTabs}>
+                      {varietyGroups.map((group) => {
+                        const active = group.key === activeVariety;
+                        return (
+                          <TouchableOpacity
+                            key={group.key}
+                            activeOpacity={0.8}
+                            onPress={() => setActiveVariety(group.key)}
+                            style={[
+                              styles.varietyTab,
+                              active && styles.varietyTabActive,
+                            ]}
+                          >
+                            <Text
+                              style={[
+                                styles.varietyTabText,
+                                active && styles.varietyTabTextActive,
+                              ]}
+                              numberOfLines={1}
+                            >
+                              {group.label}
+                            </Text>
+                            <View
+                              style={[
+                                styles.varietyCount,
+                                active && styles.varietyCountActive,
+                              ]}
+                            >
+                              <Text
+                                style={[
+                                  styles.varietyCountText,
+                                  active && styles.varietyCountTextActive,
+                                ]}
+                              >
+                                {group.items.length}
+                              </Text>
+                            </View>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+                  ) : undefined
+                }
               />
-              {itemsList.map((item: any, index: number) => {
+              {visibleItems.map((item: any, index: number) => {
                 const bp = parseFloat(item.price_list_basic) || 0;
                 const mp = parseFloat(item.basic_price) || 0;
                 const isFlagged = mp > 0 && mp < bp;
@@ -755,12 +868,12 @@ export default function OrderDetailsScreen() {
                           <Text style={styles.itemHeaderCode}>{item.item_code}</Text>
                         )}
                       </View>
-                      {isFlagged && (
-                        <Ionicons name="alert-circle" size={16} color={COLORS.error} style={{ marginRight: 6 }} />
-                      )}
+                      {/* No warning icon: a rate below the price list is already
+                          shown by the red Basic Price below, so the icon only
+                          added noise. */}
                       <Ionicons
                         name={expanded ? "chevron-up" : "chevron-down"}
-                        size={20}
+                        size={ms(20)}
                         color={COLORS.primary}
                       />
                     </TouchableOpacity>
@@ -888,8 +1001,10 @@ export default function OrderDetailsScreen() {
 
 const SectionTitle = ({ icon, title, right }: any) => (
   <View style={styles.sectionTitleRow}>
-    <Ionicons name={icon} size={18} color={COLORS.primary} />
-    <Text style={styles.sectionTitle}>{title}</Text>
+    <Ionicons name={icon} size={ms(18)} color={COLORS.primary} />
+    <Text style={styles.sectionTitle} numberOfLines={1}>
+      {title}
+    </Text>
     <View style={styles.sectionTitleSpacer} />
     {right}
   </View>
@@ -1044,8 +1159,9 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   infoLabel: {
-    width: 110,
-    fontSize: 13,
+    width: ms(110),
+    flexShrink: 0,
+    fontSize: fs(13),
     color: COLORS.black,
   },
   infoColon: {
@@ -1054,7 +1170,8 @@ const styles = StyleSheet.create({
   },
   infoValue: {
     flex: 1,
-    fontSize: 14,
+    minWidth: 0,
+    fontSize: fs(14),
     fontWeight: "600",
     color: COLORS.text,
   },
@@ -1091,22 +1208,6 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-  },
-  readOnlyChip: {
-    flexDirection: "row",
-    alignItems: "center",
-    alignSelf: "flex-start",
-    gap: 5,
-    marginTop: 10,
-    backgroundColor: "rgba(255,255,255,0.16)",
-    borderRadius: 10,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-  },
-  readOnlyChipText: {
-    color: "rgba(255,255,255,0.95)",
-    fontSize: 11,
-    fontWeight: "700",
   },
   orderNo: {
     flex: 1,
@@ -1234,19 +1335,70 @@ const styles = StyleSheet.create({
     paddingVertical: 9,
     marginLeft: 42,
   },
+  // Premium / Commodity tabs sit on this row, so it must be allowed to shrink.
   sectionTitleRow: {
     flexDirection: "row",
     alignItems: "center",
-    marginBottom: 14,
-    gap: 6,
+    marginBottom: sp(14),
+    gap: sp(6),
+  },
+  varietyTabs: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: sp(6),
+    flexShrink: 1,
+  },
+  varietyTab: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: sp(8),
+    paddingVertical: sp(5),
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: "#E5E9F0",
+    backgroundColor: "#F6F8FC",
+  },
+  varietyTabActive: {
+    backgroundColor: COLORS.primary,
+    borderColor: COLORS.primary,
+  },
+  varietyTabText: {
+    fontSize: fs(11),
+    fontWeight: "700",
+    color: COLORS.textSecondary,
+  },
+  varietyTabTextActive: {
+    color: "#fff",
+  },
+  varietyCount: {
+    minWidth: ms(16),
+    paddingHorizontal: 4,
+    borderRadius: 8,
+    backgroundColor: "#E5E9F0",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  varietyCountActive: {
+    backgroundColor: "rgba(255,255,255,0.28)",
+  },
+  varietyCountText: {
+    fontSize: fs(10),
+    fontWeight: "800",
+    color: COLORS.textSecondary,
+  },
+  varietyCountTextActive: {
+    color: "#fff",
   },
   sectionTitle: {
-    fontSize: 16,
+    fontSize: fs(16),
     fontWeight: "700",
     color: COLORS.text,
+    flexShrink: 1,
   },
   sectionTitleSpacer: {
     flex: 1,
+    minWidth: sp(6),
   },
   sectionTitleCode: {
     fontSize: 13,
@@ -1279,9 +1431,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
   },
   itemIndexBadge: {
-    width: 26,
-    height: 26,
+    width: ms(26),
+    height: ms(26),
     borderRadius: 8,
+    flexShrink: 0,
     backgroundColor: COLORS.primaryLight,
     alignItems: "center",
     justifyContent: "center",
@@ -1292,12 +1445,12 @@ const styles = StyleSheet.create({
     color: COLORS.primary,
   },
   itemHeaderName: {
-    fontSize: 14,
+    fontSize: fs(14),
     fontWeight: "700",
     color: COLORS.text,
   },
   itemHeaderCode: {
-    fontSize: 12,
+    fontSize: fs(12),
     color: COLORS.textSecondary,
     marginTop: 2,
   },
@@ -1324,12 +1477,12 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   gridLabel: {
-    fontSize: 12,
+    fontSize: fs(12),
     color: COLORS.textSecondary,
     marginBottom: 3,
   },
   gridValue: {
-    fontSize: 14,
+    fontSize: fs(14),
     fontWeight: "600",
     color: COLORS.text,
   },

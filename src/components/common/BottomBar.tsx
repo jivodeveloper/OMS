@@ -5,19 +5,13 @@ import { usePathname, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "@/src/context/AuthContext";
 import { COLORS } from "@/src/constants/theme";
-import { canAccessScreen } from "@/src/constants/pages";
+import { canAccessScreen, resolveOrdersRoute } from "@/src/constants/pages";
 import { useDrawerOpen } from "@/src/utils/drawerState";
 
 type TabKey = "home" | "orders" | "create" | "reports" | "profile";
 
-// Each role's own "orders" destination for the Orders tab. A user can always
-// reach their own orders screen, so this tab is never permission-blocked.
-const ORDERS_BY_ROLE: Record<string, { screen: string; route: string }> = {
-  billing: { screen: "orders/orderlist", route: "/orders/orderlist" },
-  manager: { screen: "orders/ordertracking", route: "/orders/ordertracking" },
-  approver: { screen: "approver/pending_approval", route: "/approver/pending_approval" },
-  auditor: { screen: "orders/auditorapproval", route: "/orders/auditorapproval" },
-};
+// Each role's own "orders" destination now lives in constants/pages.ts, so the
+// Orders tab and the post-create "Go to Orders" action resolve it identically.
 
 /**
  * Shared bottom navigation for every role. The bar looks identical for all
@@ -41,10 +35,9 @@ export default function BottomBar({
   const extraPages = user?.extra_pages || [];
   const [deniedLabel, setDeniedLabel] = useState<string | null>(null);
 
-  const orders = ORDERS_BY_ROLE[role] ?? {
-    screen: "orders/orderlist",
-    route: "/orders/orderlist",
-  };
+  // This user's own orders screen — falls back to one they can actually open
+  // rather than to a role-specific screen they'd be blocked from.
+  const orders = resolveOrdersRoute(role, extraPages);
 
   // Highlight the tab that matches the current route (so the global bar shows
   // the right active tab on every screen). An explicit `active` prop wins.

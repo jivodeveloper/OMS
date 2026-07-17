@@ -21,6 +21,7 @@ import { useAuth } from "@/src/context/AuthContext";
 import { COLORS } from "@/src/constants/theme";
 import { orderService } from "@/src/services/order.service";
 import { storage } from "@/src/utils/storage";
+import { fs, ms, sp } from "@/src/utils/responsive";
 
 /** Per-route accent colour for the icon tile. */
 const ACCENTS: Record<string, string> = {
@@ -183,18 +184,16 @@ export default function CustomDrawer(props: DrawerContentComponentProps) {
           </LinearGradient>
         </View>
 
+        {/* No "Online" pill: a signed-in user is online by definition, and on a
+            narrower drawer it only crowded the name. */}
         <View style={styles.nameRow}>
-          <View style={{ flex: 1 }}>
+          <View style={{ flex: 1, minWidth: 0 }}>
             <Text style={styles.userName} numberOfLines={1}>
               {user?.name || user?.username || "User"}
             </Text>
             <Text style={styles.userRole} numberOfLines={1}>
               {user?.role || "Member"}
             </Text>
-          </View>
-          <View style={styles.onlinePill}>
-            <View style={styles.onlinePillDot} />
-            <Text style={styles.onlinePillText}>Online</Text>
           </View>
         </View>
 
@@ -297,7 +296,9 @@ export default function CustomDrawer(props: DrawerContentComponentProps) {
           <Ionicons name="chevron-forward" size={18} color={COLORS.error} />
         </TouchableOpacity>
 
-        <Text style={styles.version}>Version 1.0.0</Text>
+        {/* App version intentionally not shown here — it was a hardcoded
+            "1.0.0" that drifted from the real build. Profile → App & Device
+            Info reports the actual installed version. */}
       </View>
 
       {/* Custom branded sign-out confirmation (replaces the system Alert). */}
@@ -454,8 +455,8 @@ const styles = StyleSheet.create({
 
   // Header
   header: {
-    paddingBottom: 22,
-    paddingHorizontal: 20,
+    paddingBottom: sp(22),
+    paddingHorizontal: sp(18),
     position: "relative",
     overflow: "hidden",
     borderBottomLeftRadius: 4,
@@ -484,16 +485,16 @@ const styles = StyleSheet.create({
     marginBottom: 14,
   },
   avatar: {
-    width: 68,
-    height: 68,
-    borderRadius: 34,
+    width: ms(60),
+    height: ms(60),
+    borderRadius: ms(30),
     justifyContent: "center",
     alignItems: "center",
     borderWidth: 3,
     borderColor: "rgba(255,255,255,0.55)",
   },
   avatarText: {
-    fontSize: 28,
+    fontSize: fs(26),
     fontWeight: "800",
     color: "#fff",
   },
@@ -513,37 +514,15 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   userName: {
-    fontSize: 22,
+    fontSize: fs(20),
     fontWeight: "800",
     color: "#fff",
   },
   userRole: {
-    fontSize: 14,
+    fontSize: fs(13),
     color: "rgba(255,255,255,0.85)",
     textTransform: "capitalize",
     marginTop: 2,
-  },
-  onlinePill: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    backgroundColor: "rgba(255,255,255,0.16)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.28)",
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 20,
-  },
-  onlinePillDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: "#4ADE80",
-  },
-  onlinePillText: {
-    fontSize: 12,
-    fontWeight: "600",
-    color: "#fff",
   },
   companyBadge: {
     flexDirection: "row",
@@ -559,7 +538,7 @@ const styles = StyleSheet.create({
     borderColor: "rgba(255,255,255,0.2)",
   },
   companyText: {
-    fontSize: 12,
+    fontSize: fs(12),
     fontWeight: "600",
     color: "#fff",
   },
@@ -731,11 +710,5 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: "700",
     color: COLORS.error,
-  },
-  version: {
-    fontSize: 12,
-    color: "#9CA3AF",
-    textAlign: "center",
-    marginTop: 16,
   },
 });

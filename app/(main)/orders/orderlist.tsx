@@ -36,8 +36,11 @@ import StateWrapper from "@/src/components/common/StateWrapper";
 import { useAuth } from "@/src/context/AuthContext";
 import Dropdown from "@/src/components/common/DropdownProps";
 import { refreshOrderData } from "@/src/cache";
+import { fs, ms, sp } from "@/src/utils/responsive";
 
-type OrderListTab = "pending" | "others";
+// "all" is the whole list — pending AND decided — so the Status filter's
+// "All" is genuinely everything, not just orders billing has acted on.
+type OrderListTab = "pending" | "others" | "all";
 type BillingDecisionFilter = "Billing Approved" | "Billing Rejected";
 type BillingDecisionSummary = {
   decision: BillingDecisionFilter;
@@ -338,9 +341,28 @@ export default function BillingOrderList() {
       setError(null);
       let data: OrderItemList[] = [];
 
-      if (activeTab === "others") {
+      if (activeTab === "others" || activeTab === "all") {
+        // status-tracking returns orders billing has already decided.
         const result = await api.get("/orders/status-tracking/?mode=billing");
-        data = (Array.isArray(result) ? result : []).sort(
+        let merged: OrderItemList[] = Array.isArray(result) ? result : [];
+
+        if (activeTab === "all") {
+          // Pending orders are only in the billing-view feed, so "All" must pull
+          // it too — otherwise All can only ever show decided (mostly approved)
+          // orders.
+          const pendingResult = await productService.getOrders(0, undefined, true);
+          const pendingOrders = (Array.isArray(pendingResult) ? pendingResult : []).filter(
+            (order: OrderItemList) =>
+              PENDING_STATUS_CODES.has(String(order.status || "").toUpperCase()),
+          );
+          // Decided rows win — they carry the decision_type the badge needs.
+          const orderMap = new Map<number, OrderItemList>();
+          pendingOrders.forEach((order) => orderMap.set(order.id, order));
+          merged.forEach((order) => orderMap.set(order.id, order));
+          merged = Array.from(orderMap.values());
+        }
+
+        data = merged.sort(
           (a, b) =>
             new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
         );
@@ -556,7 +578,7 @@ export default function BillingOrderList() {
     let isActive = true;
 
     const loadBillingDecisionSummary = async () => {
-      if (activeTab !== "others" || orders.length === 0) {
+      if (activeTab === "pending" || orders.length === 0) {
         setBillingDecisionByOrderId({});
         setLoadingBillingDecisions(false);
         return;
@@ -673,8 +695,10 @@ export default function BillingOrderList() {
 
   const filteredOrders = orders.filter((item: any) => {
     const billingDecision =
-      activeTab === "others" ? getBillingDecisionSummary(item) : null;
+      activeTab === "pending" ? null : getBillingDecisionSummary(item);
 
+    // "others" is the decided-only view. "all" keeps undecided orders — that is
+    // the whole point of All.
     if (activeTab === "others" && !billingDecision) {
       return false;
     }
@@ -733,7 +757,9 @@ export default function BillingOrderList() {
   const getCardStatusBadge = (
     item: OrderItemList,
   ): { label: string; color: string; bg: string; icon: React.ComponentProps<typeof Ionicons>["name"] } => {
-    if (activeTab === "others") {
+    // Billing's recorded decision is the most reliable signal — check it on any
+    // view that can contain decided orders (others AND all).
+    if (activeTab !== "pending") {
       const decision = getBillingDecisionSummary(item);
       if (decision?.decision === "Billing Approved") {
         return { label: "Approved", color: COLORS.success, bg: "#ECFDF3", icon: "checkmark-circle-outline" };
@@ -747,11 +773,25 @@ export default function BillingOrderList() {
     if (raw.includes("reject")) {
       return { label: getStatusName(item) || "Rejected", color: COLORS.error, bg: "#FEF2F2", icon: "close-circle-outline" };
     }
+
+    // Awaiting-action stages MUST be tested before any "approv" text match:
+    // stage names like "Rate Approval" / "Auditor Approval" contain "approv"
+    // but mean the order is still WAITING there — matching text first would
+    // paint every pending order green in the All view.
+    const isPendingStage =
+      PENDING_STATUS_CODES.has(String(item.status || "").toUpperCase()) ||
+      raw.includes("pending") ||
+      raw.includes("billing") ||
+      raw.includes("created") ||
+      raw.includes("rate approval") ||
+      raw.includes("auditor approval") ||
+      raw.includes("need approval");
+    if (activeTab === "pending" || isPendingStage) {
+      return { label: "Pending", color: "#EA8C00", bg: "#FFF7ED", icon: "time-outline" };
+    }
+
     if (raw.includes("approv") || raw.includes("accept") || raw.includes("complete")) {
       return { label: getStatusName(item) || "Approved", color: COLORS.success, bg: "#ECFDF3", icon: "checkmark-circle-outline" };
-    }
-    if (activeTab === "pending" || raw.includes("pending") || raw.includes("billing")) {
-      return { label: "Pending Approval", color: "#EA8C00", bg: "#FFF7ED", icon: "time-outline" };
     }
     return { label: getStatusName(item) || "Order", color: COLORS.primary, bg: COLORS.primaryLight, icon: "ellipse-outline" };
   };
@@ -1078,7 +1118,10 @@ export default function BillingOrderList() {
         <Text style={styles.amountValue}>₹{item.total_amount}</Text>
       </View>
 
-      {activeTab === "pending" && (
+      {/* Actionable while billing hasn't decided yet — so pending orders keep
+          Approve/Reject in the "All" view, and decided ones don't. */}
+      {(activeTab === "pending" ||
+        (activeTab === "all" && !getBillingDecisionSummary(item))) && (
         <>
           <View style={styles.actionRow}>
             <TouchableOpacity
@@ -1143,7 +1186,7 @@ export default function BillingOrderList() {
         loading ||
         loadingItems ||
         loadingStatuses ||
-        (activeTab === "others" && loadingBillingDecisions)
+        (activeTab !== "pending" && loadingBillingDecisions)
       ) && !refreshing}
       error={error}
       onRetry={loadOrders}
@@ -1162,7 +1205,9 @@ export default function BillingOrderList() {
             value={statusView}
             onChange={(value) => {
               setStatusView(value);
-              setActiveTab(value === "pending" ? "pending" : "others");
+              setActiveTab(
+                value === "pending" ? "pending" : value === "all" ? "all" : "others",
+              );
               setSelectedStatuses(
                 value === "approved" ? ["Billing Approved"] :
                 value === "rejected" ? ["Billing Rejected"] : [],
@@ -1193,35 +1238,23 @@ export default function BillingOrderList() {
             )}
           </View>
         </View>
-        <View style={styles.dateFieldWrap}>
-          <Text style={styles.fieldLabel}>Date</Text>
-          <InlineOrderDateFilter
-            value={selectedOrderDate}
-            onChange={setSelectedOrderDate}
-            variant="field"
-          />
-        </View>
+        {/* Date moved into the count bar below so Search can use the rest of
+            the row and long text stays fully visible. */}
       </View>
 
       {/* Orders Count + Filter */}
-      {!loading && filteredOrders.length > 0 && (
+      {/* Always rendered once loading finishes, even with zero results: this bar
+            holds the Filter control, so hiding it on an empty list would leave the
+            user unable to change the filter that emptied it. */}
+        {!loading && (
         <LinearGradient
           colors={[COLORS.primaryDark, COLORS.primary]}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
           style={styles.countBar}
         >
-          <View style={styles.countBarLeft}>
-            <View style={styles.countBarIcon}>
-              <Ionicons name="receipt-outline" size={18} color="#fff" />
-            </View>
-            <View style={styles.countBarTextWrap}>
-              <Text style={styles.countText} numberOfLines={1}>
-                {filteredOrders.length} order{filteredOrders.length > 1 ? "s" : ""} found
-              </Text>
-              <Text style={styles.countSubText} numberOfLines={1}>Last updated just now</Text>
-            </View>
-          </View>
+          {/* 1) Filter · 2) result count · 3) Date — each sized so they never
+              collide on narrow screens. */}
           <TouchableOpacity
             style={styles.countBarFilterBtn}
             onPress={() => setIsFilterModalVisible(true)}
@@ -1233,6 +1266,23 @@ export default function BillingOrderList() {
               <View style={styles.countBarFilterDot} />
             )}
           </TouchableOpacity>
+
+          <View style={styles.countBarTextWrap}>
+            <Text style={styles.countText} numberOfLines={1} adjustsFontSizeToFit>
+              {filteredOrders.length} order{filteredOrders.length === 1 ? "" : "s"} found
+            </Text>
+            <Text style={styles.countSubText} numberOfLines={1}>
+              Last updated just now
+            </Text>
+          </View>
+
+          <View style={styles.countBarDateWrap}>
+            <InlineOrderDateFilter
+              value={selectedOrderDate}
+              onChange={setSelectedOrderDate}
+              variant="onDark"
+            />
+          </View>
         </LinearGradient>
       )}
 
@@ -1620,24 +1670,28 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: COLORS.white,
-    padding: 12,
-    gap: 8,
+    paddingHorizontal: sp(12),
+    paddingVertical: sp(12),
+    gap: sp(8),
   },
   tabGroup: {
     flex: 1,
     flexDirection: "row",
     gap: 8,
   },
+  // Fixed width: the Status box must not grow/shrink when a value is picked,
+  // and must be wide enough to keep the longest option on one line.
   statusDropdownWrap: {
-    width: 126,
+    width: ms(124),
+    flexGrow: 0,
+    flexShrink: 0,
   },
+  // Search takes every remaining pixel (~3/4 of the row); minWidth:0 lets it
+  // shrink rather than push Status off-screen.
   fieldWrap: {
     flex: 1,
-    paddingTop: 8,
-    position: "relative",
-  },
-  dateFieldWrap: {
-    paddingTop: 8,
+    minWidth: 0,
+    paddingTop: sp(8),
     position: "relative",
   },
   fieldLabel: {
@@ -1647,13 +1701,13 @@ const styles = StyleSheet.create({
     zIndex: 2,
     backgroundColor: COLORS.inputBackground,
     paddingHorizontal: 4,
-    fontSize: 12,
+    fontSize: fs(12),
     fontWeight: "500",
     color: COLORS.textSecondary,
   },
   searchWrap: {
     alignSelf: "stretch",
-    height: 56,
+    height: ms(56),
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
@@ -1717,7 +1771,8 @@ const styles = StyleSheet.create({
   },
   searchInput: {
     flex: 1,
-    fontSize: 12,
+    minWidth: 0,
+    fontSize: fs(12),
     fontWeight: "600",
     color: COLORS.text,
     paddingVertical: 0,
@@ -1771,60 +1826,54 @@ const styles = StyleSheet.create({
   countBar: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
-    marginHorizontal: 16,
-    marginTop: 12,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    borderRadius: 16,
+    marginHorizontal: sp(16),
+    marginTop: sp(12),
+    paddingVertical: sp(12),
+    paddingHorizontal: sp(12),
+    borderRadius: sp(16),
+    gap: sp(10),
     shadowColor: COLORS.primaryDark,
     shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 0.2,
     shadowRadius: 12,
     elevation: 6,
   },
-  countBarLeft: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    flex: 1,
-    marginRight: 10,
-  },
-  countBarIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    backgroundColor: "rgba(255,255,255,0.18)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
+  // Middle column: the only flexible one, so Filter and Date keep their size
+  // and the count text absorbs whatever width is left.
   countBarTextWrap: {
     flex: 1,
+    minWidth: 0,
+  },
+  countBarDateWrap: {
+    flexGrow: 0,
+    flexShrink: 0,
   },
   countText: {
     color: "#fff",
-    fontSize: 15,
+    fontSize: fs(14),
     fontWeight: "800",
   },
   countSubText: {
     color: "rgba(255,255,255,0.8)",
-    fontSize: 11,
+    fontSize: fs(11),
     marginTop: 2,
   },
   countBarFilterBtn: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
+    gap: 5,
+    flexGrow: 0,
+    flexShrink: 0,
     backgroundColor: "rgba(255,255,255,0.2)",
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.35)",
     borderRadius: 20,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
+    paddingHorizontal: sp(10),
+    paddingVertical: sp(8),
   },
   countBarFilterText: {
     color: "#fff",
-    fontSize: 13,
+    fontSize: fs(12),
     fontWeight: "700",
   },
   countBarFilterDot: {

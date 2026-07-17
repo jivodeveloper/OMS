@@ -37,7 +37,8 @@ import {
   type OrderDraftPayload,
 } from "@/src/utils/orderDraft";
 import useAndroidBackOverride from "@/src/hooks/useAndroidBackOverride";
-import { refreshPartyProducts } from "@/src/cache";
+import { refreshOrderData, refreshPartyProducts } from "@/src/cache";
+import { resolveOrdersRoute } from "@/src/constants/pages";
 import {
   orderService,
   schemeService,
@@ -502,6 +503,9 @@ export function OrderEntryScreen({
     openMode?: string;
   }>();
   const userRole = user?.role?.toLowerCase() || "";
+  // Where "Go to Orders" should send THIS user — resolved from their role and
+  // page grants, never hardcoded to one role's screen.
+  const ordersRoute = resolveOrdersRoute(user?.role, user?.extra_pages || []);
   const isExplicitCreateMode = openMode === "create";
   const isEditMode = !isExplicitCreateMode && mode === "edit" && !!editOrderId;
   const isFocMode = screenVariant === "foc";
@@ -2473,16 +2477,22 @@ export function OrderEntryScreen({
 
         const response = await orderService.updateOrder(Number(editOrderId), payload);
         if (response?.id || response?.order_number) {
-          setOrderResult({
-            orderNumber: String(response.order_number || editOrderId || ""),
-            message: response.message || "Order updated successfully",
-            needsApproval: response.needs_approval || false,
-            isUpdate: true,
-          });
-          setSuccessModal(true);
-        } else {
-          appAlert("Error", response?.message || "Failed to update order");
+          // An update lands straight on this order's details, so the user sees
+          // the saved changes — the refreshed order IS the confirmation, so no
+          // success dialog here (that stays for newly CREATED orders only).
+          const updatedOrderId = Number(response.id || editOrderId);
+
+          // The edit POSTs to /orders/create/, so make sure the details screen
+          // reads the updated order rather than its cached copy.
+          await refreshOrderData();
+
+          router.replace({
+            pathname: "/(main)/orders/orderdetails",
+            params: { orderId: updatedOrderId },
+          } as never);
+          return;
         }
+        appAlert("Error", response?.message || "Failed to update order");
 
       } else {
 
@@ -3769,9 +3779,10 @@ export function OrderEntryScreen({
                     if (orderResult?.isDraft) {
                       router.navigate({ pathname: "/(main)/orders/drafts" } as never);
                     } else {
-                      // "Go to Orders" → open the order list so the user sees
-                      // their order (previously went back to Home/Dashboard).
-                      router.navigate({ pathname: "/(main)/orders/orderlist" } as never);
+                      // "Go to Orders" → this user's OWN orders screen. It used
+                      // to hardcode orders/orderlist, which is billing-only, so
+                      // e.g. a manager landed on a page they can't access.
+                      router.navigate({ pathname: ordersRoute.route } as never);
                     }
                   }}
                 >
@@ -3873,7 +3884,13 @@ export function OrderEntryScreen({
                     color={COLORS.textLight}
                   />
                   <Text style={styles.submitBtnText}>
-                    {isFocOrder ? "Create FOC" : "Create Order"}
+                    {/* Editing an existing order updates it — "Create Order"
+                        wrongly implied a second order would be made. */}
+                    {isEditMode
+                      ? "Update Order"
+                      : isFocOrder
+                        ? "Create FOC"
+                        : "Create Order"}
                   </Text>
                 </>
               )}

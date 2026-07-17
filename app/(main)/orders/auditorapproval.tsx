@@ -24,6 +24,7 @@ import StateWrapper from "@/src/components/common/StateWrapper";
 import { storage } from "@/src/utils/storage";
 import { useAuth } from "@/src/context/AuthContext";
 import { refreshOrderData } from "@/src/cache";
+import { fs, ms, sp } from "@/src/utils/responsive";
 
 type AuditorTab = "pending" | "others";
 type AuditorDecisionFilter = "Auditor Approved" | "Auditor Rejected";
@@ -693,11 +694,11 @@ export default function AuditorApprovalScreen() {
     icon: React.ComponentProps<typeof Ionicons>["name"];
   } => {
     // Pending tab: every order is awaiting the auditor's action, so it is always
-    // "Pending Approval". (The stage status name is literally "Auditor Approval",
+    // "Pending". (The stage status name is literally "Auditor Approval",
     // which contains "approv" — matching on that text would wrongly read as
     // Approved, so we never inspect the status name here.)
     if (activeTab === "pending") {
-      return { label: "Pending Approval", color: "#EA8C00", bg: "#FFF7ED", icon: "time-outline" };
+      return { label: "Pending", color: "#EA8C00", bg: "#FFF7ED", icon: "time-outline" };
     }
 
     // Others tab: reflect the auditor's actual decision.
@@ -716,7 +717,7 @@ export default function AuditorApprovalScreen() {
     if (raw.includes("approv") || raw.includes("accept") || raw.includes("complete")) {
       return { label: "Approved", color: COLORS.success, bg: "#ECFDF3", icon: "checkmark-circle-outline" };
     }
-    return { label: "Pending Approval", color: "#EA8C00", bg: "#FFF7ED", icon: "time-outline" };
+    return { label: "Pending", color: "#EA8C00", bg: "#FFF7ED", icon: "time-outline" };
   };
 
   useEffect(() => {
@@ -1122,36 +1123,22 @@ export default function AuditorApprovalScreen() {
               )}
             </View>
           </View>
-          <View style={styles.dateFieldWrap}>
-            <Text style={styles.fieldLabel}>Date</Text>
-            <InlineOrderDateFilter
-              value={selectedOrderDate}
-              onChange={setSelectedOrderDate}
-              variant="field"
-            />
-          </View>
+          {/* Date moved into the count bar below so Search can use the rest of
+              the row and long text stays fully visible. */}
         </View>
 
-        {!loading && filteredOrders.length > 0 && (
+        {/* Always rendered once loading finishes, even with zero results: this bar
+            holds the Filter control, so hiding it on an empty list would leave the
+            user unable to change the filter that emptied it. */}
+        {!loading && (
           <LinearGradient
             colors={[COLORS.primaryDark, COLORS.primary]}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
             style={styles.countBar}
           >
-            <View style={styles.countBarLeft}>
-              <View style={styles.countBarIcon}>
-                <Ionicons name="receipt-outline" size={18} color="#fff" />
-              </View>
-              <View style={styles.countBarTextWrap}>
-                <Text style={styles.countText} numberOfLines={1}>
-                  {filteredOrders.length} order{filteredOrders.length > 1 ? "s" : ""} found
-                </Text>
-                <Text style={styles.countSubText} numberOfLines={1}>
-                  Last updated just now
-                </Text>
-              </View>
-            </View>
+            {/* 1) Filter · 2) result count · 3) Date — each sized so they never
+                collide on narrow screens. */}
             <TouchableOpacity
               style={styles.countBarFilterBtn}
               onPress={() => setIsFilterModalVisible(true)}
@@ -1163,6 +1150,23 @@ export default function AuditorApprovalScreen() {
                 <View style={styles.countBarFilterDot} />
               )}
             </TouchableOpacity>
+
+            <View style={styles.countBarTextWrap}>
+              <Text style={styles.countText} numberOfLines={1} adjustsFontSizeToFit>
+                {filteredOrders.length} order{filteredOrders.length === 1 ? "" : "s"} found
+              </Text>
+              <Text style={styles.countSubText} numberOfLines={1}>
+                Last updated just now
+              </Text>
+            </View>
+
+            <View style={styles.countBarDateWrap}>
+              <InlineOrderDateFilter
+                value={selectedOrderDate}
+                onChange={setSelectedOrderDate}
+                variant="onDark"
+              />
+            </View>
           </LinearGradient>
         )}
 
@@ -1655,8 +1659,9 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: COLORS.white,
-    padding: 12,
-    gap: 8,
+    paddingHorizontal: sp(12),
+    paddingVertical: sp(12),
+    gap: sp(8),
   },
   tabGroup: {
     flex: 1,
@@ -1726,16 +1731,19 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   // Filter bar fields (Status dropdown + Search + Date) — matches Order List.
+  // Fixed width: the Status box must not grow/shrink when a value is picked,
+  // and must be wide enough to keep the longest option on one line.
   statusDropdownWrap: {
-    width: 126,
+    width: ms(124),
+    flexGrow: 0,
+    flexShrink: 0,
   },
+  // Search takes every remaining pixel (~3/4 of the row); minWidth:0 lets it
+  // shrink rather than push Status off-screen.
   fieldWrap: {
     flex: 1,
-    paddingTop: 8,
-    position: "relative",
-  },
-  dateFieldWrap: {
-    paddingTop: 8,
+    minWidth: 0,
+    paddingTop: sp(8),
     position: "relative",
   },
   fieldLabel: {
@@ -1745,13 +1753,13 @@ const styles = StyleSheet.create({
     zIndex: 2,
     backgroundColor: COLORS.inputBackground,
     paddingHorizontal: 4,
-    fontSize: 12,
+    fontSize: fs(12),
     fontWeight: "500",
     color: COLORS.textSecondary,
   },
   searchWrap: {
     alignSelf: "stretch",
-    height: 56,
+    height: ms(56),
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
@@ -1763,7 +1771,8 @@ const styles = StyleSheet.create({
   },
   searchInput: {
     flex: 1,
-    fontSize: 12,
+    minWidth: 0,
+    fontSize: fs(12),
     fontWeight: "600",
     color: COLORS.text,
     paddingVertical: 0,
@@ -1772,60 +1781,54 @@ const styles = StyleSheet.create({
   countBar: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
-    marginHorizontal: 16,
-    marginTop: 12,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    borderRadius: 16,
+    marginHorizontal: sp(16),
+    marginTop: sp(12),
+    paddingVertical: sp(12),
+    paddingHorizontal: sp(12),
+    borderRadius: sp(16),
+    gap: sp(10),
     shadowColor: COLORS.primaryDark,
     shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 0.2,
     shadowRadius: 12,
     elevation: 6,
   },
-  countBarLeft: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    flex: 1,
-    marginRight: 10,
-  },
-  countBarIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    backgroundColor: "rgba(255,255,255,0.18)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
+  // Middle column: the only flexible one, so Filter and Date keep their size
+  // and the count text absorbs whatever width is left.
   countBarTextWrap: {
     flex: 1,
+    minWidth: 0,
+  },
+  countBarDateWrap: {
+    flexGrow: 0,
+    flexShrink: 0,
   },
   countText: {
     color: "#fff",
-    fontSize: 15,
+    fontSize: fs(14),
     fontWeight: "800",
   },
   countSubText: {
     color: "rgba(255,255,255,0.8)",
-    fontSize: 11,
+    fontSize: fs(11),
     marginTop: 2,
   },
   countBarFilterBtn: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
+    gap: 5,
+    flexGrow: 0,
+    flexShrink: 0,
     backgroundColor: "rgba(255,255,255,0.2)",
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.35)",
     borderRadius: 20,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
+    paddingHorizontal: sp(10),
+    paddingVertical: sp(8),
   },
   countBarFilterText: {
     color: "#fff",
-    fontSize: 13,
+    fontSize: fs(12),
     fontWeight: "700",
   },
   countBarFilterDot: {

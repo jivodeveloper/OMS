@@ -72,3 +72,53 @@ export const canAccessScreen = (
   const roles = SCREEN_ROLES[screen];
   return !!roles && roles.includes(normalizedRole);
 };
+
+export type AppRoute = { screen: string; route: string };
+
+/**
+ * Each role's own "Orders" destination. There is no single orders screen — the
+ * list a user should see depends on their role, so anything navigating to
+ * "Orders" must resolve it rather than hardcode one (e.g. `orders/orderlist` is
+ * BILLING-only; sending a manager there lands them on a page they can't open).
+ */
+export const ORDERS_BY_ROLE: Record<string, AppRoute> = {
+  billing: { screen: "orders/orderlist", route: "/orders/orderlist" },
+  manager: { screen: "orders/ordertracking", route: "/orders/ordertracking" },
+  approver: {
+    screen: "approver/pending_approval",
+    route: "/approver/pending_approval",
+  },
+  auditor: { screen: "orders/auditorapproval", route: "/orders/auditorapproval" },
+};
+
+// Tried in order when a user's own role screen isn't reachable (e.g. an
+// extra_pages grant gave them a different orders screen).
+const ORDERS_FALLBACKS: string[] = [
+  "orders/ordertracking",
+  "orders/orderlist",
+  "approver/pending_approval",
+  "orders/auditorapproval",
+];
+
+/**
+ * The Orders screen this user should actually land on: their role's own screen
+ * when permitted, else the first orders screen they DO have access to, else the
+ * dashboard (always reachable). Never returns a screen the user can't open.
+ */
+export const resolveOrdersRoute = (
+  role: string | null | undefined,
+  extraPages: string[] = [],
+): AppRoute => {
+  const normalizedRole = (role || "").toLowerCase();
+
+  const own = ORDERS_BY_ROLE[normalizedRole];
+  if (own && canAccessScreen(own.screen, normalizedRole, extraPages)) return own;
+
+  for (const screen of ORDERS_FALLBACKS) {
+    if (canAccessScreen(screen, normalizedRole, extraPages)) {
+      return { screen, route: `/${screen}` };
+    }
+  }
+
+  return { screen: "dashboard", route: "/(main)/dashboard" };
+};

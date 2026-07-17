@@ -28,6 +28,7 @@ import { shouldShowPermissionPrompt } from "@/src/utils/notificationPermission";
 import { isNotificationSuppressed } from "@/src/utils/notificationGate";
 import { useHeaderRefresh } from "@/src/utils/headerRefresh";
 import { refreshLiveData, refreshNotifications } from "@/src/cache";
+import { DRAWER_WIDTH } from "@/src/utils/responsive";
 import NotificationPermissionModal from "@/src/components/NotificationPermissionModal";
 import BottomBar from "@/src/components/common/BottomBar";
 
@@ -310,7 +311,8 @@ export default function MainLayout() {
             drawerActiveBackgroundColor: "#E8F0FE",
             drawerStyle: {
               backgroundColor: COLORS.surface,
-              width: 330,
+              // ~50% of the screen, leaving a wide tap-to-close area.
+              width: DRAWER_WIDTH,
             },
             headerRightContainerStyle: {
               paddingRight: 6,

@@ -213,6 +213,25 @@ export const setSessionExpiredHandler = (fn: (() => void) | null) => {
   sessionExpiredHandler = fn;
 };
 
+// Device/version metadata headers. DeviceService registers a synchronous
+// provider here so version/device headers ride on EVERY request from the one
+// chokepoint below — the API layer never imports DeviceService (avoids a cycle
+// and keeps this file free of device concerns).
+let deviceHeaderProvider: (() => Record<string, string>) | null = null;
+export const setDeviceHeaderProvider = (
+  fn: (() => Record<string, string>) | null,
+) => {
+  deviceHeaderProvider = fn;
+};
+
+// Post-authentication hook, fired after a SUCCESSFUL token refresh. Lets device
+// registration retry itself on the next auth event without this layer knowing
+// what DeviceService is. Same inversion-of-control shape as the handler above.
+let authenticatedHandler: (() => void) | null = null;
+export const setAuthenticatedHandler = (fn: (() => void) | null) => {
+  authenticatedHandler = fn;
+};
+
 const decodeBase64 = (input: string): string | null => {
   try {
     if (typeof atob === 'function') return atob(input);
@@ -263,6 +282,13 @@ const doRefresh = async (): Promise<RefreshResult> => {
       await storage.saveTokens(newAccess, newRefresh || refresh);
     } catch {
       /* ignore persistence errors */
+    }
+    // Successful (re)authentication — let device registration retry if a prior
+    // attempt hadn't succeeded. Fire-and-forget; never affects the refresh.
+    try {
+      authenticatedHandler?.();
+    } catch {
+      /* device hook must never impact the auth path */
     }
     return { ok: true, access: newAccess };
   }
@@ -336,6 +362,15 @@ const sendAuthed = async (
   }
 
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  // Attach device/version metadata to every request from this single place.
+  // Applied BEFORE Authorization so the provider can never clobber the token.
+  if (deviceHeaderProvider) {
+    try {
+      Object.assign(headers, deviceHeaderProvider());
+    } catch {
+      /* never fail a request over metadata headers */
+    }
+  }
   if (token) headers['Authorization'] = `Bearer ${token}`;
 
   const init: RequestInit = {
