@@ -6,6 +6,17 @@ buildscript {
     mavenCentral()
   }
   dependencies {
+    // Processes android/app/google-services.json at build time and generates the
+    // google_app_id / gcm_defaultSenderId string resources that Firebase's
+    // FirebaseInitProvider reads to auto-initialise FirebaseApp. Without this,
+    // expo-notifications' firebase-messaging dependency starts but FirebaseApp
+    // never initialises -> "Default FirebaseApp is not initialized in this
+    // process com.jivo.oms" and getExpoPushTokenAsync() fails.
+    //
+    // This mirrors exactly what `npx expo prebuild` injects from app.json's
+    // android.googleServicesFile (see @expo/config-plugins GoogleServices.js),
+    // so prebuild stays idempotent: it skips when the classpath is present.
+    classpath('com.google.gms:google-services:4.4.1')
     classpath('com.android.tools.build:gradle')
     classpath('com.facebook.react:react-native-gradle-plugin')
     classpath('org.jetbrains.kotlin:kotlin-gradle-plugin')

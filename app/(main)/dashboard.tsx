@@ -12,7 +12,6 @@ import {
   Modal,
   ActivityIndicator,
 } from "react-native";
-import { LineChart, PieChart } from "react-native-gifted-charts";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -32,8 +31,7 @@ import AnimatedCard from "@/src/components/dashboard/AnimatedCard";
 import AnimatedNumber from "@/src/components/dashboard/AnimatedNumber";
 import StateWrapper from "@/src/components/common/StateWrapper";
 import { refreshLiveData } from "@/src/cache";
-import { fs, ms, sp, SCREEN_WIDTH } from "@/src/utils/responsive";
-import { canAccessScreen } from "@/src/constants/pages";
+import { fs, ms, sp } from "@/src/utils/responsive";
 import {
   OrderItemList,
   productService,
@@ -1462,14 +1460,6 @@ export default function DashboardScreen() {
         })
       : "—";
 
-  // Reports is role- and grant-gated, so the "View full report" shortcut is only
-  // shown to users who can actually open it.
-  const canViewReports = canAccessScreen(
-    "reports/daily-report",
-    user?.role,
-    user?.extra_pages || [],
-  );
-
   const {
     total: bTotal,
     pending: bPending,
@@ -1484,40 +1474,6 @@ export default function DashboardScreen() {
         : 0;
   const avgOrderValue =
     bTotal > 0 ? Math.round(Number(data?.total_revenue ?? 0) / bTotal) : 0;
-
-  // Order VOLUME trend for the Insights sparkline: how many orders were placed
-  // per month (last 8 months) from the charts endpoint, normalised to bar
-  // heights. Deliberately a count, not money — the Insights card shows activity
-  // trend without exposing revenue figures. No dummy data: empty until real
-  // months exist.
-  const volumeSeries = (chartData?.monthly_sales || [])
-    .map((m) => Number(m.count) || 0)
-    .slice(-8);
-  const volumeMax = Math.max(...volumeSeries, 1);
-  const sparkMaxHeight = ms(40);
-  // Insights cards are a 2-up grid inside a padded card: screen − card margins
-  // (16*2) − card padding (16*2) − grid gap (12), halved, − box padding (12*2).
-  const insightChartWidth = Math.max(
-    ms(70),
-    (SCREEN_WIDTH - sp(16) * 2 - sp(16) * 2 - sp(12)) / 2 - sp(12) * 2,
-  );
-  // Points for the Insights trend chart. Tapping a point reveals that month's
-  // order count, so the trend stays readable without printing figures on the
-  // card itself.
-  // Value only — no `label`, otherwise gifted-charts renders an x-axis caption
-  // per point and the month keys ("2026-07") truncate to unreadable "2…" text.
-  // The card is a trend line; the month/count is revealed by touching a point.
-  const volumePoints = volumeSeries.map((v) => ({ value: v }));
-  // Month-over-month change in order count (real), used as the trend chip.
-  const volumeTrend =
-    volumeSeries.length >= 2 && volumeSeries[volumeSeries.length - 2] > 0
-      ? Math.round(
-          ((volumeSeries[volumeSeries.length - 1] -
-            volumeSeries[volumeSeries.length - 2]) /
-            volumeSeries[volumeSeries.length - 2]) *
-            100,
-        )
-      : null;
 
   // Role-appropriate month period + orders destination (look stays identical).
   const periodYear = isManager ? mgrYear : audYear;
@@ -1739,127 +1695,6 @@ export default function DashboardScreen() {
               )}
             </TouchableOpacity>
           ))}
-        </View>
-
-        {/* ===== Insights ===== */}
-        <View style={bStyles.card}>
-          <View style={bStyles.cardHeaderRow}>
-            <Text style={bStyles.cardTitle}>Insights</Text>
-            {/* Only offered when the user can actually open Reports — otherwise
-                the link led to a page they'd be blocked from, and the Insights
-                cards simply stand on their own. */}
-            {canViewReports && (
-              <TouchableOpacity
-                style={bStyles.linkRow}
-                onPress={() => router.push("/reports/daily-report" as any)}
-              >
-                <Text style={bStyles.linkText}>View full report</Text>
-                <Ionicons name="chevron-forward" size={ms(16)} color={COLORS.primary} />
-              </TouchableOpacity>
-            )}
-          </View>
-          <View style={bStyles.insightsRow}>
-            {/* Approval Rate keeps its % — a rate isn't a sensitive figure and
-                the donut is meaningless without it. Order Volume replaces the
-                old ₹ Avg. Order Value: it shows activity trend as a COUNT, so
-                no revenue is exposed on the home screen. */}
-            <View style={bStyles.insightBox}>
-              <Text style={bStyles.insightLabel}>Approval Rate</Text>
-              <View style={bStyles.insightBody}>
-                <Text style={bStyles.insightValue}>{approvalRate}%</Text>
-                <PieChart
-                  donut
-                  radius={ms(30)}
-                  innerRadius={ms(20)}
-                  innerCircleColor="#fff"
-                  data={[
-                    { value: Math.max(approvalRate, 0.001), color: "#16A34A" },
-                    { value: Math.max(100 - approvalRate, 0.001), color: "#E5E7EB" },
-                  ]}
-                  centerLabelComponent={() => (
-                    <Ionicons name="checkmark" size={ms(16)} color="#16A34A" />
-                  )}
-                />
-              </View>
-            </View>
-            <View style={bStyles.insightBox}>
-              <Text style={bStyles.insightLabel}>Order Volume</Text>
-              <View style={bStyles.insightChartOnly}>
-                {volumePoints.length > 1 ? (
-                  <LineChart
-                    data={volumePoints}
-                    height={sparkMaxHeight}
-                    width={insightChartWidth}
-                    initialSpacing={ms(6)}
-                    endSpacing={ms(6)}
-                    spacing={
-                      (insightChartWidth - ms(12)) /
-                      Math.max(volumePoints.length - 1, 1)
-                    }
-                    curved
-                    areaChart
-                    startFillColor="#8B5CF6"
-                    endFillColor="#8B5CF6"
-                    startOpacity={0.28}
-                    endOpacity={0.02}
-                    color="#8B5CF6"
-                    thickness={2}
-                    dataPointsColor="#8B5CF6"
-                    dataPointsRadius={ms(2.5)}
-                    hideRules
-                    hideYAxisText
-                    hideAxesAndRules
-                    xAxisLabelsHeight={0}
-                    yAxisThickness={0}
-                    xAxisThickness={0}
-                    adjustToWidth
-                    disableScroll
-                    maxValue={volumeMax * 1.15}
-                    pointerConfig={{
-                      pointerStripHeight: sparkMaxHeight,
-                      pointerStripColor: "#C4B5FD",
-                      pointerStripWidth: 1,
-                      pointerColor: "#8B5CF6",
-                      radius: ms(3.5),
-                      pointerLabelWidth: ms(78),
-                      pointerLabelHeight: ms(30),
-                      activatePointersOnLongPress: false,
-                      autoAdjustPointerLabelPosition: true,
-                      pointerLabelComponent: (items: any[]) => (
-                        <View style={bStyles.pointerLabel}>
-                          <Text style={bStyles.pointerLabelText}>
-                            {items?.[0]?.value ?? 0} orders
-                          </Text>
-                        </View>
-                      ),
-                    }}
-                  />
-                ) : (
-                  <Text style={bStyles.insightMuted}>No trend yet</Text>
-                )}
-                {volumeTrend !== null ? (
-                  <View style={bStyles.trendChip}>
-                    <Ionicons
-                      name={volumeTrend >= 0 ? "arrow-up" : "arrow-down"}
-                      size={ms(11)}
-                      color={volumeTrend >= 0 ? "#16A34A" : "#DC2626"}
-                    />
-                    <Text
-                      style={[
-                        bStyles.trendChipText,
-                        { color: volumeTrend >= 0 ? "#16A34A" : "#DC2626" },
-                      ]}
-                      numberOfLines={1}
-                    >
-                      {Math.abs(volumeTrend)}% vs last month
-                    </Text>
-                  </View>
-                ) : (
-                  <Text style={bStyles.insightMuted}>Last 8 months</Text>
-                )}
-              </View>
-            </View>
-          </View>
         </View>
 
         {/* ===== Recent Orders ===== */}
@@ -3498,75 +3333,6 @@ const bStyles = StyleSheet.create({
     color: COLORS.primary,
   },
 
-  // Insights
-  insightsRow: {
-    flexDirection: "row",
-    gap: sp(12),
-  },
-  insightBox: {
-    flex: 1,
-    borderWidth: 1,
-    borderColor: "#EEF1F6",
-    borderRadius: sp(14),
-    padding: sp(12),
-  },
-  insightLabel: {
-    fontSize: fs(12),
-    color: "#64748B",
-    fontWeight: "600",
-  },
-  // Value + chart side by side (Approval Rate).
-  insightBody: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginTop: sp(10),
-    minHeight: ms(72),
-  },
-  insightValue: {
-    fontSize: fs(20),
-    fontWeight: "800",
-    color: "#0F172A",
-    flexShrink: 1,
-  },
-  // Trend-only body: the chart is the content, so it is centred rather than
-  // sitting beside a number.
-  insightChartOnly: {
-    marginTop: sp(10),
-    minHeight: ms(72),
-    alignItems: "center",
-    justifyContent: "center",
-    gap: sp(6),
-  },
-  insightMuted: {
-    fontSize: fs(12),
-    color: "#94A3B8",
-    fontWeight: "600",
-  },
-  // Tooltip shown when a point on the Order Volume trend is touched.
-  pointerLabel: {
-    backgroundColor: "#0F172A",
-    borderRadius: 8,
-    paddingHorizontal: 8,
-    paddingVertical: 5,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  pointerLabelText: {
-    color: "#fff",
-    fontSize: fs(11),
-    fontWeight: "700",
-  },
-  trendChip: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 2,
-    marginTop: sp(4),
-  },
-  trendChipText: {
-    fontSize: fs(10.5),
-    fontWeight: "700",
-  },
 
   // Recent orders
   recentRow: {

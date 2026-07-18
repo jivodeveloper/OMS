@@ -353,7 +353,11 @@ const sendAuthed = async (
   isRetry = false,
 ): Promise<any> => {
   let token = tokenOverride;
-  if (!token) {
+  // Never attach a stored token to /auth/login/ (or refresh/logout, which carry
+  // their own token in the body). Signing in must not depend on — or be
+  // confused by — whatever stale token happens to be on the device. This
+  // mirrors the web client, which excludes the login URL from its auth header.
+  if (!token && !isAuthEndpoint(endpoint)) {
     try {
       token = (await storage.getAccessToken()) || undefined;
     } catch {

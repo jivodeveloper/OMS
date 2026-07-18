@@ -180,3 +180,11 @@ dependencies {
         implementation jscFlavor
     }
 }
+
+// Reads android/app/google-services.json and generates the Firebase string
+// resources (google_app_id, gcm_defaultSenderId, ...). Required for FirebaseApp
+// to auto-initialise, which expo-notifications needs to obtain an FCM token.
+// Appended at the end of the file to match `npx expo prebuild` output exactly
+// (see @expo/config-plugins GoogleServices.js -> applyPlugin), so prebuild
+// remains idempotent and will not duplicate this line.
+apply plugin: 'com.google.gms.google-services'

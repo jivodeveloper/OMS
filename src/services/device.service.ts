@@ -339,7 +339,6 @@ export const deviceService = {
 
   // ---- Future extension points (intentionally not implemented in Phase 3) ----
   // These belong HERE so no future feature needs to touch the auth flow again:
-  //   • checkForUpdate()      -> GET /app/version/ + compare (force/optional UI)
   //   • associatePushToken()  -> link the Expo push token to this device row
   //   • trackSession()        -> heartbeat / last-active pings
   //   • reportCrashContext()  -> attach device info to crash reports

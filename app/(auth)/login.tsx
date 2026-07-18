@@ -224,7 +224,12 @@ export default function LoginScreen() {
     ],
   }));
 
-  const credentials = () => ({ username: username.trim(), password: password.trim() });
+  // The password is sent EXACTLY as typed — never trimmed. A password may
+  // legitimately begin/end with a space, and trimming silently sends different
+  // credentials than the user entered (the web client sends it raw, which is
+  // why the same login could succeed there and fail here). Username is trimmed
+  // because a surrounding space there is always an input slip.
+  const credentials = () => ({ username: username.trim(), password });
   const validate = () => {
     const values = credentials();
     const next = {
@@ -396,7 +401,7 @@ export default function LoginScreen() {
                   if (errors.password) setErrors((current) => ({ ...current, password: "" }));
                 }}
                 onFocus={() => setPasswordFocused(true)}
-                onBlur={() => { setPasswordFocused(false); setPassword((value) => value.trim()); }}
+                onBlur={() => setPasswordFocused(false)}
                 mode="outlined"
                 editable={!loading}
                 placeholder="Enter your password"
