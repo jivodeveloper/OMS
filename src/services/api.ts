@@ -4,24 +4,18 @@ import Constants from 'expo-constants';
 import { getGetCacheTtl, getInvalidationPrefixes } from '../cache/policy';
 import { fetchQuery, invalidateQueries } from '../cache/queryClient';
   
-const DEFAULT_BASE_URL = Platform.select({
+// Fallback used only when EXPO_PUBLIC_API_BASE_URL is not set at build time.
+// This MUST stay reachable from a real device: loopback hosts (127.0.0.1) and
+// the emulator-only alias 10.0.2.2 resolve to the phone itself in a release
+// APK, which makes every request fail with a generic network error.
+// For local backend work, override it in .env instead of editing this.
+const SHARED_BASE_URL = 'http://103.89.45.75:8081/api';
 
-  // android: 'http://103.89.45.75:8081/api',
-  // ios: 'http://103.89.45.75:8081/api',
-  // web: 'http://103.89.45.75:8081/api',
-  // default: 'http://103.89.45.75:8081/api',
-  
-  
-  android: 'http://10.0.2.2:8001/api',  
-  ios: 'http://127.0.0.1:8001/api',     
-  web: 'http://127.0.0.1:8001/api',     
-  default: 'http://127.0.0.1:8001/api',
-  
-  // android: 'http://103.89.45.75:8001/api',
-  // ios: 'http://103.89.45.75:8001/api',
-  // web: 'http://103.89.45.75:8001/api',
-  // default: 'http://103.89.45.75:8001/api',
-  
+const DEFAULT_BASE_URL = Platform.select({
+  android: SHARED_BASE_URL,
+  ios: SHARED_BASE_URL,
+  web: SHARED_BASE_URL,
+  default: SHARED_BASE_URL,
 }) as string;
 
 const ENV_BASE_URL =
