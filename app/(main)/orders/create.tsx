@@ -17,7 +17,7 @@ import DateTimePicker from "@react-native-community/datetimepicker";
 import { Surface, TextInput } from "react-native-paper";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
-import { useAuth } from "@/src/context/AuthContext";
+import { useAuth, useUILabels } from "@/src/context/AuthContext";
 import { COLORS, SPACING, RADIUS, GRADIENTS } from "@/src/constants/theme";
 import Dropdown from "@/src/components/common/DropdownProps";
 import StateWrapper from "@/src/components/common/StateWrapper";
@@ -489,6 +489,7 @@ export function OrderEntryScreen({
   screenVariant?: "order" | "foc";
 } = {}) {
   const { user } = useAuth();
+  const { t } = useUILabels();
   const {
     orderId: editOrderId,
     mode,
@@ -3342,7 +3343,7 @@ export function OrderEntryScreen({
                     </View>
                     <View style={styles.halfField}>
                       <FixedLabelTextInput
-                        label="Price List (Basic)"
+                        label={t("price_list", "Price List (Basic)")}
                         textColor={COLORS.black}
                         value={row.priceListBasic}
                         editable={false}

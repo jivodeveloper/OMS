@@ -30,7 +30,7 @@ import { COLORS } from "@/constants/theme";
 import { appAlert } from "@/src/components/common/AppDialog";
 import StateWrapper from "@/src/components/common/StateWrapper";
 import { orderService, productService } from "@/src/services/order.service";
-import { useAuth } from "@/src/context/AuthContext";
+import { useAuth, useUILabels } from "@/src/context/AuthContext";
 import useAndroidBackOverride from "@/src/hooks/useAndroidBackOverride";
 import { refreshOrderData } from "@/src/cache";
 import { fs, ms, sp } from "@/src/utils/responsive";
@@ -264,6 +264,7 @@ const getBillingApprovalMessage = (response: any) => {
 
 export default function OrderDetailsScreen() {
   const { user } = useAuth();
+  const { t } = useUILabels();
   const userRole = user?.role?.toLowerCase() || "";
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
@@ -293,18 +294,33 @@ export default function OrderDetailsScreen() {
     setExpandedItems((prev) => ({ ...prev, [key]: !prev[key] }));
   }, []);
 
-  // Show the edit (pencil) action only to the order's creator, and only while
-  // the next approver hasn't acted yet. Once approved/rejected/forwarded, the
-  // order is locked and the creator can view it but no longer edit it.
+  // Show the edit (pencil) action in two cases:
+  //   1. The order's CREATOR, while the next approver hasn't acted yet.
+  //   2. An APPROVER reviewing an order that is pending their action — so they
+  //      can correct item details before confirming the approval. This is what
+  //      makes every approval a "review (and optionally edit) then confirm"
+  //      flow: the Approve button on the queue cards now opens this page, and
+  //      the approver edits here via the same order-entry screen creators use.
+  // Both paths navigate into create.tsx edit mode and return here on save.
   const { isCreator, awaitingApprover } = getCreatorEditState(order, user);
   const canCreatorEdit = isCreator && awaitingApprover;
+  // Approver can edit only while the order is genuinely pending their action and
+  // it wasn't opened read-only from the "others" tab (same gate as the action
+  // bar's canActOnOrder).
+  const canApproverEdit =
+    !isCreator &&
+    sourceTab !== "others" &&
+    isPendingActionStatusForRole(order, userRole);
+  const canEditOrder = canCreatorEdit || canApproverEdit;
   useEffect(() => {
-    // Only the creator's header is customised; everyone else keeps the default
-    // header (with the notification bell) untouched.
-    if (!order || !isCreator) return;
-    if (!canCreatorEdit) {
-      // Creator, but the approver has acted — lock the order (no edit action).
-      navigation.setOptions({ headerRight: () => null });
+    // Header is customised only when this user may edit; everyone else keeps the
+    // default header (with the notification bell) untouched.
+    if (!order) return;
+    if (!canEditOrder) {
+      // Creator whose approver has acted, or a viewer with no edit rights —
+      // lock the order (no edit action). Leaving the creator branch explicit so
+      // a locked creator order shows no pencil rather than the default header.
+      if (isCreator) navigation.setOptions({ headerRight: () => null });
       return;
     }
     const parsedId = Number(
@@ -337,7 +353,7 @@ export default function OrderDetailsScreen() {
         </TouchableOpacity>
       ),
     });
-  }, [navigation, isCreator, canCreatorEdit, order?.id, orderId]);
+  }, [navigation, isCreator, canEditOrder, order?.id, orderId]);
 
   const fetchOrder = useCallback(async (id: number, isRefresh = false) => {
     try {
@@ -882,7 +898,7 @@ export default function OrderDetailsScreen() {
                       <View style={styles.itemBody}>
                         <View style={styles.gridWrap}>
                           <View style={styles.gridCol}>
-                            <GridCell label="Price List (Basic)" value={`₹${item.price_list_basic}`} />
+                            <GridCell label={t("price_list", "Price List (Basic)")} value={`₹${item.price_list_basic}`} />
                             <GridCell label="Basic Price" value={`₹${item.basic_price}`} danger={isFlagged} />
                             <GridCell label="Boxes" value={item.boxes} />
                             <GridCell label="PCS/Case" value={item.pcs} />

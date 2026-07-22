@@ -1141,7 +1141,19 @@ export default function BillingOrderList() {
 
             <TouchableOpacity
               style={[styles.actionBtn, styles.approveBtn]}
-              onPress={() => openApproveModal(item.id)}
+              onPress={() =>
+                // Approve now opens the order for review first — billing can
+                // inspect (and optionally edit) the items and then confirm the
+                // approval from the details page's action bar.
+                router.push({
+                  pathname: "/orders/orderdetails",
+                  params: {
+                    orderId: item.id,
+                    from: "orders/orderlist",
+                    sourceTab: activeTab,
+                  },
+                })
+              }
               disabled={actionLoading !== null}
             >
               {actionLoading?.id === item.id && actionLoading.type === "approve" ? (

@@ -1076,7 +1076,19 @@ export default function PendingApprovalScreen() {
 
           <TouchableOpacity
             style={[styles.actionBtn, styles.approveBtn]}
-            onPress={() => handleApprove(item.id, item.order_number)}
+            onPress={() =>
+              // Approve now opens the order for review first — the approver can
+              // inspect (and optionally edit) the items and then confirm the
+              // approval from the details page's action bar. No direct approve.
+              router.push({
+                pathname: "/orders/orderdetails",
+                params: {
+                  orderId: item.id,
+                  from: "approver/pending_approval",
+                  sourceTab: activeTab,
+                },
+              })
+            }
             disabled={actionLoading !== null}
           >
             {isApproveLoading ? (

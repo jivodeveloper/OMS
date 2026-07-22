@@ -21,6 +21,7 @@ import {
   productService,
 } from "@/src/services/order.service";
 import { userService } from "@/src/services/user.service";
+import { useUILabels } from "@/src/context/AuthContext";
 
 type ReportUser = {
   id: number;
@@ -946,6 +947,7 @@ function OrderDetailsModal({
   loading: boolean;
   onClose: () => void;
 }) {
+  const { t } = useUILabels();
   const items = order?.items || order?.order_items || order?.orderItems || [];
   const subtotal = items.reduce((sum: number, item: any) => sum + toNumber(item?.total), 0);
   const tax = items.reduce(
@@ -997,7 +999,7 @@ function OrderDetailsModal({
                     <DetailRow label="Boxes" value={String(item?.boxes ?? "-")} compact />
                     <DetailRow label="Ltrs" value={String(item?.ltrs ?? "-")} compact />
                     <DetailRow label="Total Ltrs" value={formatAmount(getItemTotalLtrs(item))} compact />
-                    <DetailRow label="Price List (Basic)" value={formatAmount(item?.price_list_basic)} compact />
+                    <DetailRow label={t("price_list", "Price List (Basic)")} value={formatAmount(item?.price_list_basic)} compact />
                     <DetailRow label="Basic Price" value={formatAmount(item?.basic_price)} compact />
                     <DetailRow label="Tax %" value={formatAmount(item?.tax_rate)} compact />
                     <DetailRow label="Amount" value={`Rs ${formatAmount(item?.total)}`} compact />

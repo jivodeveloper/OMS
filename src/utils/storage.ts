@@ -4,6 +4,7 @@ const KEYS = {
   ACCESS_TOKEN: 'access_token',
   REFRESH_TOKEN: 'refresh_token',
   USER: 'user',
+  UI_LABELS: 'ui_labels',
   HIDDEN_NOTIFICATION_IDS: 'hidden_notification_ids',
   NOTIFICATION_PERMISSION: 'notification_permission_state',
   // Stable per-install device identifier. Created once, then persisted for the
@@ -53,6 +54,23 @@ export const storage = {
   getUser: async () => {
     const user = await AsyncStorage.getItem(KEYS.USER);
     return user ? JSON.parse(user) : null;
+  },
+
+  // Dynamic UI labels ({ field_key: display_name }). Cached so a relaunch paints
+  // the last-known wording instantly, before the network fetch completes.
+  saveUiLabels: async (labels: Record<string, string>) => {
+    await AsyncStorage.setItem(KEYS.UI_LABELS, JSON.stringify(labels));
+  },
+
+  getUiLabels: async (): Promise<Record<string, string>> => {
+    const raw = await AsyncStorage.getItem(KEYS.UI_LABELS);
+    if (!raw) return {};
+    try {
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch {
+      return {};
+    }
   },
 
   getHiddenNotificationIds: async (): Promise<number[]> => {
@@ -137,6 +155,7 @@ export const storage = {
       KEYS.ACCESS_TOKEN,
       KEYS.REFRESH_TOKEN,
       KEYS.USER,
+      KEYS.UI_LABELS,
       KEYS.HIDDEN_NOTIFICATION_IDS,
     ]);
   },

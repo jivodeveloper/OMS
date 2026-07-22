@@ -13,6 +13,12 @@ import { authService, User, LoginRequest } from "../services/auth.service";
 import { notificationService } from "../services/notification.service";
 import { deviceService } from "../services/device.service";
 import {
+  uiConfigService,
+  subscribeUILabels,
+  getUILabels,
+  type UILabelMap,
+} from "../services/uiConfig.service";
+import {
   getNotificationDedupeKey,
   type OMSNotificationData,
 } from "../utils/notificationRouting";
@@ -29,6 +35,8 @@ interface AuthContextType {
   user: User | null;
   isLoading: boolean;
   isLoggedIn: boolean;
+  /** Dynamic UI field labels ({ field_key: display_name }) for this session. */
+  uiLabels: UILabelMap;
   login: (
     credentials: LoginRequest,
   ) => Promise<{ success: boolean; message: string }>;
@@ -75,6 +83,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 }) => {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [uiLabels, setUiLabels] = useState<UILabelMap>(getUILabels);
   // Whether to SUPPRESS the "Session expired" alert. Default true so it never
   // fires during app startup / before a healthy session exists. It's flipped
   // off once a valid session is confirmed, and back on during intentional
@@ -84,6 +93,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
   // Check for existing session on app start
   useEffect(() => {
     checkAuth();
+  }, []);
+
+  // Mirror the dynamic UI-label store into React state so any screen using
+  // useUILabels() re-renders the moment labels load or an admin edit lands.
+  useEffect(() => {
+    setUiLabels(getUILabels());
+    return subscribeUILabels(setUiLabels);
   }, []);
 
   // Scope the API cache to the signed-in user, so cached payloads can never be
@@ -146,6 +162,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
         // Restored a valid session — register/refresh this device in the
         // background. Never blocks startup, never throws.
         void deviceService.onAuthenticated("startup");
+
+        // Load dynamic UI labels once for this restored session (fire-and-forget).
+        void uiConfigService.load();
       } else {
         // App launched UNAUTHENTICATED. If a notification opened the app, its
         // deep-link must NOT fire after the user logs in (Task: CASE 4). Record
@@ -209,6 +228,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
         // best-effort, never blocks login, never throws, and retries on the
         // next successful auth if it fails now.
         void deviceService.onAuthenticated("login");
+
+        // Fetch dynamic UI labels once for this session (fire-and-forget: never
+        // blocks login; screens fall back to hardcoded text until it resolves).
+        void uiConfigService.load(true);
 
         return { success: true, message: "Login successful" };
       }
@@ -280,6 +303,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     // The stable device id itself is preserved (storage.clear() keeps it).
     deviceService.reset();
 
+    // Drop cached UI labels so the next account starts clean (storage.clear()
+    // below removes the persisted copy).
+    uiConfigService.reset();
+
     // Drop every cached API payload so the next account on this device can
     // never be served the previous user's data.
     void resetCache();
@@ -311,6 +338,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
         user,
         isLoading,
         isLoggedIn: !!user,
+        uiLabels,
         login,
         logout,
         refreshUser,
@@ -328,4 +356,20 @@ export const useAuth = () => {
     throw new Error("useAuth must be used within an AuthProvider");
   }
   return context;
+};
+
+/**
+ * Read dynamic UI labels in a component. Returns a `t(key, fallback)` reader
+ * that re-renders on label changes:
+ *
+ *   const { t } = useUILabels();
+ *   <FixedLabelTextInput label={t("price_list", "Price List (Basic)")} />
+ */
+export const useUILabels = () => {
+  const { uiLabels } = useAuth();
+  const t = (key: string, fallback: string): string => {
+    const value = uiLabels[key];
+    return typeof value === "string" && value.trim() ? value : fallback;
+  };
+  return { labels: uiLabels, t };
 };
