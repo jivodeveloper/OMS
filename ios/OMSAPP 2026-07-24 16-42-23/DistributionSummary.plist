@@ -1,0 +1,154 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>OMSAPP.ipa</key>
+	<array>
+		<dict>
+			<key>architectures</key>
+			<array>
+				<string>arm64</string>
+			</array>
+			<key>buildNumber</key>
+			<string>3</string>
+			<key>certificate</key>
+			<dict>
+				<key>SHA1</key>
+				<string>F8A71948482F06FDE9DC7CB8DC9F7B78464033FA</string>
+				<key>dateExpires</key>
+				<string>24/06/27</string>
+				<key>type</key>
+				<string>Cloud Managed Apple Distribution</string>
+			</dict>
+			<key>embeddedBinaries</key>
+			<array>
+				<dict>
+					<key>architectures</key>
+					<array>
+						<string>arm64</string>
+					</array>
+					<key>buildNumber</key>
+					<string>1</string>
+					<key>certificate</key>
+					<dict>
+						<key>SHA1</key>
+						<string>F8A71948482F06FDE9DC7CB8DC9F7B78464033FA</string>
+						<key>dateExpires</key>
+						<string>24/06/27</string>
+						<key>type</key>
+						<string>Cloud Managed Apple Distribution</string>
+					</dict>
+					<key>name</key>
+					<string>React.framework</string>
+					<key>symbols</key>
+					<true/>
+					<key>team</key>
+					<dict>
+						<key>id</key>
+						<string>Y7U4CTA5P2</string>
+						<key>name</key>
+						<string>Jivo Mart Private Limited</string>
+					</dict>
+					<key>versionNumber</key>
+					<string>1.0</string>
+				</dict>
+				<dict>
+					<key>architectures</key>
+					<array>
+						<string>arm64</string>
+					</array>
+					<key>buildNumber</key>
+					<string>1</string>
+					<key>certificate</key>
+					<dict>
+						<key>SHA1</key>
+						<string>F8A71948482F06FDE9DC7CB8DC9F7B78464033FA</string>
+						<key>dateExpires</key>
+						<string>24/06/27</string>
+						<key>type</key>
+						<string>Cloud Managed Apple Distribution</string>
+					</dict>
+					<key>name</key>
+					<string>ReactNativeDependencies.framework</string>
+					<key>symbols</key>
+					<true/>
+					<key>team</key>
+					<dict>
+						<key>id</key>
+						<string>Y7U4CTA5P2</string>
+						<key>name</key>
+						<string>Jivo Mart Private Limited</string>
+					</dict>
+					<key>versionNumber</key>
+					<string>1.0</string>
+				</dict>
+				<dict>
+					<key>architectures</key>
+					<array>
+						<string>arm64</string>
+					</array>
+					<key>buildNumber</key>
+					<string>0.12.0</string>
+					<key>certificate</key>
+					<dict>
+						<key>SHA1</key>
+						<string>F8A71948482F06FDE9DC7CB8DC9F7B78464033FA</string>
+						<key>dateExpires</key>
+						<string>24/06/27</string>
+						<key>type</key>
+						<string>Cloud Managed Apple Distribution</string>
+					</dict>
+					<key>name</key>
+					<string>hermes.framework</string>
+					<key>symbols</key>
+					<true/>
+					<key>team</key>
+					<dict>
+						<key>id</key>
+						<string>Y7U4CTA5P2</string>
+						<key>name</key>
+						<string>Jivo Mart Private Limited</string>
+					</dict>
+					<key>versionNumber</key>
+					<string>0.12.0</string>
+				</dict>
+			</array>
+			<key>entitlements</key>
+			<dict>
+				<key>application-identifier</key>
+				<string>Y7U4CTA5P2.com.jivo.oms</string>
+				<key>aps-environment</key>
+				<string>production</string>
+				<key>beta-reports-active</key>
+				<true/>
+				<key>com.apple.developer.team-identifier</key>
+				<string>Y7U4CTA5P2</string>
+				<key>get-task-allow</key>
+				<false/>
+			</dict>
+			<key>name</key>
+			<string>OMSAPP.app</string>
+			<key>profile</key>
+			<dict>
+				<key>UUID</key>
+				<string>f2a130a8-939a-4e13-b994-ba9dede47682</string>
+				<key>dateExpires</key>
+				<string>24/06/27</string>
+				<key>name</key>
+				<string>iOS Team Store Provisioning Profile: com.jivo.oms</string>
+			</dict>
+			<key>symbols</key>
+			<true/>
+			<key>team</key>
+			<dict>
+				<key>id</key>
+				<string>Y7U4CTA5P2</string>
+				<key>name</key>
+				<string>Jivo Mart Private Limited</string>
+			</dict>
+			<key>versionNumber</key>
+			<string>1.0.3</string>
+		</dict>
+	</array>
+</dict>
+</plist>
