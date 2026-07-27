@@ -4,7 +4,7 @@
 
 expo-env.d.ts
 # @end expo-cli
-
+build.gradle
 # Local environment and secrets
 .env
 .env.*
@@ -14,7 +14,10 @@ GoogleService-Info.plist
 *.p8
 *.p12
 *.keystore
+*.jks
 *.mobileprovision
+android/gradle.properties
+android/keystore.properties
 
 # Dependencies
 node_modules/
