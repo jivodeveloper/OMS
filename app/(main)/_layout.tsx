@@ -300,6 +300,9 @@ export default function MainLayout() {
           // button onto Home/Orders.
           const isOrderEntry =
             route.name === "orders/create" || route.name === "orders/foc";
+          // Receive Payment is an admin-only screen that still wants the bell,
+          // so it opts out of the blanket "no header actions for admin" rule.
+          const isReceivePayment = route.name === "payments/receive-payment";
 
           return {
             headerShown: true,
@@ -351,7 +354,8 @@ export default function MainLayout() {
               </TouchableOpacity>
             ),
             headerRight: () => {
-              if (isNotifications || userRole === "admin") return null;
+              if (isNotifications) return null;
+              if (userRole === "admin" && !isReceivePayment) return null;
 
               return (
                 <View style={styles.headerActions}>
@@ -499,6 +503,20 @@ export default function MainLayout() {
               <Ionicons name="document-text-outline" size={22} color={color} />
             ),
             drawerItemStyle: isVisible("orders/orderlist")
+              ? visibleStyle
+              : hiddenStyle,
+          }}
+        />
+        <Drawer.Screen
+          name="payments/receive-payment"
+          options={{
+            drawerLabel: ({ color }) =>
+              renderDrawerLabel("Receive Payment", color),
+            title: "Receive Payment",
+            drawerIcon: ({ color }) => (
+              <Ionicons name="wallet-outline" size={22} color={color} />
+            ),
+            drawerItemStyle: isVisible("payments/receive-payment")
               ? visibleStyle
               : hiddenStyle,
           }}

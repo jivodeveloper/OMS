@@ -41,6 +41,7 @@ export const SCREEN_ROLES: Record<string, string[]> = {
   "orders/foc": ["manager", "billing"],
   "orders/orderlist": ["billing"],
   "reports/daily-report": ["admin", "billing"],
+  "payments/receive-payment": ["admin"],
   "admin/order-flow": ["admin"],
   "admin/sales-quotation": ["admin"],
   "users/create": ["admin"],
