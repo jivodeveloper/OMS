@@ -32,6 +32,7 @@ import { APP_CONFIG } from "@/src/constants/config";
 import { deviceService } from "@/src/services/device.service";
 import { useAuth } from "@/src/context/AuthContext";
 import CustomDialog from "@/src/components/common/CustomDialog";
+import { isOnline, OFFLINE_MESSAGE } from "@/src/utils/network";
 
 const TECHNICAL_ERROR_PATTERNS = [
   /request timed out/i,
@@ -242,6 +243,17 @@ export default function LoginScreen() {
   const handleLogin = async () => {
     if (submittingRef.current) return; // one request at a time (Task 5)
     if (!validate()) return;
+
+    // Pre-flight connectivity check: if the device is offline, tell the user
+    // plainly instead of firing a request that will hang and fail with a
+    // generic error. This is the common "no internet, tried to log in" case.
+    if (!(await isOnline())) {
+      setDialogTitle("No Internet Connection");
+      setDialogMessage(OFFLINE_MESSAGE);
+      setDialogVisible(true);
+      return;
+    }
+
     submittingRef.current = true;
     const values = credentials();
     setUsername(values.username);

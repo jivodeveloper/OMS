@@ -6,6 +6,7 @@ import { AuthProvider } from "@/src/context/AuthContext";
 import { UpdateProvider, useUpdate } from "@/src/context/UpdateContext";
 import AppDialogHost from "@/src/components/common/AppDialog";
 import ToastHost from "@/src/components/common/Toast";
+import OfflineBanner from "@/src/components/common/OfflineBanner";
 import UpdateRequiredScreen from "@/src/components/common/UpdateRequiredScreen";
 import {
   darkNavigationTheme,
@@ -40,6 +41,9 @@ function ThemedApplication() {
         <AppDialogHost />
         {/* App-wide non-blocking toast (success/error feedback). */}
         <ToastHost />
+        {/* App-wide offline indicator — shows a top bar whenever there is no
+            internet, on every screen including login. */}
+        <OfflineBanner />
         {/* Force-update gate — rendered ABOVE the navigator, so when active it
             covers the entire app and blocks all navigation without any screen
             being aware of it. */}
