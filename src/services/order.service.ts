@@ -202,13 +202,13 @@ export const orderService = {
 
  getPartyProducts: async (cardCode: string, category?: string | null) => {
  const query = category
- ? `/orders/party-products/${encodeURIComponent(cardCode)}?party_category=${encodeURIComponent(category)}`
- : `/orders/party-products/${encodeURIComponent(cardCode)}`;
+ ? `/orders/party-products/${encodeURIComponent(cardCode)}/?party_category=${encodeURIComponent(category)}`
+ : `/orders/party-products/${encodeURIComponent(cardCode)}/`;
  return await api.get(query);
  },
 
  getorderstatus: async (cardCode: string) => {
- return await api.get(`/orders/party-products/${cardCode}`);
+ return await api.get(`/orders/party-products/${cardCode}/`);
  },
 
  getbranch: async (company: string) => {
@@ -247,7 +247,7 @@ export const orderService = {
  },
 
  getorderdetailsbyid: async(orderId:number):Promise<any>=>{
- return await api.get(`/orders/orderdetailsbyid/${orderId}`);
+ return await api.get(`/orders/orderdetailsbyid/${orderId}/`);
  },
 
  getNotifications: async (): Promise<OrderNotification[]> => {
@@ -333,7 +333,7 @@ export const orderService = {
  // return await api.get(`/orders/list/?user_id=${userdata.id}`);
 },
 addScheme: async (payload: { scheme_name: string; item_code: string,state_code:string }) => {
- return await api.post('/orders/create_scheme', payload);
+ return await api.post('/orders/create_scheme/', payload);
 }
 
  

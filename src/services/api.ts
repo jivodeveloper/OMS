@@ -107,11 +107,25 @@ const parseResponse = async (response: Response) => {
   return { raw, data };
 };
 
+// Ensure the path portion of the endpoint always ends with a trailing slash.
+// Django's APPEND_SLASH redirects non-slash URLs (301), and iOS/NSURLSession
+// strips the Authorization header on redirects — causing 401s on iOS only.
+// Normalising here means no individual call-site can forget the slash.
+const ensureTrailingSlash = (endpoint: string): string => {
+  const qIndex = endpoint.indexOf('?');
+  if (qIndex === -1) {
+    return endpoint.endsWith('/') ? endpoint : `${endpoint}/`;
+  }
+  const path = endpoint.slice(0, qIndex);
+  const query = endpoint.slice(qIndex);
+  return (path.endsWith('/') ? path : `${path}/`) + query;
+};
+
 const requestWithFallback = async (
   endpoint: string,
   init: RequestInit
 ): Promise<any> => {
-  const url = `${BASE_URL}${endpoint}`;
+  const url = `${BASE_URL}${ensureTrailingSlash(endpoint)}`;
   const timeoutMs = getTimeoutForEndpoint(endpoint);
   const shouldUseTimeout = timeoutMs > 0;
 
