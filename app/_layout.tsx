@@ -1,10 +1,12 @@
 import { ThemeProvider as NavigationThemeProvider } from "@react-navigation/native";
 import { Stack } from "expo-router";
-import { StatusBar } from "react-native";
+import { StatusBar, StyleSheet, View } from "react-native";
 import { PaperProvider } from "react-native-paper";
 import { AuthProvider } from "@/src/context/AuthContext";
+import { UpdateProvider, useUpdate } from "@/src/context/UpdateContext";
 import AppDialogHost from "@/src/components/common/AppDialog";
 import ToastHost from "@/src/components/common/Toast";
+import UpdateRequiredScreen from "@/src/components/common/UpdateRequiredScreen";
 import {
   darkNavigationTheme,
   darkPaperTheme,
@@ -38,17 +40,36 @@ function ThemedApplication() {
         <AppDialogHost />
         {/* App-wide non-blocking toast (success/error feedback). */}
         <ToastHost />
+        {/* Force-update gate — rendered ABOVE the navigator, so when active it
+            covers the entire app and blocks all navigation without any screen
+            being aware of it. */}
+        <ForceUpdateGate />
       </PaperProvider>
     </NavigationThemeProvider>
+  );
+}
+
+/** Full-screen overlay shown while the backend requires an app update.
+ *  Absolutely positioned over everything, so it covers the whole navigator and
+ *  intercepts all touches — the app underneath is completely unreachable. */
+function ForceUpdateGate() {
+  const { updateRequired } = useUpdate();
+  if (!updateRequired) return null;
+  return (
+    <View style={StyleSheet.absoluteFill} pointerEvents="auto">
+      <UpdateRequiredScreen />
+    </View>
   );
 }
 
 export default function RootLayout() {
   return (
     <ThemeProvider>
-      <AuthProvider>
-        <ThemedApplication />
-      </AuthProvider>
+      <UpdateProvider>
+        <AuthProvider>
+          <ThemedApplication />
+        </AuthProvider>
+      </UpdateProvider>
     </ThemeProvider>
   );
 }

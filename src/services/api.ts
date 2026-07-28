@@ -136,6 +136,20 @@ const requestWithFallback = async (
 
     if (!response.ok) {
       console.log('API Error:', response.status, data || raw);
+
+      // Force update: HTTP 426 + APP_UPDATE_REQUIRED. Raise the global block
+      // from this one chokepoint so NO individual API call has to handle it.
+      // This only ever fires for a real server response — a network/offline
+      // failure throws and is handled in the catch below, so offline can never
+      // trigger update mode.
+      if (isForceUpdateResponse(response.status, data)) {
+        try {
+          updateRequiredHandler?.(data);
+        } catch {
+          /* the update hook must never break the request path */
+        }
+      }
+
       return {
         success: false,
         message:
@@ -225,6 +239,30 @@ let authenticatedHandler: (() => void) | null = null;
 export const setAuthenticatedHandler = (fn: (() => void) | null) => {
   authenticatedHandler = fn;
 };
+
+// Force-update handoff. The backend returns HTTP 426 + code APP_UPDATE_REQUIRED
+// when this app build is below the required version. UpdateContext registers a
+// handler here, so the block is raised from the ONE place every response passes
+// through — no screen handles 426 itself, and this layer never imports the
+// context (same inversion-of-control shape as the handlers above).
+export type UpdateRequiredPayload = {
+  message?: string;
+  required_version?: string;
+  required_build?: number;
+  store_url?: string;
+};
+let updateRequiredHandler: ((payload: UpdateRequiredPayload) => void) | null = null;
+export const setUpdateRequiredHandler = (
+  fn: ((payload: UpdateRequiredPayload) => void) | null,
+) => {
+  updateRequiredHandler = fn;
+};
+
+// True ONLY for a genuine force-update response: HTTP 426 with the agreed code.
+// A 426 without the code, or the code without a 426, is ignored — we never
+// block the app on anything but the exact contract.
+const isForceUpdateResponse = (statusCode: number, data: any): boolean =>
+  statusCode === 426 && data?.code === 'APP_UPDATE_REQUIRED';
 
 const decodeBase64 = (input: string): string | null => {
   try {
