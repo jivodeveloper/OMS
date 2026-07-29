@@ -3,8 +3,8 @@ import { StyleSheet, Text, View } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import { COLORS } from "@/src/constants/theme";
-import { formatAmount } from "../constants";
-import type { PaymentMethodEntry } from "../types";
+import { formatAmount } from "../_lib/constants";
+import type { PaymentMethodEntry } from "../_lib/types";
 
 interface PaymentSummaryProps {
   methods: PaymentMethodEntry[];

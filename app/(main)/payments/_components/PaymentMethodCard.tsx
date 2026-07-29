@@ -1,7 +1,8 @@
 import React from "react";
-import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
-import { Surface } from "react-native-paper";
+import { Platform, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { Surface, TextInput } from "react-native-paper";
 import { Ionicons } from "@expo/vector-icons";
+import DateTimePicker from "@react-native-community/datetimepicker";
 import { COLORS, RADIUS, SPACING } from "@/src/constants/theme";
 import Dropdown from "@/src/components/common/DropdownProps";
 import FormField from "./FormField";
@@ -12,9 +13,9 @@ import {
   methodMeta,
   PAYMENT_METHOD_OPTIONS,
   type PaymentMethodType,
-} from "../constants";
-import { validateCashBreakdown } from "../validation";
-import type { AttachmentStub, CashNoteRow, PaymentMethodEntry } from "../types";
+} from "../_lib/constants";
+import { validateCashBreakdown } from "../_lib/validation";
+import type { AttachmentStub, CashNoteRow, PaymentMethodEntry } from "../_lib/types";
 
 interface PaymentMethodCardProps {
   entry: PaymentMethodEntry;
@@ -35,6 +36,7 @@ export default function PaymentMethodCard({
   onChange,
   onRemove,
 }: PaymentMethodCardProps) {
+  const [showDatePicker, setShowDatePicker] = React.useState(false);
   const meta = methodMeta(entry.method);
   const amount = Number(entry.amount) || 0;
   const cashError = validateCashBreakdown(entry);
@@ -48,7 +50,8 @@ export default function PaymentMethodCard({
       denomination: null,
       quantity: "",
     };
-    onChange({ noteRows: [...entry.noteRows, row] });
+    // Adding a row while the section is closed would hide the row just created.
+    onChange({ noteRows: [...entry.noteRows, row], notesExpanded: true });
   };
 
   const changeNoteRow = (id: string, patch: Partial<CashNoteRow>) => {
@@ -86,8 +89,8 @@ export default function PaymentMethodCard({
       <TouchableOpacity
         style={styles.header}
         activeOpacity={0.8}
-        // An expanded card with an unbalanced breakdown stays open — collapsing
-        // it would hide the error the user still has to fix.
+        // An expanded card whose denominations don't balance stays open —
+        // collapsing it would hide the error the user still has to fix.
         onPress={expanded && cashError ? undefined : onToggle}
         disabled={expanded && !!cashError}
         accessibilityRole="button"
@@ -141,22 +144,127 @@ export default function PaymentMethodCard({
             onChangeText={(text) =>
               onChange({ amount: text.replace(/[^0-9.]/g, "") })
             }
-            placeholder="0"
+            placeholder="Enter Amount"
             keyboardType="decimal-pad"
             prefix="₹"
             required
           />
 
-          {/* Cash records denominations; UPI and Cheque record proof. */}
+          {/* ── Cash ── */}
           {entry.method === "cash" ? (
             <CashNoteBreakdown
               rows={entry.noteRows}
               amount={amount}
               error={cashError}
+              expanded={entry.notesExpanded}
+              onToggle={() => onChange({ notesExpanded: !entry.notesExpanded })}
               onAddRow={addNoteRow}
               onChangeRow={changeNoteRow}
               onRemoveRow={removeNoteRow}
             />
+          ) : null}
+
+          {/* UPI carries no reference field — the screenshot is the record. */}
+
+          {/* ── Cheque ── */}
+          {entry.method === "cheque" ? (
+            <>
+              <FormField
+                label="Cheque Number"
+                value={entry.chequeNumber}
+                onChangeText={(text) =>
+                  onChange({ chequeNumber: text.replace(/[^0-9]/g, "") })
+                }
+                placeholder="Enter cheque number"
+                keyboardType="number-pad"
+                leftIcon="numeric"
+              />
+
+              <FormField
+                label="Bank Name"
+                value={entry.bankName}
+                onChangeText={(text) => onChange({ bankName: text })}
+                placeholder="Enter bank name"
+                leftIcon="bank-outline"
+              />
+
+              {/* Cheque Date — web uses a native date input, native uses the
+                  picker (same split as the Create Order delivery date). */}
+              <View style={styles.field}>
+                <Text style={styles.fieldLabel}>Cheque Date</Text>
+                {Platform.OS === "web" ? (
+                  <View style={styles.webDateWrapper}>
+                    <Ionicons
+                      name="calendar-outline"
+                      size={18}
+                      color={COLORS.primary}
+                    />
+                    {/* @ts-ignore — 'input' is valid on web */}
+                    <input
+                      type="date"
+                      value={entry.chequeDate}
+                      onChange={(event: any) =>
+                        onChange({ chequeDate: event.target.value })
+                      }
+                      style={{
+                        border: "none",
+                        outline: "none",
+                        fontSize: 14,
+                        color: COLORS.black,
+                        background: "transparent",
+                        width: "100%",
+                        marginLeft: 10,
+                        cursor: "pointer",
+                      }}
+                    />
+                  </View>
+                ) : (
+                  <>
+                    <TouchableOpacity
+                      activeOpacity={0.8}
+                      onPress={() => setShowDatePicker(true)}
+                    >
+                      <TextInput
+                        value={entry.chequeDate}
+                        mode="outlined"
+                        placeholder="Select date"
+                        editable={false}
+                        pointerEvents="none"
+                        textColor={COLORS.black}
+                        style={styles.input}
+                        outlineStyle={styles.inputOutline}
+                        outlineColor={COLORS.border}
+                        activeOutlineColor={COLORS.primary}
+                        left={
+                          <TextInput.Icon
+                            icon="calendar-outline"
+                            color={COLORS.primary}
+                          />
+                        }
+                      />
+                    </TouchableOpacity>
+
+                    {showDatePicker ? (
+                      <DateTimePicker
+                        value={
+                          entry.chequeDate ? new Date(entry.chequeDate) : new Date()
+                        }
+                        mode="date"
+                        display={Platform.OS === "ios" ? "spinner" : "default"}
+                        onChange={(_event, selectedDate) => {
+                          setShowDatePicker(false);
+                          if (selectedDate) {
+                            onChange({
+                              chequeDate: selectedDate.toISOString().split("T")[0],
+                            });
+                          }
+                        }}
+                      />
+                    ) : null}
+                  </>
+                )}
+              </View>
+            </>
           ) : null}
 
           {supportsAttachment ? (
@@ -170,23 +278,23 @@ export default function PaymentMethodCard({
             />
           ) : null}
 
-          {/* Card footer — stays at the bottom of the expanded card. */}
+          {/* ── Card actions: pinned to the bottom of the expanded card ── */}
           <View style={styles.footer}>
             <TouchableOpacity
-              style={[styles.footerRemoveBtn, !canRemove && styles.footerDisabled]}
+              style={[styles.removeBtn, !canRemove && styles.actionDisabled]}
               activeOpacity={0.8}
               disabled={!canRemove}
               onPress={onRemove}
             >
               <Ionicons
                 name="trash-outline"
-                size={16}
+                size={15}
                 color={canRemove ? COLORS.error : COLORS.textMuted}
               />
               <Text
                 style={[
-                  styles.footerRemoveLabel,
-                  !canRemove && styles.footerDisabledLabel,
+                  styles.removeLabel,
+                  !canRemove && styles.actionLabelDisabled,
                 ]}
               >
                 Remove Payment Method
@@ -265,13 +373,41 @@ const styles = StyleSheet.create({
   field: {
     marginBottom: SPACING.sm,
   },
+  fieldLabel: {
+    fontSize: 12,
+    fontWeight: "500",
+    color: COLORS.textSecondary,
+    marginBottom: SPACING.sm,
+  },
+  input: {
+    backgroundColor: COLORS.inputBackground,
+    fontSize: 14,
+  },
+  inputOutline: {
+    borderRadius: RADIUS.md,
+    borderWidth: 1.5,
+  },
+  webDateWrapper: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: COLORS.inputBackground,
+    borderRadius: RADIUS.md,
+    borderWidth: 1.5,
+    borderColor: COLORS.border,
+    paddingHorizontal: SPACING.md,
+    height: 56,
+  },
   footer: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: SPACING.sm,
     marginTop: SPACING.xs,
     paddingTop: SPACING.md,
     borderTopWidth: 1,
     borderTopColor: COLORS.borderLight,
   },
-  footerRemoveBtn: {
+  removeBtn: {
+    flex: 1,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
@@ -282,16 +418,16 @@ const styles = StyleSheet.create({
     borderColor: COLORS.errorBorder,
     paddingVertical: SPACING.sm + 2,
   },
-  footerRemoveLabel: {
-    fontSize: 12,
+  removeLabel: {
+    fontSize: 11,
     fontWeight: "600",
     color: COLORS.error,
   },
-  footerDisabled: {
+  actionDisabled: {
     backgroundColor: COLORS.inputBackground,
     borderColor: COLORS.border,
   },
-  footerDisabledLabel: {
+  actionLabelDisabled: {
     color: COLORS.textMuted,
   },
 });

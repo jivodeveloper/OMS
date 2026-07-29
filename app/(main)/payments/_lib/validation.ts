@@ -1,6 +1,6 @@
 import type { CashNoteRow, PaymentMethodEntry } from "./types";
 
-/** Sum of denomination × quantity across the note rows. */
+/** Sum of denomination × quantity across the denomination rows. */
 export const noteRowsTotal = (rows: CashNoteRow[]) =>
   rows.reduce(
     (sum, row) => sum + (row.denomination ?? 0) * (Number(row.quantity) || 0),
@@ -9,16 +9,16 @@ export const noteRowsTotal = (rows: CashNoteRow[]) =>
 
 export interface CashBreakdownError {
   message: string;
-  /** Signed gap (breakdown − amount): negative is short, positive is over. */
+  /** Signed gap (denominations − amount): negative is short, positive is over. */
   difference: number;
 }
 
 /**
- * A cash payment's note breakdown must add up to exactly the amount entered.
+ * A cash payment's denominations must add up to exactly the amount entered.
  *
  * Returns null when there is nothing to complain about yet — no amount typed,
- * or no notes recorded at all — so the user isn't shown an error before they've
- * had a chance to fill the section in.
+ * or no denominations recorded at all — so the user isn't shown an error before
+ * they've had a chance to fill the section in.
  */
 export const validateCashBreakdown = (
   entry: PaymentMethodEntry,
@@ -37,11 +37,11 @@ export const validateCashBreakdown = (
     difference,
     message:
       difference < 0
-        ? `Note breakdown is short by ₹${Math.abs(difference).toLocaleString("en-IN")}. It must equal the amount entered.`
-        : `Note breakdown exceeds the amount by ₹${difference.toLocaleString("en-IN")}. It must equal the amount entered.`,
+        ? `Denominations are short by ₹${Math.abs(difference).toLocaleString("en-IN")}. They must equal the amount entered.`
+        : `Denominations exceed the amount by ₹${difference.toLocaleString("en-IN")}. They must equal the amount entered.`,
   };
 };
 
-/** True when every cash card's breakdown balances. */
+/** True when any card's denominations don't balance against its amount. */
 export const hasBlockingErrors = (methods: PaymentMethodEntry[]) =>
   methods.some((entry) => validateCashBreakdown(entry) !== null);

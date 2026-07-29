@@ -1,4 +1,4 @@
-import type { PaymentMethodType, PayToType } from "./constants";
+import type { PaymentMethodType } from "./constants";
 
 export interface CashNoteRow {
   id: string;
@@ -20,15 +20,24 @@ export interface PaymentMethodEntry {
   id: string;
   method: PaymentMethodType;
   amount: string;
-  /** Cash only — denomination rows. */
+  /** Cash only — denomination rows, plus whether that section is open. */
   noteRows: CashNoteRow[];
-  /** UPI and Cheque only — proof of payment. */
+  notesExpanded: boolean;
+  /** Cheque only. */
+  chequeNumber: string;
+  bankName: string;
+  chequeDate: string;
+  /** UPI and Cheque — proof of payment. */
   attachments: AttachmentStub[];
 }
 
 export interface ReceivePaymentForm {
-  receivedFrom: PayToType | null;
+  company: string | null;
+  /** A party sentinel or a named company user — see RECEIVED_FROM_OPTIONS. */
+  receivedFrom: string | null;
   party: string | null;
+  invoice: string | null;
+  isAdvance: boolean;
   remarks: string;
   methods: PaymentMethodEntry[];
 }

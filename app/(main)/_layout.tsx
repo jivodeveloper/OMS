@@ -31,6 +31,7 @@ import { refreshLiveData, refreshNotifications } from "@/src/cache";
 import { DRAWER_WIDTH } from "@/src/utils/responsive";
 import NotificationPermissionModal from "@/src/components/NotificationPermissionModal";
 import BottomBar from "@/src/components/common/BottomBar";
+import { showToast } from "@/src/components/common/Toast";
 
 const HEADER_ICON_HIT_SLOP = { top: 12, right: 12, bottom: 12, left: 12 };
 
@@ -300,9 +301,17 @@ export default function MainLayout() {
           // button onto Home/Orders.
           const isOrderEntry =
             route.name === "orders/create" || route.name === "orders/foc";
-          // Receive Payment is an admin-only screen that still wants the bell,
-          // so it opts out of the blanket "no header actions for admin" rule.
-          const isReceivePayment = route.name === "payments/receive-payment";
+          // The payment screens are admin-only but still want the bell, so they
+          // opt out of the blanket "no header actions for admin" rule.
+          const isPaymentScreen =
+            route.name === "payments/receive-payment" ||
+            route.name === "payments/bank-deposit" ||
+            route.name === "approval/approval-list" ||
+            route.name === "approval/approval-details";
+          // Bank Deposit carries a help affordance next to the bell.
+          const isBankDeposit = route.name === "payments/bank-deposit";
+          // Approval Details carries an Edit action next to the bell.
+          const isApprovalDetails = route.name === "approval/approval-details";
 
           return {
             headerShown: true,
@@ -355,10 +364,44 @@ export default function MainLayout() {
             ),
             headerRight: () => {
               if (isNotifications) return null;
-              if (userRole === "admin" && !isReceivePayment) return null;
+              if (userRole === "admin" && !isPaymentScreen) return null;
 
               return (
                 <View style={styles.headerActions}>
+                  {isBankDeposit ? (
+                    <TouchableOpacity
+                      hitSlop={HEADER_ICON_HIT_SLOP}
+                      onPress={() => {}}
+                      style={styles.headerBellButton}
+                      accessibilityLabel="Help"
+                    >
+                      <Ionicons
+                        name="help-circle-outline"
+                        size={22}
+                        color={COLORS.text}
+                      />
+                    </TouchableOpacity>
+                  ) : null}
+                  {isApprovalDetails ? (
+                    <TouchableOpacity
+                      hitSlop={HEADER_ICON_HIT_SLOP}
+                      onPress={() => {
+                        // Edit mode lands with the create/edit request screen.
+                        showToast(
+                          "Edit mode arrives with the request form screen.",
+                          "info",
+                        );
+                      }}
+                      style={styles.headerBellButton}
+                      accessibilityLabel="Edit request"
+                    >
+                      <Ionicons
+                        name="create-outline"
+                        size={22}
+                        color={COLORS.text}
+                      />
+                    </TouchableOpacity>
+                  ) : null}
                   {/* Top "+" create shortcut removed — the bottom bar's centre
                       Create button is the single entry point for new orders. */}
                   {isOrderEntry && headerRefresh.available ? (
@@ -517,6 +560,40 @@ export default function MainLayout() {
               <Ionicons name="wallet-outline" size={22} color={color} />
             ),
             drawerItemStyle: isVisible("payments/receive-payment")
+              ? visibleStyle
+              : hiddenStyle,
+          }}
+        />
+        <Drawer.Screen
+          name="approval/approval-list"
+          options={{
+            drawerLabel: ({ color }) =>
+              renderDrawerLabel("Approval Requests", color),
+            title: "Approval Requests",
+            drawerIcon: ({ color }) => (
+              <Ionicons name="shield-checkmark-outline" size={22} color={color} />
+            ),
+            drawerItemStyle: isVisible("approval/approval-list")
+              ? visibleStyle
+              : hiddenStyle,
+          }}
+        />
+        <Drawer.Screen
+          name="approval/approval-details"
+          options={{
+            title: "Approval Details",
+            drawerItemStyle: hiddenStyle,
+          }}
+        />
+        <Drawer.Screen
+          name="payments/bank-deposit"
+          options={{
+            drawerLabel: ({ color }) => renderDrawerLabel("Bank Deposit", color),
+            title: "Bank Deposit",
+            drawerIcon: ({ color }) => (
+              <Ionicons name="business-outline" size={22} color={color} />
+            ),
+            drawerItemStyle: isVisible("payments/bank-deposit")
               ? visibleStyle
               : hiddenStyle,
           }}
