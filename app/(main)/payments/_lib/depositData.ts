@@ -45,6 +45,18 @@ export const PARTY_FILTERS = [
   { label: "Mahesh Agency", value: "Mahesh Agency" },
 ];
 
+/**
+ * Date-range presets for the payments filter. `custom` is a sentinel: picking it
+ * opens a date picker rather than filtering on its own.
+ */
+export const DATE_RANGE_CUSTOM = "custom";
+
+export const DATE_RANGE_OPTIONS: { label: string; value: string }[] = [
+  { label: "Last 2 days", value: "2d" },
+  { label: "Last 7 days", value: "7d" },
+  { label: "Select date...", value: DATE_RANGE_CUSTOM },
+];
+
 /** The window the list is currently showing — drives the footer line. */
 export const DEPOSIT_DATE_RANGE = {
   from: "26 Jul 2026",

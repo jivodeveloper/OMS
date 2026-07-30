@@ -16,6 +16,7 @@ import { Ionicons } from "@expo/vector-icons";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { COLORS, RADIUS, SPACING } from "@/src/constants/theme";
 import Dropdown from "@/src/components/common/DropdownProps";
+import ScreenGuard from "@/src/components/common/ScreenGuard";
 import FormField from "./_components/FormField";
 import DepositPaymentRow from "./_components/DepositPaymentRow";
 import UploadCard from "./_components/UploadCard";
@@ -23,6 +24,8 @@ import { COMPANY_OPTIONS, formatAmount } from "./_lib/constants";
 import {
   AVAILABLE_BALANCE,
   BANK_ACCOUNT_OPTIONS,
+  DATE_RANGE_CUSTOM,
+  DATE_RANGE_OPTIONS,
   DEPOSIT_DATE_RANGE,
   DEPOSIT_TYPE_OPTIONS,
   DEPOSITABLE_PAYMENTS,
@@ -38,7 +41,16 @@ if (
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
 
-export default function BankDepositScreen() {
+/** Permission gate — the screen only mounts for users who may open it. */
+export default function BankDepositRoute() {
+  return (
+    <ScreenGuard screen="payments/bank-deposit">
+      <BankDepositScreen />
+    </ScreenGuard>
+  );
+}
+
+function BankDepositScreen() {
   const [company, setCompany] = useState<string | null>(null);
   const [depositDate, setDepositDate] = useState("2026-07-28");
   const [showDatePicker, setShowDatePicker] = useState(false);
@@ -50,10 +62,24 @@ export default function BankDepositScreen() {
   const [listExpanded, setListExpanded] = useState(true);
   const [search, setSearch] = useState("");
   // Empty = no date filter applied; set by the picker below.
-  const [dateFilter, setDateFilter] = useState("");
+  // Range preset ("2d" | "7d" | "custom"); defaults to the last 2 days.
+  const [dateRange, setDateRange] = useState<string>("2d");
+  // Only set when the preset is `custom` — the specific day chosen.
+  const [customDate, setCustomDate] = useState("");
   const [showFilterDatePicker, setShowFilterDatePicker] = useState(false);
   const [partyFilter, setPartyFilter] = useState<string | null>("all");
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+
+  /**
+   * What is actually being banked. Auto-filled from the selection so the common
+   * case (deposit everything collected) needs no typing, but editable because
+   * the depositor sometimes banks less than they collected. `depositTouched`
+   * tracks whether they've overridden it — once they have, changing the
+   * selection must not silently overwrite their figure.
+   */
+  const [depositAmount, setDepositAmount] = useState("");
+  const [depositTouched, setDepositTouched] = useState(false);
+  const [shortfallReason, setShortfallReason] = useState("");
 
   const [depositSlip, setDepositSlip] = useState<string | null>(null);
   const [depositReceipt, setDepositReceipt] = useState<string | null>(null);
@@ -98,10 +124,80 @@ export default function BankDepositScreen() {
     .filter((payment) => payment.method === "Cheque")
     .reduce((sum, payment) => sum + payment.amount, 0);
 
+  // "Collected" is always the sum of the selection; "deposited" is what the user
+  // says they banked. Until they edit it, the two track each other.
+  const collectedAmount = totalSelected;
+  const depositedAmount = depositTouched
+    ? Number(depositAmount) || 0
+    : collectedAmount;
+
+  const difference = collectedAmount - depositedAmount;
+  const isShort = difference > 0;
+  const isOver = difference < 0;
+  // A reason is only demanded once there is something to explain.
+  const reasonRequired = isShort && collectedAmount > 0;
+  const reasonMissing = reasonRequired && shortfallReason.trim().length === 0;
+
   const togglePayment = (id: string) => {
-    setSelectedIds((prev) =>
-      prev.includes(id) ? prev.filter((value) => value !== id) : [...prev, id],
-    );
+    setSelectedIds((prev) => {
+      const next = prev.includes(id)
+        ? prev.filter((value) => value !== id)
+        : [...prev, id];
+
+      // Keep the deposit figure mirroring the selection while it is still
+      // auto-filled; once the user has typed their own, leave it alone.
+      if (!depositTouched) {
+        const nextTotal = DEPOSITABLE_PAYMENTS.filter((p) =>
+          next.includes(p.id),
+        ).reduce((sum, p) => sum + p.amount, 0);
+        setDepositAmount(nextTotal ? String(nextTotal) : "");
+      }
+      return next;
+    });
+  };
+
+  /** Picking "Select date..." opens the picker; the presets apply immediately. */
+  const handleDateRangeChange = (value: string) => {
+    setDateRange(value);
+    if (value === DATE_RANGE_CUSTOM) {
+      setShowFilterDatePicker(true);
+    } else {
+      setCustomDate("");
+    }
+  };
+
+  /**
+   * Progressive disclosure: each field unlocks only once the one before it is
+   * answered, so the form is filled in a deterministic order and a later choice
+   * can never be made against a stale earlier one.
+   *
+   * Company → Deposit Date → Deposited By → Bank Account → Deposit Type →
+   * payment selection → deposit amount.
+   */
+  const canPickDate = !!company;
+  const canPickDepositedBy = canPickDate && !!depositDate;
+  const canPickBankAccount = canPickDepositedBy && !!depositedBy;
+  const canPickDepositType = canPickBankAccount && !!bankAccount;
+  const headerComplete = canPickDepositType && !!depositType;
+
+  // Submit gating, in the same order as the fields so the disabled button always
+  // reflects the FIRST thing still outstanding.
+  const submitBlocked =
+    !company ||
+    !depositDate ||
+    !depositedBy ||
+    !bankAccount ||
+    !depositType ||
+    !selectedIds.length ||
+    depositedAmount <= 0 ||
+    isOver ||
+    reasonMissing;
+
+  /** Reverts the deposit field to tracking the selection again. */
+  const resetDepositToCollected = () => {
+    setDepositTouched(false);
+    setShortfallReason("");
+    setDepositAmount(collectedAmount ? String(collectedAmount) : "");
   };
 
   return (
@@ -125,8 +221,9 @@ export default function BankDepositScreen() {
                 {selectedIds.length} Selected
               </Text>
             </View>
+            {/* Shows what is actually being banked, not the raw selection. */}
             <Text style={styles.bannerAmount} numberOfLines={1}>
-              ₹{formatAmount(totalSelected)}
+              ₹{formatAmount(depositedAmount)}
             </Text>
           </View>
 
@@ -148,6 +245,18 @@ export default function BankDepositScreen() {
             </View>
             <Text style={styles.bannerLabel}>TOTAL DEPOSIT</Text>
           </View>
+
+          {/* Shortfall is surfaced on the banner so it stays visible while the
+              user scrolls the form below. */}
+          {isShort ? (
+            <View style={styles.bannerShortRow}>
+              <Ionicons name="alert-circle" size={13} color="#FDE68A" />
+              <Text style={styles.bannerShortText}>
+                Collected ₹{formatAmount(collectedAmount)} · short by ₹
+                {formatAmount(difference)}
+              </Text>
+            </View>
+          ) : null}
         </LinearGradient>
 
         <ScrollView
@@ -214,13 +323,17 @@ export default function BankDepositScreen() {
                 <>
                   <TouchableOpacity
                     activeOpacity={0.8}
+                    disabled={!canPickDate}
                     onPress={() => setShowDatePicker(true)}
                   >
                     <TextInput
-                      value={depositDate}
+                      value={canPickDate ? depositDate : ""}
                       mode="outlined"
-                      placeholder="Select date"
+                      placeholder={
+                        canPickDate ? "Select date" : "Select a company first"
+                      }
                       editable={false}
+                      disabled={!canPickDate}
                       pointerEvents="none"
                       textColor={COLORS.black}
                       style={styles.input}
@@ -230,7 +343,7 @@ export default function BankDepositScreen() {
                       left={
                         <TextInput.Icon
                           icon="calendar-outline"
-                          color={COLORS.primary}
+                          color={canPickDate ? COLORS.primary : COLORS.textMuted}
                         />
                       }
                     />
@@ -259,7 +372,12 @@ export default function BankDepositScreen() {
                 data={DEPOSITED_BY_OPTIONS}
                 value={depositedBy}
                 onChange={setDepositedBy}
-                placeholder="Select person..."
+                placeholder={
+                  canPickDepositedBy
+                    ? "Select person..."
+                    : "Select a deposit date first"
+                }
+                disabled={!canPickDepositedBy}
                 leftIcon="person-outline"
                 iconColor={COLORS.textSecondary}
                 required
@@ -272,7 +390,12 @@ export default function BankDepositScreen() {
                 data={BANK_ACCOUNT_OPTIONS}
                 value={bankAccount}
                 onChange={setBankAccount}
-                placeholder="Select bank account..."
+                placeholder={
+                  canPickBankAccount
+                    ? "Select bank account..."
+                    : "Select who deposited first"
+                }
+                disabled={!canPickBankAccount}
                 leftIcon="business-outline"
                 iconColor={COLORS.textSecondary}
                 required
@@ -285,7 +408,12 @@ export default function BankDepositScreen() {
                 data={DEPOSIT_TYPE_OPTIONS}
                 value={depositType}
                 onChange={setDepositType}
-                placeholder="Select deposit type..."
+                placeholder={
+                  canPickDepositType
+                    ? "Select deposit type..."
+                    : "Select a bank account first"
+                }
+                disabled={!canPickDepositType}
                 searchable={false}
                 leftIcon="swap-vertical-outline"
                 iconColor={COLORS.textSecondary}
@@ -309,7 +437,9 @@ export default function BankDepositScreen() {
               <View style={styles.collapsibleText}>
                 <Text style={styles.sectionTitle}>PAYMENTS INCLUDED</Text>
                 <Text style={styles.collapsibleSubtitle}>
-                  Select one or more payments to include in this bank deposit.
+                  {headerComplete
+                    ? "Select one or more payments to include in this bank deposit."
+                    : "Complete the deposit information above to choose payments."}
                 </Text>
               </View>
               <Ionicons
@@ -322,7 +452,24 @@ export default function BankDepositScreen() {
             {/* No summary row here — the banner above already reports the
                 selected count and total. */}
 
-            {listExpanded ? (
+            {/* Locked until the header is filled — picking payments against an
+                unset company/bank account would let a later change invalidate
+                the selection silently. */}
+            {listExpanded && !headerComplete ? (
+              <View style={styles.lockedNotice}>
+                <Ionicons
+                  name="lock-closed-outline"
+                  size={16}
+                  color={COLORS.textMuted}
+                />
+                <Text style={styles.lockedNoticeText}>
+                  Fill in Company, Deposit Date, Deposited By, Bank Account and
+                  Deposit Type to continue.
+                </Text>
+              </View>
+            ) : null}
+
+            {listExpanded && headerComplete ? (
               <View style={styles.listBody}>
                 {/* Search */}
                 <TextInput
@@ -351,74 +498,41 @@ export default function BankDepositScreen() {
                     never resizes the row. */}
                 <View style={styles.filterRow}>
                   <View style={styles.filterCol}>
-                    {Platform.OS === "web" ? (
-                      <View style={styles.dateFilterBtn}>
-                        <Ionicons
-                          name="calendar-outline"
-                          size={16}
-                          color={COLORS.textSecondary}
-                        />
-                        {/* @ts-ignore — 'input' is valid on web */}
-                        <input
-                          type="date"
-                          value={dateFilter}
-                          onChange={(event: any) => setDateFilter(event.target.value)}
-                          style={{
-                            border: "none",
-                            outline: "none",
-                            fontSize: 13,
-                            color: COLORS.black,
-                            background: "transparent",
-                            width: "100%",
-                            marginLeft: 8,
-                            cursor: "pointer",
-                          }}
-                        />
-                      </View>
-                    ) : (
-                      <TouchableOpacity
-                        style={styles.dateFilterBtn}
-                        activeOpacity={0.8}
-                        onPress={() => setShowFilterDatePicker(true)}
-                      >
-                        <Ionicons
-                          name="calendar-outline"
-                          size={16}
-                          color={COLORS.textSecondary}
-                        />
-                        <Text
-                          style={[
-                            styles.dateFilterText,
-                            !dateFilter && styles.dateFilterPlaceholder,
-                          ]}
-                          numberOfLines={1}
-                        >
-                          {dateFilter || "Date"}
-                        </Text>
-                        {dateFilter ? (
-                          <TouchableOpacity
-                            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                            onPress={() => setDateFilter("")}
-                          >
-                            <Ionicons
-                              name="close-circle"
-                              size={15}
-                              color={COLORS.textMuted}
-                            />
-                          </TouchableOpacity>
-                        ) : null}
-                      </TouchableOpacity>
-                    )}
+                    <Dropdown
+                      label=""
+                      data={DATE_RANGE_OPTIONS}
+                      value={dateRange}
+                      onChange={handleDateRangeChange}
+                      // Once a custom day is picked, show it instead of the
+                      // generic "Select date..." label.
+                      placeholder={
+                        dateRange === DATE_RANGE_CUSTOM && customDate
+                          ? customDate
+                          : "Date"
+                      }
+                      searchable={false}
+                      leftIcon="calendar-outline"
+                      iconColor={COLORS.textSecondary}
+                      noBottomSpacing
+                    />
 
                     {showFilterDatePicker ? (
                       <DateTimePicker
-                        value={dateFilter ? new Date(dateFilter) : new Date()}
+                        value={customDate ? new Date(customDate) : new Date()}
                         mode="date"
                         display={Platform.OS === "ios" ? "spinner" : "default"}
-                        onChange={(_event, selectedDate) => {
+                        onChange={(event, selectedDate) => {
                           setShowFilterDatePicker(false);
+                          if (event.type === "dismissed") {
+                            // Cancelling the picker with no day chosen would
+                            // leave "custom" selected but empty — fall back.
+                            if (!customDate) setDateRange("2d");
+                            return;
+                          }
                           if (selectedDate) {
-                            setDateFilter(selectedDate.toISOString().split("T")[0]);
+                            setCustomDate(
+                              selectedDate.toISOString().split("T")[0],
+                            );
                           }
                         }}
                       />
@@ -482,7 +596,137 @@ export default function BankDepositScreen() {
             ) : null}
           </Surface>
 
-          {/* ── 3. Deposit summary ────────────────────────────────────── */}
+          {/* ── 3. Deposit amount ─────────────────────────────────────── */}
+          <Surface style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <View style={styles.sectionIndicator} />
+              <Text style={styles.sectionTitle}>DEPOSIT AMOUNT</Text>
+              {depositTouched ? (
+                <TouchableOpacity
+                  style={styles.resetBtn}
+                  activeOpacity={0.8}
+                  onPress={resetDepositToCollected}
+                >
+                  <Ionicons name="refresh" size={12} color={COLORS.primary} />
+                  <Text style={styles.resetBtnText}>Match collected</Text>
+                </TouchableOpacity>
+              ) : null}
+            </View>
+
+            {/* Row: collected (read-only, derived) · deposit (editable) */}
+            <View style={styles.amountRow}>
+              <View style={styles.amountCol}>
+                <Text style={styles.fieldLabel}>Collected Amount</Text>
+                <View style={styles.readOnlyBox}>
+                  <Text style={styles.readOnlyPrefix}>₹</Text>
+                  <Text style={styles.readOnlyValue} numberOfLines={1}>
+                    {formatAmount(collectedAmount)}
+                  </Text>
+                  <Ionicons
+                    name="lock-closed-outline"
+                    size={13}
+                    color={COLORS.textMuted}
+                  />
+                </View>
+                <Text style={styles.fieldHint}>
+                  {selectedIds.length} payment
+                  {selectedIds.length === 1 ? "" : "s"} selected
+                </Text>
+              </View>
+
+              <View style={styles.amountCol}>
+                <Text style={styles.fieldLabel}>
+                  Deposit Amount<Text style={styles.required}> *</Text>
+                </Text>
+                <TextInput
+                  value={depositTouched ? depositAmount : String(collectedAmount || "")}
+                  onChangeText={(text) => {
+                    setDepositTouched(true);
+                    setDepositAmount(text.replace(/[^0-9.]/g, ""));
+                  }}
+                  mode="outlined"
+                  placeholder="0"
+                  keyboardType="decimal-pad"
+                  textColor={COLORS.black}
+                  style={styles.input}
+                  outlineStyle={styles.inputOutline}
+                  outlineColor={isShort || isOver ? COLORS.warning : COLORS.border}
+                  activeOutlineColor={
+                    isShort || isOver ? COLORS.warning : COLORS.primary
+                  }
+                  left={<TextInput.Affix text="₹" textStyle={styles.affix} />}
+                />
+                <Text style={styles.fieldHint}>Editable — what you banked</Text>
+              </View>
+            </View>
+
+            {/* ── Conditional validation UI ── */}
+            {isShort ? (
+              <View style={styles.diffBanner}>
+                <Ionicons name="alert-circle" size={16} color={COLORS.warning} />
+                <Text style={styles.diffText}>
+                  Short by{" "}
+                  <Text style={styles.diffAmount}>₹{formatAmount(difference)}</Text>{" "}
+                  against the collected amount. A reason is required.
+                </Text>
+              </View>
+            ) : isOver ? (
+              <View style={[styles.diffBanner, styles.diffBannerError]}>
+                <Ionicons name="alert-circle" size={16} color={COLORS.error} />
+                <Text style={[styles.diffText, styles.diffTextError]}>
+                  Deposit exceeds collected by ₹
+                  {formatAmount(Math.abs(difference))}. Check the amount entered.
+                </Text>
+              </View>
+            ) : collectedAmount > 0 ? (
+              <View style={[styles.diffBanner, styles.diffBannerOk]}>
+                <Ionicons
+                  name="checkmark-circle"
+                  size={16}
+                  color={COLORS.success}
+                />
+                <Text style={[styles.diffText, styles.diffTextOk]}>
+                  Deposit matches the collected amount.
+                </Text>
+              </View>
+            ) : null}
+
+            {/* Reason — only shown when the deposit is short. Visible to the
+                approver, so it is mandatory rather than optional. */}
+            {reasonRequired ? (
+              <View style={styles.reasonWrap}>
+                <Text style={styles.fieldLabel}>
+                  Reason for Short Deposit
+                  <Text style={styles.required}> *</Text>
+                </Text>
+                <TextInput
+                  value={shortfallReason}
+                  onChangeText={setShortfallReason}
+                  mode="outlined"
+                  placeholder="Explain why less was deposited than collected..."
+                  multiline
+                  numberOfLines={3}
+                  textColor={COLORS.black}
+                  style={[styles.input, styles.reasonInput]}
+                  outlineStyle={styles.inputOutline}
+                  outlineColor={reasonMissing ? COLORS.error : COLORS.border}
+                  activeOutlineColor={
+                    reasonMissing ? COLORS.error : COLORS.primary
+                  }
+                />
+                {reasonMissing ? (
+                  <View style={styles.errorRow}>
+                    <Ionicons name="alert-circle" size={13} color={COLORS.error} />
+                    <Text style={styles.errorText}>
+                      This reason is shown to the approver and cannot be left blank.
+                    </Text>
+                  </View>
+                ) : null}
+              </View>
+            ) : null}
+          </Surface>
+
+          {/* ── 4. Deposit summary ────────────────────────────────────── */}
           <Surface style={styles.section}>
             <View style={styles.sectionHeader}>
               <View style={styles.sectionIndicator} />
@@ -504,16 +748,80 @@ export default function BankDepositScreen() {
               </Text>
             </View>
 
-            <View style={styles.grandTotalRow}>
-              <Text style={styles.grandTotalLabel}>Grand Total Deposit</Text>
-              <Text style={styles.grandTotalValue}>
-                ₹{formatAmount(totalSelected)}
+            <View style={styles.summaryDivider} />
+
+            {/* Collected vs deposited, so the gap is explicit rather than implied. */}
+            <View style={styles.summaryLine}>
+              <Text style={styles.summaryLineLabel}>
+                Total Collected (Selected Parties)
+              </Text>
+              <Text style={styles.summaryLineValue}>
+                ₹{formatAmount(collectedAmount)}
               </Text>
             </View>
 
+            <View style={styles.summaryLine}>
+              <Text style={styles.summaryLineLabel}>Deposit Amount Entered</Text>
+              <Text
+                style={[
+                  styles.summaryLineValue,
+                  isShort && styles.summaryValueShort,
+                  isOver && styles.summaryValueOver,
+                ]}
+              >
+                ₹{formatAmount(depositedAmount)}
+              </Text>
+            </View>
+
+            {/* Difference row appears only when there is one. */}
+            {isShort || isOver ? (
+              <View style={[styles.shortRow, isOver && styles.shortRowError]}>
+                <Ionicons
+                  name={isShort ? "trending-down" : "trending-up"}
+                  size={14}
+                  color={isShort ? COLORS.warning : COLORS.error}
+                />
+                <Text
+                  style={[styles.shortLabel, isOver && styles.shortLabelError]}
+                >
+                  {isShort ? "Short Deposit" : "Excess Deposit"}
+                </Text>
+                <Text
+                  style={[styles.shortValue, isOver && styles.shortLabelError]}
+                >
+                  ₹{formatAmount(Math.abs(difference))}
+                </Text>
+              </View>
+            ) : null}
+
+            {/* Echo the reason here too — the approver reads this card. */}
+            {isShort && shortfallReason.trim() ? (
+              <View style={styles.reasonEcho}>
+                <Text style={styles.reasonEchoLabel}>Reason</Text>
+                <Text style={styles.reasonEchoText}>{shortfallReason.trim()}</Text>
+              </View>
+            ) : null}
+
+            <View
+              style={[
+                styles.grandTotalRow,
+                (isShort || isOver) && styles.grandTotalRowFlagged,
+              ]}
+            >
+              <Text style={styles.grandTotalLabel}>Grand Total Deposit</Text>
+              <Text
+                style={[
+                  styles.grandTotalValue,
+                  isShort && styles.summaryValueShort,
+                  isOver && styles.summaryValueOver,
+                ]}
+              >
+                ₹{formatAmount(depositedAmount)}
+              </Text>
+            </View>
           </Surface>
 
-          {/* ── 4. Attachments ────────────────────────────────────────── */}
+          {/* ── 5. Attachments ────────────────────────────────────────── */}
           <Surface style={styles.section}>
             <View style={styles.sectionHeader}>
               <View style={styles.sectionIndicator} />
@@ -541,7 +849,7 @@ export default function BankDepositScreen() {
             </View>
           </Surface>
 
-          {/* ── 5. Remarks ────────────────────────────────────────────── */}
+          {/* ── 6. Remarks ────────────────────────────────────────────── */}
           <Surface style={[styles.section, styles.lastSection]}>
             <View style={styles.sectionHeader}>
               <View style={styles.sectionIndicator} />
@@ -561,13 +869,16 @@ export default function BankDepositScreen() {
 
         {/* ── Sticky submit ──────────────────────────────────────────── */}
         <View style={styles.bottomBar}>
+          {/* No inline warning — the disabled button is the only signal, and the
+              progressive field unlocking already shows what is outstanding. */}
           <Button
             mode="contained"
             onPress={() => {}}
+            disabled={submitBlocked}
             style={styles.submitBtn}
             contentStyle={styles.submitContent}
             labelStyle={styles.submitLabel}
-            buttonColor={COLORS.success}
+            buttonColor={submitBlocked ? COLORS.textMuted : COLORS.success}
             textColor={COLORS.textLight}
             icon="bank-transfer-in"
           >
@@ -700,6 +1011,226 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: COLORS.textMuted,
   },
+  resetBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    marginLeft: "auto",
+    backgroundColor: COLORS.primaryLighter,
+    borderRadius: RADIUS.full,
+    borderWidth: 1,
+    borderColor: COLORS.borderBlue,
+    paddingVertical: 3,
+    paddingHorizontal: SPACING.sm,
+  },
+  resetBtnText: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: COLORS.primary,
+  },
+  // ── Deposit amount row ──
+  amountRow: {
+    flexDirection: "row",
+    gap: SPACING.sm,
+  },
+  amountCol: {
+    flex: 1,
+  },
+  // Height matches the Paper input beside it so the row stays level.
+  readOnlyBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    height: 56,
+    backgroundColor: COLORS.borderLight,
+    borderRadius: RADIUS.md,
+    borderWidth: 1.5,
+    borderColor: COLORS.border,
+    paddingHorizontal: SPACING.md,
+  },
+  readOnlyPrefix: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: COLORS.textSecondary,
+  },
+  readOnlyValue: {
+    flex: 1,
+    fontSize: 15,
+    fontWeight: "800",
+    color: COLORS.primaryDark,
+  },
+  affix: {
+    fontSize: 14,
+    color: COLORS.textSecondary,
+    fontWeight: "600",
+  },
+  fieldHint: {
+    fontSize: 10,
+    color: COLORS.textMuted,
+    marginTop: SPACING.xs,
+    marginLeft: 2,
+  },
+  // ── Difference banners ──
+  diffBanner: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: SPACING.sm,
+    marginTop: SPACING.sm + 2,
+    backgroundColor: COLORS.warningLight,
+    borderRadius: RADIUS.md,
+    borderWidth: 1,
+    borderColor: COLORS.warning,
+    paddingVertical: SPACING.sm,
+    paddingHorizontal: SPACING.sm + 2,
+  },
+  diffBannerError: {
+    backgroundColor: COLORS.errorLight,
+    borderColor: COLORS.errorBorder,
+  },
+  diffBannerOk: {
+    backgroundColor: COLORS.successLight,
+    borderColor: COLORS.success,
+  },
+  diffText: {
+    flex: 1,
+    fontSize: 11,
+    lineHeight: 16,
+    fontWeight: "500",
+    color: COLORS.warning,
+  },
+  diffTextError: {
+    color: COLORS.error,
+  },
+  diffTextOk: {
+    color: COLORS.success,
+  },
+  diffAmount: {
+    fontWeight: "800",
+  },
+  // ── Reason ──
+  reasonWrap: {
+    marginTop: SPACING.md,
+  },
+  reasonInput: {
+    minHeight: 84,
+    paddingTop: SPACING.sm,
+  },
+  errorRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    marginTop: SPACING.xs + 2,
+  },
+  errorText: {
+    flex: 1,
+    fontSize: 10,
+    fontWeight: "500",
+    color: COLORS.error,
+  },
+  // ── Banner shortfall strip ──
+  bannerShortRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    marginTop: SPACING.sm,
+    backgroundColor: "rgba(255,255,255,0.16)",
+    borderRadius: RADIUS.sm,
+    paddingVertical: 5,
+    paddingHorizontal: SPACING.sm,
+  },
+  bannerShortText: {
+    flex: 1,
+    color: "#FDE68A",
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  // ── Summary extras ──
+  summaryDivider: {
+    height: 1,
+    backgroundColor: COLORS.borderLight,
+    marginVertical: SPACING.sm,
+  },
+  summaryValueShort: {
+    color: COLORS.warning,
+  },
+  summaryValueOver: {
+    color: COLORS.error,
+  },
+  shortRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: SPACING.sm,
+    marginTop: SPACING.sm,
+    backgroundColor: COLORS.warningLight,
+    borderRadius: RADIUS.md,
+    borderWidth: 1,
+    borderColor: COLORS.warning,
+    paddingVertical: SPACING.sm,
+    paddingHorizontal: SPACING.sm + 2,
+  },
+  shortRowError: {
+    backgroundColor: COLORS.errorLight,
+    borderColor: COLORS.errorBorder,
+  },
+  shortLabel: {
+    flex: 1,
+    fontSize: 12,
+    fontWeight: "700",
+    color: COLORS.warning,
+  },
+  shortLabelError: {
+    color: COLORS.error,
+  },
+  shortValue: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: COLORS.warning,
+  },
+  reasonEcho: {
+    marginTop: SPACING.sm,
+    backgroundColor: COLORS.inputBackground,
+    borderRadius: RADIUS.md,
+    borderWidth: 1,
+    borderColor: COLORS.borderLight,
+    paddingVertical: SPACING.sm,
+    paddingHorizontal: SPACING.sm + 2,
+  },
+  reasonEchoLabel: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: COLORS.textMuted,
+    letterSpacing: 0.6,
+    textTransform: "uppercase",
+  },
+  reasonEchoText: {
+    fontSize: 12,
+    lineHeight: 17,
+    color: COLORS.text,
+    marginTop: 3,
+  },
+  grandTotalRowFlagged: {
+    borderTopColor: COLORS.warning,
+  },
+  // ── Locked-section notice ──
+  lockedNotice: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: SPACING.sm,
+    marginTop: SPACING.md,
+    backgroundColor: COLORS.inputBackground,
+    borderRadius: RADIUS.md,
+    borderWidth: 1,
+    borderStyle: "dashed",
+    borderColor: COLORS.border,
+    paddingVertical: SPACING.md,
+    paddingHorizontal: SPACING.sm + 2,
+  },
+  lockedNoticeText: {
+    flex: 1,
+    fontSize: 11,
+    lineHeight: 16,
+    color: COLORS.textMuted,
+  },
   sectionIndicator: {
     width: 2,
     height: 16,
@@ -773,29 +1304,6 @@ const styles = StyleSheet.create({
   },
   filterCol: {
     flex: 1,
-  },
-  // Height matches the Dropdown beside it (56) so the row keeps a constant
-  // height whether or not a date is picked.
-  dateFilterBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: SPACING.xs + 2,
-    height: 56,
-    backgroundColor: COLORS.inputBackground,
-    borderRadius: RADIUS.md,
-    borderWidth: 1.5,
-    borderColor: COLORS.border,
-    paddingHorizontal: SPACING.md,
-  },
-  dateFilterText: {
-    flex: 1,
-    fontSize: 14,
-    fontWeight: "500",
-    color: COLORS.text,
-  },
-  dateFilterPlaceholder: {
-    fontWeight: "400",
-    color: COLORS.textMuted,
   },
   list: {
     // The outer page scrolls; a nested scroll view here would fight it.

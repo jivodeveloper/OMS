@@ -17,7 +17,11 @@ import { COLORS, RADIUS } from "@/src/constants/theme";
 import { orderService } from "@/src/services/order.service";
 import { notificationService } from "@/src/services/notification.service";
 import { storage } from "@/src/utils/storage";
-import { screensFromExtraPages, SCREEN_ROLES } from "@/src/constants/pages";
+import {
+  canAccessScreen,
+  screensFromExtraPages,
+  SCREEN_ROLES,
+} from "@/src/constants/pages";
 import {
   getNotificationDedupeKey,
   originScreenForRole,
@@ -279,6 +283,14 @@ export default function MainLayout() {
     </Text>
   );
 
+  // Single source of truth for the header bell and the drawer's Notifications
+  // item, so the two can never disagree.
+  const canSeeNotifications = canAccessScreen(
+    "notifications",
+    userRole,
+    user?.extra_pages || [],
+  );
+
   const isVisible = (screen: string) => {
     if (!userRole && screen === "dashboard") return true;
     if (grantedScreens.has(screen)) return true;
@@ -301,15 +313,14 @@ export default function MainLayout() {
           // button onto Home/Orders.
           const isOrderEntry =
             route.name === "orders/create" || route.name === "orders/foc";
-          // The payment screens are admin-only but still want the bell, so they
-          // opt out of the blanket "no header actions for admin" rule.
+          // The payment/approval screens are admin-reachable but still want
+          // header actions, so they opt out of the blanket "no header actions
+          // for admin" rule.
           const isPaymentScreen =
             route.name === "payments/receive-payment" ||
             route.name === "payments/bank-deposit" ||
             route.name === "approval/approval-list" ||
             route.name === "approval/approval-details";
-          // Bank Deposit carries a help affordance next to the bell.
-          const isBankDeposit = route.name === "payments/bank-deposit";
           // Approval Details carries an Edit action next to the bell.
           const isApprovalDetails = route.name === "approval/approval-details";
 
@@ -368,20 +379,6 @@ export default function MainLayout() {
 
               return (
                 <View style={styles.headerActions}>
-                  {isBankDeposit ? (
-                    <TouchableOpacity
-                      hitSlop={HEADER_ICON_HIT_SLOP}
-                      onPress={() => {}}
-                      style={styles.headerBellButton}
-                      accessibilityLabel="Help"
-                    >
-                      <Ionicons
-                        name="help-circle-outline"
-                        size={22}
-                        color={COLORS.text}
-                      />
-                    </TouchableOpacity>
-                  ) : null}
                   {isApprovalDetails ? (
                     <TouchableOpacity
                       hitSlop={HEADER_ICON_HIT_SLOP}
@@ -423,26 +420,30 @@ export default function MainLayout() {
                       )}
                     </TouchableOpacity>
                   ) : null}
-                  <TouchableOpacity
-                    hitSlop={HEADER_ICON_HIT_SLOP}
-                    onPress={() => navigation.navigate("notifications" as never)}
-                    style={styles.headerBellButton}
-                  >
-                    <Ionicons
-                      name="notifications-outline"
-                      size={22}
-                      color={COLORS.text}
-                    />
-                    {unreadNotificationCount > 0 ? (
-                      <View style={styles.notificationBadge}>
-                        <Text style={styles.notificationBadgeText}>
-                          {unreadNotificationCount > 99
-                            ? "99+"
-                            : unreadNotificationCount}
-                        </Text>
-                      </View>
-                    ) : null}
-                  </TouchableOpacity>
+                  {/* Bell only for users who may actually open Notifications —
+                      showing it otherwise leads to a denied screen. */}
+                  {canSeeNotifications ? (
+                    <TouchableOpacity
+                      hitSlop={HEADER_ICON_HIT_SLOP}
+                      onPress={() => navigation.navigate("notifications" as never)}
+                      style={styles.headerBellButton}
+                    >
+                      <Ionicons
+                        name="notifications-outline"
+                        size={22}
+                        color={COLORS.text}
+                      />
+                      {unreadNotificationCount > 0 ? (
+                        <View style={styles.notificationBadge}>
+                          <Text style={styles.notificationBadgeText}>
+                            {unreadNotificationCount > 99
+                              ? "99+"
+                              : unreadNotificationCount}
+                          </Text>
+                        </View>
+                      ) : null}
+                    </TouchableOpacity>
+                  ) : null}
                 </View>
               );
             },
@@ -485,7 +486,7 @@ export default function MainLayout() {
             drawerIcon: ({ color }) => (
               <Ionicons name="notifications-outline" size={22} color={color} />
             ),
-            drawerItemStyle: userRole === "admin" ? hiddenStyle : visibleStyle,
+            drawerItemStyle: canSeeNotifications ? visibleStyle : hiddenStyle,
           }}
         />
         <Drawer.Screen

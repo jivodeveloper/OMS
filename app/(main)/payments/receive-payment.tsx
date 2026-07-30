@@ -14,6 +14,7 @@ import { Button, Checkbox, Surface } from "react-native-paper";
 import { Ionicons } from "@expo/vector-icons";
 import { COLORS, RADIUS, SPACING } from "@/src/constants/theme";
 import Dropdown from "@/src/components/common/DropdownProps";
+import ScreenGuard from "@/src/components/common/ScreenGuard";
 import FormField from "./_components/FormField";
 import PaymentMethodCard from "./_components/PaymentMethodCard";
 import PaymentSummary from "./_components/PaymentSummary";
@@ -54,7 +55,16 @@ const createMethod = (): PaymentMethodEntry => {
 
 const INITIAL_METHOD = createMethod();
 
-export default function ReceivePaymentScreen() {
+/** Permission gate — the screen only mounts for users who may open it. */
+export default function ReceivePaymentRoute() {
+  return (
+    <ScreenGuard screen="payments/receive-payment">
+      <ReceivePaymentScreen />
+    </ScreenGuard>
+  );
+}
+
+function ReceivePaymentScreen() {
   const [form, setForm] = useState<ReceivePaymentForm>({
     company: null,
     receivedFrom: null,
@@ -114,11 +124,32 @@ export default function ReceivePaymentScreen() {
     (entry) => entry.id === expandedId && validateCashBreakdown(entry) !== null,
   );
 
+  /**
+   * Progressive disclosure: Company → Received From → Party → Invoice, then the
+   * payment methods. Each field unlocks only once the one before it is answered,
+   * so a later choice can never be made against a stale earlier one.
+   */
+  const canPickReceivedFrom = !!form.company;
+  const canPickParty = canPickReceivedFrom && !!form.receivedFrom;
+  // The invoice list hangs off the party, and an advance isn't invoice-linked.
+  const canPickInvoice = canPickParty && !!form.party && !form.isAdvance;
+  const headerComplete =
+    canPickParty && !!form.party && (form.isAdvance || !!form.invoice);
+
+  // Every method needs an amount before this can be submitted.
+  const allMethodsHaveAmount = form.methods.every(
+    (entry) => (Number(entry.amount) || 0) > 0,
+  );
+
+  // Can't add a method while one is unbalanced, or before the details are set.
+  const addDisabled = !!blockingEntry || !headerComplete;
+
   // Submit is gated on EVERY card, not just the open one — a collapsed card can
   // still hold an unbalanced breakdown.
-  const submitBlocked = form.methods.some(
-    (entry) => validateCashBreakdown(entry) !== null,
-  );
+  const submitBlocked =
+    !headerComplete ||
+    !allMethodsHaveAmount ||
+    form.methods.some((entry) => validateCashBreakdown(entry) !== null);
 
   const toggleMethod = (id: string) => {
     if (blockingEntry) return;
@@ -203,7 +234,12 @@ export default function ReceivePaymentScreen() {
                 data={RECEIVED_FROM_OPTIONS}
                 value={form.receivedFrom}
                 onChange={handleReceivedFromChange}
-                placeholder="Select source..."
+                placeholder={
+                  canPickReceivedFrom
+                    ? "Select source..."
+                    : "Select a company first"
+                }
+                disabled={!canPickReceivedFrom}
                 leftIcon="swap-horizontal-outline"
                 iconColor={COLORS.textSecondary}
                 required
@@ -217,7 +253,12 @@ export default function ReceivePaymentScreen() {
                 data={PARTY_OPTIONS}
                 value={form.party}
                 onChange={handlePartyChange}
-                placeholder="Select party..."
+                placeholder={
+                  canPickParty
+                    ? "Select party..."
+                    : "Select “Received From” first"
+                }
+                disabled={!canPickParty}
                 leftIcon="person-outline"
                 iconColor={COLORS.textSecondary}
                 required
@@ -246,11 +287,11 @@ export default function ReceivePaymentScreen() {
                 placeholder={
                   form.isAdvance
                     ? "Not applicable for advance"
-                    : form.party
+                    : canPickInvoice
                       ? "Select invoice..."
                       : "Select a party first"
                 }
-                disabled={form.isAdvance || !form.party}
+                disabled={!canPickInvoice}
                 leftIcon="receipt-outline"
                 iconColor={COLORS.textSecondary}
               />
@@ -283,7 +324,23 @@ export default function ReceivePaymentScreen() {
             <Text style={styles.sectionTitle}>PAYMENT METHODS</Text>
           </View>
 
-          {form.methods.map((entry, index) => (
+          {/* Locked until the details above are set — entering amounts against
+              an unset party/invoice would let a later change invalidate them. */}
+          {!headerComplete ? (
+            <View style={styles.lockedNotice}>
+              <Ionicons
+                name="lock-closed-outline"
+                size={16}
+                color={COLORS.textMuted}
+              />
+              <Text style={styles.lockedNoticeText}>
+                Select Company, Received From, Party and Invoice (or mark it as an
+                advance) to add payment methods.
+              </Text>
+            </View>
+          ) : null}
+
+          {headerComplete && form.methods.map((entry, index) => (
             <PaymentMethodCard
               key={entry.id}
               entry={entry}
@@ -299,20 +356,20 @@ export default function ReceivePaymentScreen() {
           {/* Always below the last card, so adding another never means
               scrolling back up. */}
           <TouchableOpacity
-            style={[styles.addMethodBtn, blockingEntry && styles.addMethodDisabled]}
+            style={[styles.addMethodBtn, addDisabled && styles.addMethodDisabled]}
             activeOpacity={0.8}
-            disabled={!!blockingEntry}
+            disabled={addDisabled}
             onPress={addMethod}
           >
             <Ionicons
               name="add-circle-outline"
               size={20}
-              color={blockingEntry ? COLORS.textMuted : COLORS.primary}
+              color={addDisabled ? COLORS.textMuted : COLORS.primary}
             />
             <Text
               style={[
                 styles.addMethodLabel,
-                blockingEntry && styles.addMethodLabelDisabled,
+                addDisabled && styles.addMethodLabelDisabled,
               ]}
             >
               Add Payment Method
@@ -339,14 +396,8 @@ export default function ReceivePaymentScreen() {
 
         {/* ── Sticky submit, raised clear of the global bottom bar ────── */}
         <View style={styles.bottomBar}>
-          {submitBlocked ? (
-            <View style={styles.submitWarning}>
-              <Ionicons name="alert-circle" size={14} color={COLORS.error} />
-              <Text style={styles.submitWarningText}>
-                Denominations must equal the amount entered.
-              </Text>
-            </View>
-          ) : null}
+          {/* No inline warning — the disabled button is the only signal, and the
+              progressive field unlocking already shows what is outstanding. */}
           <Button
             mode="contained"
             onPress={() => {}}
@@ -493,17 +544,25 @@ const styles = StyleSheet.create({
   addMethodLabelDisabled: {
     color: COLORS.textMuted,
   },
-  submitWarning: {
+  // ── Locked-section notice ──
+  lockedNotice: {
     flexDirection: "row",
     alignItems: "center",
-    gap: SPACING.xs + 2,
-    marginBottom: SPACING.sm,
+    gap: SPACING.sm,
+    backgroundColor: COLORS.inputBackground,
+    borderRadius: RADIUS.md,
+    borderWidth: 1,
+    borderStyle: "dashed",
+    borderColor: COLORS.border,
+    paddingVertical: SPACING.md,
+    paddingHorizontal: SPACING.sm + 2,
+    marginBottom: SPACING.md,
   },
-  submitWarningText: {
+  lockedNoticeText: {
     flex: 1,
     fontSize: 11,
-    fontWeight: "500",
-    color: COLORS.error,
+    lineHeight: 16,
+    color: COLORS.textMuted,
   },
   bottomBar: {
     backgroundColor: COLORS.surface,

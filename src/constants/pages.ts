@@ -18,6 +18,25 @@ export const ASSIGNABLE_PAGES: AppPage[] = [
   { key: "Order_Flow_Settings", label: "Order Flow Settings", screens: ["admin/order-flow"] },
   { key: "Product_Stock", label: "Stock", screens: [] },
   { key: "Reports", label: "Reports", screens: ["reports/daily-report"] },
+  // NOTE: these keys must match the WEB app's page keys exactly — a grant made
+  // in the web admin is stored in User.extra_pages and read by both clients.
+  {
+    key: "Receive_Payment",
+    label: "Receive Payment",
+    screens: ["payments/receive-payment"],
+  },
+  {
+    key: "Bank_Deposit",
+    label: "Bank Deposit",
+    screens: ["payments/bank-deposit"],
+  },
+  {
+    key: "Approval_Requests",
+    label: "Approval Requests",
+    // One grant opens the list and the detail screen it navigates to; granting
+    // the list alone would dead-end every "View Details" tap.
+    screens: ["approval/approval-list", "approval/approval-details"],
+  },
 ];
 
 // Expand a user's granted keys into the set of mobile screen names to unlock.
@@ -36,6 +55,9 @@ export const screensFromExtraPages = (keys: string[] = []): Set<string> => {
 // grants add access on top of this.
 export const SCREEN_ROLES: Record<string, string[]> = {
   dashboard: ["admin", "manager", "approver"],
+  // Admin has no order-level notifications to act on, so the bell is hidden for
+  // that role — both in the drawer and in the screen headers.
+  notifications: ["manager", "billing", "approver", "auditor"],
   "orders/create": ["manager", "billing"],
   "orders/drafts": ["manager", "billing"],
   "orders/foc": ["manager", "billing"],
@@ -44,6 +66,9 @@ export const SCREEN_ROLES: Record<string, string[]> = {
   "payments/receive-payment": ["admin"],
   "payments/bank-deposit": ["admin"],
   "approval/approval-list": ["admin", "approver"],
+  // Detail screen mirrors the list's roles — it is reachable by deep link, so it
+  // needs its own entry rather than inheriting from the list it was opened from.
+  "approval/approval-details": ["admin", "approver"],
   "admin/order-flow": ["admin"],
   "admin/sales-quotation": ["admin"],
   "users/create": ["admin"],
