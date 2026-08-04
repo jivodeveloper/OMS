@@ -5,10 +5,16 @@ import React from "react";
 import ScreenGuard from "@/src/components/common/ScreenGuard";
 import ApprovalListScreen from "@/src/features/approval/screens/ApprovalListScreen";
 
-export default function ApprovalListRoute() {
+/**
+ * Payment approval queue.
+ *
+ * Split from deposits so a payment approver is shown only what they can act
+ * on — the guard and the query both scope to PAYMENT.
+ */
+export default function PaymentRequestsRoute() {
   return (
-    <ScreenGuard screen="approval/approval-list">
-      <ApprovalListScreen />
+    <ScreenGuard screen="approval/payment-requests">
+      <ApprovalListScreen documentType="PAYMENT" />
     </ScreenGuard>
   );
 }

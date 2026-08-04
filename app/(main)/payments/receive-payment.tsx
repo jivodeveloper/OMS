@@ -1,5 +1,6 @@
 import React, { useCallback, useState } from "react";
 import {
+  Alert,
   KeyboardAvoidingView,
   LayoutAnimation,
   Platform,
@@ -12,6 +13,7 @@ import {
 } from "react-native";
 import { Button, Checkbox, Surface } from "react-native-paper";
 import { Ionicons } from "@expo/vector-icons";
+import { router } from "expo-router";
 import { COLORS, RADIUS, SPACING } from "@/src/constants/theme";
 import Dropdown from "@/src/components/common/DropdownProps";
 import ScreenGuard from "@/src/components/common/ScreenGuard";
@@ -19,12 +21,17 @@ import FormField from "./_components/FormField";
 import PaymentMethodCard from "./_components/PaymentMethodCard";
 import PaymentSummary from "./_components/PaymentSummary";
 import {
-  COMPANY_OPTIONS,
-  invoicesForParty,
-  PARTY_OPTIONS,
-  PARTY_SOURCE,
-  RECEIVED_FROM_OPTIONS,
-} from "./_lib/constants";
+  messageFrom,
+  useCompanies,
+  useCollectionPersons,
+  useOpenInvoices,
+  useParties,
+} from "@/src/features/payments/usePaymentMasters";
+import usePaymentPermissions from "@/src/features/payments/usePaymentPermissions";
+import paymentsService, {
+  type Company,
+} from "@/src/services/payments.service";
+import { PARTY_SOURCE } from "./_lib/constants";
 import { validateCashBreakdown } from "./_lib/validation";
 import type { PaymentMethodEntry, ReceivePaymentForm } from "./_lib/types";
 
@@ -78,6 +85,26 @@ function ReceivePaymentScreen() {
   // Only one card open at a time keeps the screen short — that's the point of the
   // accordion here. Null means every card is collapsed.
   const [expandedId, setExpandedId] = useState<string | null>(INITIAL_METHOD.id);
+  const [saving, setSaving] = useState(false);
+
+  // ── Live master data ──────────────────────────────────────────────────
+  // Every list below comes from the backend, so a company or collector added
+  // in the web admin shows up here without an app release. The cascade is
+  // driven by the current selection: parties reload when the company changes,
+  // invoices when the party does.
+  const companies = useCompanies();
+  const selectedCompany = (form.company as Company | null) ?? null;
+  const collectors = useCollectionPersons(selectedCompany);
+  const parties = useParties(selectedCompany);
+  const invoices = useOpenInvoices(selectedCompany, form.party);
+  const permissions = usePaymentPermissions();
+
+  // "Party" is a sentinel meaning the money came straight from the party;
+  // every other option is a person who collected it on their behalf.
+  const receivedFromOptions = [
+    { label: "Party", value: PARTY_SOURCE },
+    ...collectors.options,
+  ];
 
   const animate = useCallback(() => {
     LayoutAnimation.configureNext(
@@ -93,11 +120,23 @@ function ReceivePaymentScreen() {
   // them, a named person means that person collected it on the party's behalf —
   // so the Party dropdown is always shown. The hint below it explains which.
   const isPartySource = form.receivedFrom === PARTY_SOURCE;
-  const invoiceOptions = invoicesForParty(form.party);
+  const invoiceOptions = invoices.options;
 
   const handleReceivedFromChange = (value: string) => {
     animate();
     setForm((prev) => ({ ...prev, receivedFrom: value }));
+  };
+
+  /** Changing company invalidates everything downstream of it. */
+  const handleCompanyChange = (value: string) => {
+    animate();
+    setForm((prev) => ({
+      ...prev,
+      company: value,
+      receivedFrom: null,
+      party: null,
+      invoice: null,
+    }));
   };
 
   const handlePartyChange = (value: string) => {
@@ -149,7 +188,99 @@ function ReceivePaymentScreen() {
   const submitBlocked =
     !headerComplete ||
     !allMethodsHaveAmount ||
+    saving ||
+    // The server rejects a create without this grant; disabling the button
+    // means the user is told before filling the form, not after.
+    !permissions.canCreatePayment ||
     form.methods.some((entry) => validateCashBreakdown(entry) !== null);
+
+  /**
+   * Create the receipt and send it straight into the approval chain.
+   *
+   * Create + submit are two calls because the API models them separately (a
+   * draft can exist unsubmitted). If the submit fails the receipt still exists
+   * as a draft rather than being lost, so the message says so explicitly.
+   */
+  const handleSubmit = async () => {
+    if (submitBlocked || saving) return;
+    setSaving(true);
+    try {
+      const selectedParty = parties.data.find((p) => p.card_code === form.party);
+      const methods = form.methods.map((entry) => {
+        const base = {
+          method: entry.method.toUpperCase() as "CASH" | "UPI" | "CHEQUE",
+          amount: String(Number(entry.amount) || 0),
+        };
+        if (entry.method === "cash") {
+          return {
+            ...base,
+            denominations: entry.noteRows
+              .filter((row) => row.denomination && Number(row.quantity) > 0)
+              .map((row) => ({
+                denomination: Number(row.denomination),
+                quantity: Number(row.quantity),
+              })),
+          };
+        }
+        if (entry.method === "cheque") {
+          return {
+            ...base,
+            cheque_number: entry.chequeNumber,
+            bank_name: entry.bankName,
+            cheque_date: entry.chequeDate || undefined,
+          };
+        }
+        return base;
+      });
+
+      const totalAmount = form.methods.reduce(
+        (sum, entry) => sum + (Number(entry.amount) || 0),
+        0,
+      );
+
+      const receipt = await paymentsService.createReceipt({
+        company: selectedCompany as Company,
+        card_code: form.party as string,
+        card_name: selectedParty?.card_name ?? "",
+        payment_date: new Date().toISOString().slice(0, 10),
+        received_from_type: isPartySource ? "PARTY" : "PERSON",
+        received_from_person: isPartySource ? null : Number(form.receivedFrom),
+        is_advance: form.isAdvance,
+        remarks: form.remarks,
+        methods,
+        // An advance is not invoice-linked, so it carries no allocation.
+        allocations:
+          form.isAdvance || !form.invoice
+            ? []
+            : [
+                {
+                  sap_doc_entry: Number(form.invoice),
+                  amount_applied: String(totalAmount),
+                },
+              ],
+      });
+
+      try {
+        await paymentsService.submitReceipt(receipt.id);
+      } catch (err) {
+        Alert.alert(
+          "Saved as draft",
+          `${receipt.receipt_no} was created but could not be submitted: ${messageFrom(err)}. Submit it again from the payments list.`,
+        );
+        return;
+      }
+
+      Alert.alert(
+        "Payment recorded",
+        `${receipt.receipt_no} has been submitted for approval.`,
+        [{ text: "OK", onPress: () => router.back() }],
+      );
+    } catch (err) {
+      Alert.alert("Could not record payment", messageFrom(err));
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const toggleMethod = (id: string) => {
     if (blockingEntry) return;
@@ -217,29 +348,46 @@ function ReceivePaymentScreen() {
             <View style={styles.field}>
               <Dropdown
                 label="Company"
-                data={COMPANY_OPTIONS}
+                data={companies.options}
                 value={form.company}
-                onChange={(value) => setForm((prev) => ({ ...prev, company: value }))}
-                placeholder="Select company..."
+                onChange={handleCompanyChange}
+                placeholder={
+                  companies.loading
+                    ? "Loading companies..."
+                    : companies.options.length === 0
+                      ? "No companies configured"
+                      : "Select company..."
+                }
+                disabled={companies.loading || companies.options.length === 0}
                 searchable={false}
                 leftIcon="business-outline"
                 iconColor={COLORS.textSecondary}
                 required
               />
+              {companies.error ? (
+                <Text style={styles.fieldError}>{companies.error}</Text>
+              ) : !companies.loading && companies.options.length === 0 ? (
+                <Text style={styles.fieldHint}>
+                  No company is mapped to a SAP database yet. Ask an
+                  administrator to add one before taking payments.
+                </Text>
+              ) : null}
             </View>
 
             <View style={styles.field}>
               <Dropdown
                 label="Received From"
-                data={RECEIVED_FROM_OPTIONS}
+                data={receivedFromOptions}
                 value={form.receivedFrom}
                 onChange={handleReceivedFromChange}
                 placeholder={
-                  canPickReceivedFrom
-                    ? "Select source..."
-                    : "Select a company first"
+                  !canPickReceivedFrom
+                    ? "Select a company first"
+                    : collectors.loading
+                      ? "Loading..."
+                      : "Select source..."
                 }
-                disabled={!canPickReceivedFrom}
+                disabled={!canPickReceivedFrom || collectors.loading}
                 leftIcon="swap-horizontal-outline"
                 iconColor={COLORS.textSecondary}
                 required
@@ -250,24 +398,30 @@ function ReceivePaymentScreen() {
             <View style={styles.field}>
               <Dropdown
                 label="Party"
-                data={PARTY_OPTIONS}
+                data={parties.options}
                 value={form.party}
                 onChange={handlePartyChange}
                 placeholder={
-                  canPickParty
-                    ? "Select party..."
-                    : "Select “Received From” first"
+                  !canPickParty
+                    ? "Select “Received From” first"
+                    : parties.loading
+                      ? "Loading parties..."
+                      : parties.options.length === 0
+                        ? "No parties assigned"
+                        : "Select party..."
                 }
-                disabled={!canPickParty}
+                disabled={!canPickParty || parties.loading}
                 leftIcon="person-outline"
                 iconColor={COLORS.textSecondary}
                 required
               />
-              {form.receivedFrom && !isPartySource ? (
+              {parties.error ? (
+                <Text style={styles.fieldError}>{parties.error}</Text>
+              ) : form.receivedFrom && !isPartySource ? (
                 <Text style={styles.fieldHint}>
                   Collected by{" "}
                   {
-                    RECEIVED_FROM_OPTIONS.find(
+                    receivedFromOptions.find(
                       (option) => option.value === form.receivedFrom,
                     )?.label
                   }{" "}
@@ -287,14 +441,28 @@ function ReceivePaymentScreen() {
                 placeholder={
                   form.isAdvance
                     ? "Not applicable for advance"
-                    : canPickInvoice
-                      ? "Select invoice..."
-                      : "Select a party first"
+                    : !canPickInvoice
+                      ? "Select a party first"
+                      : invoices.loading
+                        ? "Loading open invoices..."
+                        : invoices.options.length === 0
+                          ? "No open invoices"
+                          : "Select invoice..."
                 }
-                disabled={!canPickInvoice}
+                disabled={!canPickInvoice || invoices.loading}
                 leftIcon="receipt-outline"
                 iconColor={COLORS.textSecondary}
               />
+              {invoices.error ? (
+                <Text style={styles.fieldError}>{invoices.error}</Text>
+              ) : canPickInvoice &&
+                !invoices.loading &&
+                invoices.options.length === 0 ? (
+                <Text style={styles.fieldHint}>
+                  This party has no open invoices. Tick “Advance payment” to
+                  record it without one.
+                </Text>
+              ) : null}
             </View>
 
             {/* Advance payments aren't linked to an invoice. */}
@@ -396,12 +564,21 @@ function ReceivePaymentScreen() {
 
         {/* ── Sticky submit, raised clear of the global bottom bar ────── */}
         <View style={styles.bottomBar}>
-          {/* No inline warning — the disabled button is the only signal, and the
-              progressive field unlocking already shows what is outstanding. */}
+          {/* No inline warning for an incomplete form — the disabled button is
+              the signal, and progressive unlocking shows what is outstanding.
+              A MISSING PERMISSION is different: nothing the user does on this
+              screen would fix it, so it has to be stated. */}
+          {!permissions.loading && !permissions.canCreatePayment ? (
+            <Text style={styles.permissionNote}>
+              You do not have permission to record payments. Ask an
+              administrator for the “Payments — Create” permission.
+            </Text>
+          ) : null}
           <Button
             mode="contained"
-            onPress={() => {}}
+            onPress={handleSubmit}
             disabled={submitBlocked}
+            loading={saving}
             style={styles.submitBtn}
             contentStyle={styles.submitContent}
             labelStyle={styles.submitLabel}
@@ -409,7 +586,7 @@ function ReceivePaymentScreen() {
             textColor={COLORS.textLight}
             icon="check-circle-outline"
           >
-            Receive Payment
+            {saving ? "Recording..." : "Receive Payment"}
           </Button>
         </View>
       </KeyboardAvoidingView>
@@ -494,6 +671,20 @@ const styles = StyleSheet.create({
     color: COLORS.textMuted,
     marginTop: SPACING.xs,
     marginLeft: SPACING.xs,
+  },
+  fieldError: {
+    fontSize: 11,
+    lineHeight: 16,
+    color: COLORS.error,
+    marginTop: SPACING.xs,
+    marginLeft: SPACING.xs,
+  },
+  permissionNote: {
+    fontSize: 12,
+    lineHeight: 17,
+    color: COLORS.error,
+    textAlign: "center",
+    marginBottom: SPACING.sm,
   },
   checkboxRow: {
     flexDirection: "row",

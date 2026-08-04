@@ -34,6 +34,12 @@ export interface User {
   created_at: string;
   // Admin-granted page keys giving access beyond the user's role (see ASSIGNABLE_PAGES).
   extra_pages?: string[];
+  // Additional roles held alongside the primary `role` (e.g. payment_approver).
+  extra_roles?: { id: number; name: string; display_name: string }[];
+  // Every role name the user holds — primary + extras. Prefer this over `role`
+  // when deciding access, or a user granted a function role looks like they
+  // hold none.
+  roles?: string[];
 }
 
 export interface LoginResponse {

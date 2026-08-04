@@ -19,6 +19,7 @@ import { notificationService } from "@/src/services/notification.service";
 import { storage } from "@/src/utils/storage";
 import {
   canAccessScreen,
+  rolesOf,
   screensFromExtraPages,
   SCREEN_ROLES,
 } from "@/src/constants/pages";
@@ -289,13 +290,19 @@ export default function MainLayout() {
     "notifications",
     userRole,
     user?.extra_pages || [],
+    user?.roles,
   );
+
+  // Every role the user holds (primary + extra_roles). Matching on the primary
+  // alone hid the payments screens from anyone whose payment function came from
+  // an extra role.
+  const heldRoles = rolesOf(userRole, user?.roles);
 
   const isVisible = (screen: string) => {
     if (!userRole && screen === "dashboard") return true;
     if (grantedScreens.has(screen)) return true;
     const roles = canSee[screen];
-    return roles?.includes(userRole);
+    return !!roles && roles.some((r) => heldRoles.includes(r));
   };
 
   return (
@@ -319,7 +326,11 @@ export default function MainLayout() {
           const isPaymentScreen =
             route.name === "payments/receive-payment" ||
             route.name === "payments/bank-deposit" ||
-            route.name === "approval/approval-list" ||
+            route.name === "payments/payment-tracking" ||
+            route.name === "payments/deposit-tracking" ||
+            route.name === "payments/tracking-details" ||
+            route.name === "approval/payment-requests" ||
+            route.name === "approval/deposit-requests" ||
             route.name === "approval/approval-details";
           // Approval Details carries an Edit action next to the bell.
           const isApprovalDetails = route.name === "approval/approval-details";
@@ -566,15 +577,29 @@ export default function MainLayout() {
           }}
         />
         <Drawer.Screen
-          name="approval/approval-list"
+          name="approval/payment-requests"
           options={{
             drawerLabel: ({ color }) =>
-              renderDrawerLabel("Approval Requests", color),
-            title: "Approval Requests",
+              renderDrawerLabel("Payment Requests", color),
+            title: "Payment Requests",
             drawerIcon: ({ color }) => (
               <Ionicons name="shield-checkmark-outline" size={22} color={color} />
             ),
-            drawerItemStyle: isVisible("approval/approval-list")
+            drawerItemStyle: isVisible("approval/payment-requests")
+              ? visibleStyle
+              : hiddenStyle,
+          }}
+        />
+        <Drawer.Screen
+          name="approval/deposit-requests"
+          options={{
+            drawerLabel: ({ color }) =>
+              renderDrawerLabel("Deposit Requests", color),
+            title: "Deposit Requests",
+            drawerIcon: ({ color }) => (
+              <Ionicons name="wallet-outline" size={22} color={color} />
+            ),
+            drawerItemStyle: isVisible("approval/deposit-requests")
               ? visibleStyle
               : hiddenStyle,
           }}
@@ -597,6 +622,42 @@ export default function MainLayout() {
             drawerItemStyle: isVisible("payments/bank-deposit")
               ? visibleStyle
               : hiddenStyle,
+          }}
+        />
+        <Drawer.Screen
+          name="payments/payment-tracking"
+          options={{
+            drawerLabel: ({ color }) =>
+              renderDrawerLabel("Payment Tracking", color),
+            title: "Payment Tracking",
+            drawerIcon: ({ color }) => (
+              <Ionicons name="trail-sign-outline" size={22} color={color} />
+            ),
+            drawerItemStyle: isVisible("payments/payment-tracking")
+              ? visibleStyle
+              : hiddenStyle,
+          }}
+        />
+        <Drawer.Screen
+          name="payments/deposit-tracking"
+          options={{
+            drawerLabel: ({ color }) =>
+              renderDrawerLabel("Deposit Tracking", color),
+            title: "Deposit Tracking",
+            drawerIcon: ({ color }) => (
+              <Ionicons name="analytics-outline" size={22} color={color} />
+            ),
+            drawerItemStyle: isVisible("payments/deposit-tracking")
+              ? visibleStyle
+              : hiddenStyle,
+          }}
+        />
+        <Drawer.Screen
+          name="payments/tracking-details"
+          options={{
+            title: "Details",
+            // Reached from a tracking card, never from the drawer itself.
+            drawerItemStyle: hiddenStyle,
           }}
         />
         <Drawer.Screen

@@ -1,5 +1,6 @@
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  Alert,
   KeyboardAvoidingView,
   LayoutAnimation,
   Platform,
@@ -11,6 +12,7 @@ import {
   View,
 } from "react-native";
 import { Button, Surface, TextInput } from "react-native-paper";
+import { router } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import DateTimePicker from "@react-native-community/datetimepicker";
@@ -20,17 +22,24 @@ import ScreenGuard from "@/src/components/common/ScreenGuard";
 import FormField from "./_components/FormField";
 import DepositPaymentRow from "./_components/DepositPaymentRow";
 import UploadCard from "./_components/UploadCard";
-import { COMPANY_OPTIONS, formatAmount } from "./_lib/constants";
+import { formatAmount } from "./_lib/constants";
 import {
-  AVAILABLE_BALANCE,
-  BANK_ACCOUNT_OPTIONS,
+  messageFrom,
+  useBankAccounts,
+  useCollectionPersons,
+  useCompanies,
+} from "@/src/features/payments/usePaymentMasters";
+import usePaymentPermissions from "@/src/features/payments/usePaymentPermissions";
+import paymentsService, {
+  type Company,
+  type DepositableReceipt,
+} from "@/src/services/payments.service";
+import {
   DATE_RANGE_CUSTOM,
   DATE_RANGE_OPTIONS,
-  DEPOSIT_DATE_RANGE,
   DEPOSIT_TYPE_OPTIONS,
-  DEPOSITABLE_PAYMENTS,
-  DEPOSITED_BY_OPTIONS,
-  PARTY_FILTERS,
+  type DepositablePayment,
+  type DepositPaymentMethod,
 } from "./_lib/depositData";
 
 // Android needs this opt-in for LayoutAnimation to run at all.
@@ -52,7 +61,11 @@ export default function BankDepositRoute() {
 
 function BankDepositScreen() {
   const [company, setCompany] = useState<string | null>(null);
-  const [depositDate, setDepositDate] = useState("2026-07-28");
+  // Today, not a baked-in date — a hardcoded one silently backdates every
+  // deposit made after it.
+  const [depositDate, setDepositDate] = useState(() =>
+    new Date().toISOString().slice(0, 10),
+  );
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [depositedBy, setDepositedBy] = useState<string | null>(null);
   const [bankAccount, setBankAccount] = useState<string | null>(null);
@@ -83,6 +96,59 @@ function BankDepositScreen() {
 
   const [depositSlip, setDepositSlip] = useState<string | null>(null);
   const [depositReceipt, setDepositReceipt] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  // ── Live master data ──────────────────────────────────────────────────
+  const companies = useCompanies();
+  const selectedCompany = (company as Company | null) ?? null;
+  const depositors = useCollectionPersons(selectedCompany);
+  const bankAccounts = useBankAccounts(selectedCompany);
+  const permissions = usePaymentPermissions();
+
+  // Approved receipts awaiting banking, for the chosen company. Loaded here
+  // rather than through useAsyncList because the row shape needs mapping into
+  // what DepositPaymentRow renders.
+  const [payments, setPayments] = useState<DepositableReceipt[]>([]);
+  const [paymentsLoading, setPaymentsLoading] = useState(false);
+  const [paymentsError, setPaymentsError] = useState("");
+
+  useEffect(() => {
+    if (!selectedCompany) {
+      setPayments([]);
+      setPaymentsError("");
+      return;
+    }
+    let active = true;
+    setPaymentsLoading(true);
+    paymentsService
+      .getDepositableReceipts(selectedCompany)
+      .then((rows) => {
+        if (!active) return;
+        setPayments(rows);
+        setPaymentsError("");
+      })
+      .catch((err) => {
+        if (!active) return;
+        setPayments([]);
+        setPaymentsError(messageFrom(err, "Failed to load payments"));
+      })
+      .finally(() => {
+        if (active) setPaymentsLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [selectedCompany]);
+
+  // Party filter options are derived from what actually loaded, so the list can
+  // never offer a party with no depositable payments.
+  const partyFilterOptions = useMemo(() => {
+    const names = [...new Set(payments.map((p) => p.card_name))].sort();
+    return [
+      { label: "All Parties", value: "all" },
+      ...names.map((n) => ({ label: n, value: n })),
+    ];
+  }, [payments]);
 
   const animate = useCallback(() => {
     LayoutAnimation.configureNext(
@@ -94,35 +160,80 @@ function BankDepositScreen() {
     );
   }, []);
 
-  // Filtering is pure display work over the dummy list — no query, no API.
+  // Filtering is display work over what the API returned.
   const visiblePayments = useMemo(() => {
     const term = search.trim().toLowerCase();
-    return DEPOSITABLE_PAYMENTS.filter((payment) => {
-      if (partyFilter && partyFilter !== "all" && payment.party !== partyFilter) {
+    return payments.filter((payment) => {
+      if (
+        partyFilter &&
+        partyFilter !== "all" &&
+        payment.card_name !== partyFilter
+      ) {
         return false;
       }
       if (!term) return true;
       return (
-        payment.party.toLowerCase().includes(term) ||
-        payment.invoice.toLowerCase().includes(term)
+        payment.card_name.toLowerCase().includes(term) ||
+        payment.receipt_no.toLowerCase().includes(term)
       );
     });
-  }, [search, partyFilter]);
+  }, [payments, search, partyFilter]);
 
-  const selectedPayments = DEPOSITABLE_PAYMENTS.filter((payment) =>
-    selectedIds.includes(payment.id),
+  const selectedPayments = payments.filter((payment) =>
+    selectedIds.includes(String(payment.id)),
   );
 
   const totalSelected = selectedPayments.reduce(
-    (sum, payment) => sum + payment.amount,
+    (sum, payment) => sum + Number(payment.total_amount || 0),
     0,
   );
-  const totalCash = selectedPayments
-    .filter((payment) => payment.method === "Cash")
-    .reduce((sum, payment) => sum + payment.amount, 0);
-  const totalCheque = selectedPayments
-    .filter((payment) => payment.method === "Cheque")
-    .reduce((sum, payment) => sum + payment.amount, 0);
+
+  /** Sum one payment method across a receipt's lines — a receipt can mix them. */
+  const sumMethod = (receipt: DepositableReceipt, kind: "CASH" | "CHEQUE") =>
+    (receipt.methods ?? [])
+      .filter((m) => m.method === kind)
+      .reduce((sum, m) => sum + Number(m.amount || 0), 0);
+
+  /**
+   * Adapt an API receipt to what DepositPaymentRow renders.
+   *
+   * Done here rather than by changing the component: the row is presentational
+   * and its existing shape is fine — only the source of the data changed. A
+   * receipt can mix methods, so the badge shows the dominant one.
+   */
+  const toRowShape = (receipt: DepositableReceipt): DepositablePayment => {
+    const cash = sumMethod(receipt, "CASH");
+    const cheque = sumMethod(receipt, "CHEQUE");
+    const method: DepositPaymentMethod =
+      cheque > cash ? "Cheque" : cash > 0 ? "Cash" : "UPI";
+    return {
+      id: String(receipt.id),
+      party: receipt.card_name,
+      invoice: receipt.receipt_no,
+      date: receipt.payment_date,
+      method,
+      amount: Number(receipt.total_amount || 0),
+      status: "pending",
+    };
+  };
+
+  const totalCash = selectedPayments.reduce(
+    (sum, p) => sum + sumMethod(p, "CASH"),
+    0,
+  );
+  const totalCheque = selectedPayments.reduce(
+    (sum, p) => sum + sumMethod(p, "CHEQUE"),
+    0,
+  );
+
+  /** Everything available to bank for this company, not just the selection. */
+  const availableBalance = useMemo(
+    () => ({
+      cash: payments.reduce((sum, p) => sum + sumMethod(p, "CASH"), 0),
+      cheque: payments.reduce((sum, p) => sum + sumMethod(p, "CHEQUE"), 0),
+    }),
+    [payments],
+  );
 
   // "Collected" is always the sum of the selection; "deposited" is what the user
   // says they banked. Until they edit it, the two track each other.
@@ -147,9 +258,9 @@ function BankDepositScreen() {
       // Keep the deposit figure mirroring the selection while it is still
       // auto-filled; once the user has typed their own, leave it alone.
       if (!depositTouched) {
-        const nextTotal = DEPOSITABLE_PAYMENTS.filter((p) =>
-          next.includes(p.id),
-        ).reduce((sum, p) => sum + p.amount, 0);
+        const nextTotal = payments
+          .filter((p) => next.includes(String(p.id)))
+          .reduce((sum, p) => sum + Number(p.total_amount || 0), 0);
         setDepositAmount(nextTotal ? String(nextTotal) : "");
       }
       return next;
@@ -191,7 +302,59 @@ function BankDepositScreen() {
     !selectedIds.length ||
     depositedAmount <= 0 ||
     isOver ||
-    reasonMissing;
+    reasonMissing ||
+    saving ||
+    // The server rejects a create without this grant; disabling the button
+    // tells the user before they fill the form, not after.
+    !permissions.canCreateDeposit;
+
+  /**
+   * Create the deposit and send it into the approval chain.
+   *
+   * Two calls, like the receipt flow: if the submit fails the deposit survives
+   * as a draft rather than being lost, and the message says so.
+   */
+  const handleSubmit = async () => {
+    if (submitBlocked) return;
+    setSaving(true);
+    try {
+      const deposit = await paymentsService.createDeposit({
+        company: selectedCompany as Company,
+        deposit_date: depositDate,
+        deposited_by: depositedBy ? Number(depositedBy) : null,
+        bank_account: Number(bankAccount),
+        deposit_type: String(depositType).toUpperCase() as
+          | "CASH"
+          | "CHEQUE"
+          | "MIXED",
+        collected_amount: String(collectedAmount),
+        deposit_amount: String(depositedAmount),
+        shortfall_reason: isShort ? shortfallReason.trim() : "",
+        remarks,
+        receipt_ids: selectedIds.map((id) => Number(id)),
+      });
+
+      try {
+        await paymentsService.submitDeposit(deposit.id);
+      } catch (err) {
+        Alert.alert(
+          "Saved as draft",
+          `${deposit.deposit_no ?? "The deposit"} was created but could not be submitted: ${messageFrom(err)}. Submit it again from the deposits list.`,
+        );
+        return;
+      }
+
+      Alert.alert(
+        "Deposit recorded",
+        `${deposit.deposit_no ?? "The deposit"} has been submitted for approval.`,
+        [{ text: "OK", onPress: () => router.back() }],
+      );
+    } catch (err) {
+      Alert.alert("Could not record deposit", messageFrom(err));
+    } finally {
+      setSaving(false);
+    }
+  };
 
   /** Reverts the deposit field to tracking the selection again. */
   const resetDepositToCollected = () => {
@@ -233,13 +396,13 @@ function BankDepositScreen() {
               <View style={styles.balanceChip}>
                 <Ionicons name="cash-outline" size={13} color="#fff" />
                 <Text style={styles.balanceChipText}>
-                  Cash ₹{formatAmount(AVAILABLE_BALANCE.cash)}
+                  Cash ₹{formatAmount(availableBalance.cash)}
                 </Text>
               </View>
               <View style={styles.balanceChip}>
                 <Ionicons name="document-text-outline" size={13} color="#fff" />
                 <Text style={styles.balanceChipText}>
-                  Cheque ₹{formatAmount(AVAILABLE_BALANCE.cheque)}
+                  Cheque ₹{formatAmount(availableBalance.cheque)}
                 </Text>
               </View>
             </View>
@@ -282,7 +445,7 @@ function BankDepositScreen() {
             <View style={styles.field}>
               <Dropdown
                 label="Company"
-                data={COMPANY_OPTIONS}
+                data={companies.options}
                 value={company}
                 onChange={setCompany}
                 placeholder="Select company..."
@@ -369,7 +532,7 @@ function BankDepositScreen() {
             <View style={styles.field}>
               <Dropdown
                 label="Deposited By"
-                data={DEPOSITED_BY_OPTIONS}
+                data={depositors.options}
                 value={depositedBy}
                 onChange={setDepositedBy}
                 placeholder={
@@ -387,7 +550,7 @@ function BankDepositScreen() {
             <View style={styles.field}>
               <Dropdown
                 label="Bank Account"
-                data={BANK_ACCOUNT_OPTIONS}
+                data={bankAccounts.options}
                 value={bankAccount}
                 onChange={setBankAccount}
                 placeholder={
@@ -542,7 +705,7 @@ function BankDepositScreen() {
                   <View style={styles.filterCol}>
                     <Dropdown
                       label=""
-                      data={PARTY_FILTERS}
+                      data={partyFilterOptions}
                       value={partyFilter}
                       onChange={setPartyFilter}
                       placeholder="Party"
@@ -569,9 +732,9 @@ function BankDepositScreen() {
                     visiblePayments.map((payment) => (
                       <DepositPaymentRow
                         key={payment.id}
-                        payment={payment}
-                        selected={selectedIds.includes(payment.id)}
-                        onToggle={() => togglePayment(payment.id)}
+                        payment={toRowShape(payment)}
+                        selected={selectedIds.includes(String(payment.id))}
+                        onToggle={() => togglePayment(String(payment.id))}
                       />
                     ))
                   )}
@@ -585,12 +748,9 @@ function BankDepositScreen() {
                     color={COLORS.textSecondary}
                   />
                   <Text style={styles.rangeText}>
-                    Showing payments from {DEPOSIT_DATE_RANGE.from} to{" "}
-                    {DEPOSIT_DATE_RANGE.to}
+                    {visiblePayments.length} of {payments.length} payment
+                    {payments.length === 1 ? "" : "s"} available to bank
                   </Text>
-                  <TouchableOpacity style={styles.changeBtn} activeOpacity={0.8}>
-                    <Text style={styles.changeBtnText}>Change</Text>
-                  </TouchableOpacity>
                 </View>
               </View>
             ) : null}
@@ -869,12 +1029,20 @@ function BankDepositScreen() {
 
         {/* ── Sticky submit ──────────────────────────────────────────── */}
         <View style={styles.bottomBar}>
-          {/* No inline warning — the disabled button is the only signal, and the
-              progressive field unlocking already shows what is outstanding. */}
+          {/* No inline warning for an incomplete form — the disabled button is
+              the signal. A MISSING PERMISSION is different: nothing the user
+              does here would fix it, so it has to be stated. */}
+          {!permissions.loading && !permissions.canCreateDeposit ? (
+            <Text style={styles.permissionNote}>
+              You do not have permission to record deposits. Ask an
+              administrator for the “Deposit — Create” permission.
+            </Text>
+          ) : null}
           <Button
             mode="contained"
-            onPress={() => {}}
+            onPress={handleSubmit}
             disabled={submitBlocked}
+            loading={saving}
             style={styles.submitBtn}
             contentStyle={styles.submitContent}
             labelStyle={styles.submitLabel}
@@ -882,7 +1050,7 @@ function BankDepositScreen() {
             textColor={COLORS.textLight}
             icon="bank-transfer-in"
           >
-            Deposit to Bank
+            {saving ? "Depositing..." : "Deposit to Bank"}
           </Button>
         </View>
       </KeyboardAvoidingView>
@@ -1407,5 +1575,12 @@ const styles = StyleSheet.create({
     color: COLORS.textLight,
     fontWeight: "700",
     fontSize: 15,
+  },
+  permissionNote: {
+    fontSize: 12,
+    lineHeight: 17,
+    color: COLORS.error,
+    textAlign: "center",
+    marginBottom: SPACING.sm,
   },
 });

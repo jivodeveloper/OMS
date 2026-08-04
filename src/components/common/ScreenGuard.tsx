@@ -39,7 +39,12 @@ export default function ScreenGuard({ screen, children }: ScreenGuardProps) {
     );
   }
 
-  const allowed = canAccessScreen(screen, user?.role, user?.extra_pages || []);
+  const allowed = canAccessScreen(
+    screen,
+    user?.role,
+    user?.extra_pages || [],
+    user?.roles,
+  );
 
   if (allowed) return <>{children}</>;
 

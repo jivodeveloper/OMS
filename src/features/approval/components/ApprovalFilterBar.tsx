@@ -86,11 +86,13 @@ const styles = StyleSheet.create({
     paddingTop: 12,
   },
   statusCol: {
-    // Fixed-ish share so the status pill never squeezes the search field out.
-    flex: 0.85,
+    // A quarter of the row: the status values are short ("All", "Pending"),
+    // so the space is better spent on the search field.
+    flex: 1,
   },
   searchCol: {
-    flex: 1.15,
+    // Three quarters — party names and request numbers are long.
+    flex: 3,
   },
   label: {
     fontSize: 12,

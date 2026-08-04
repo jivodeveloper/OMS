@@ -17,7 +17,17 @@ import EmptyApprovalState from "../components/EmptyApprovalState";
 import { useApprovalList } from "../hooks/useApprovalList";
 import type { ApprovalRequest } from "../types";
 
-export default function ApprovalListScreen() {
+interface ApprovalListScreenProps {
+  /**
+   * Scopes the queue to one document type. Payment and Deposit requests are
+   * separate screens so an approver only ever sees what they can act on.
+   */
+  documentType?: "PAYMENT" | "DEPOSIT";
+}
+
+export default function ApprovalListScreen({
+  documentType,
+}: ApprovalListScreenProps = {}) {
   const {
     requests,
     loading,
@@ -29,23 +39,37 @@ export default function ApprovalListScreen() {
     setStatus,
     onRefresh,
     retry,
-  } = useApprovalList();
+  } = useApprovalList(documentType);
 
   const [dateFilter, setDateFilter] = useState("");
   const [showDatePicker, setShowDatePicker] = useState(false);
 
   const handleViewDetails = useCallback((request: ApprovalRequest) => {
-    // Only the identifier travels; the details screen loads its own payload, so
-    // a deep link into it works the same as arriving from this list.
+    // `id` is the API primary key and `requestNo` the human-readable document
+    // number. Both travel: the details screen fetches by id, and shows the
+    // number immediately so the header is not blank while loading.
     router.push({
       pathname: "/(main)/approval/approval-details",
-      params: { requestNo: request.requestNo },
+      params: { id: request.id, requestNo: request.requestNo },
     } as never);
   }, []);
 
+  /**
+   * Reject from the list.
+   *
+   * Remarks are MANDATORY server-side, so this cannot be a one-tap action —
+   * it opens the details screen, where the reject dialog collects a reason.
+   * Rejecting blind from a list row would only produce a 400.
+   */
   const handleReject = useCallback((request: ApprovalRequest) => {
-    // UI-only: the reject flow (remark dialog + API) comes with the next phase.
-    console.log("Reject requested for", request.requestNo);
+    router.push({
+      pathname: "/(main)/approval/approval-details",
+      params: {
+        id: request.id,
+        requestNo: request.requestNo,
+        action: "reject",
+      },
+    } as never);
   }, []);
 
   const renderItem = useCallback(

@@ -5,7 +5,11 @@ import { usePathname, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "@/src/context/AuthContext";
 import { COLORS } from "@/src/constants/theme";
-import { canAccessScreen, resolveOrdersRoute } from "@/src/constants/pages";
+import {
+  canAccessScreen,
+  createTargetsFor,
+  resolveWorkQueueRoute,
+} from "@/src/constants/pages";
 import { useDrawerOpen } from "@/src/utils/drawerState";
 
 type TabKey = "home" | "orders" | "create" | "reports" | "profile";
@@ -34,10 +38,16 @@ export default function BottomBar({
   const role = (user?.role || "").toLowerCase();
   const extraPages = user?.extra_pages || [];
   const [deniedLabel, setDeniedLabel] = useState<string | null>(null);
+  const [createSheetOpen, setCreateSheetOpen] = useState(false);
 
-  // This user's own orders screen — falls back to one they can actually open
-  // rather than to a role-specific screen they'd be blocked from.
-  const orders = resolveOrdersRoute(role, extraPages);
+  // The second tab adapts to what the user actually has: an orders screen when
+  // they hold one, otherwise their payments or deposits queue. Labelling it
+  // "Orders" for a payments-only user sent them somewhere they cannot open.
+  const workQueue = resolveWorkQueueRoute(role, extraPages, user?.roles);
+
+  // Everything this user may create. None hides the button; one opens directly;
+  // several open the chooser sheet.
+  const createTargets = createTargetsFor(role, extraPages, user?.roles);
 
   // Highlight the tab that matches the current route (so the global bar shows
   // the right active tab on every screen). An explicit `active` prop wins.
@@ -65,8 +75,25 @@ export default function BottomBar({
 
   // Navigate if permitted, otherwise surface the "no permission" dialog.
   const guarded = (screen: string, label: string, navigate: () => void) => {
-    if (canAccessScreen(screen, role, extraPages)) navigate();
+    if (canAccessScreen(screen, role, extraPages, user?.roles)) navigate();
     else setDeniedLabel(label);
+  };
+
+  /** Open one create destination, closing the sheet first if it was showing. */
+  const openCreateTarget = (target: (typeof createTargets)[number]) => {
+    setCreateSheetOpen(false);
+    guarded(target.screen, target.label, () => {
+      // Only the order screen needs the openMode handshake; the payment and
+      // deposit forms take no params.
+      if (target.key === "order") {
+        router.push({
+          pathname: target.route,
+          params: { openMode: "create", openedAt: String(Date.now()) },
+        } as never);
+      } else {
+        router.push(target.route as never);
+      }
+    });
   };
 
   const tabs: {
@@ -88,12 +115,12 @@ export default function BottomBar({
     },
     {
       key: "orders",
-      label: "Orders",
-      icon: "clipboard-outline",
+      label: workQueue.label,
+      icon: workQueue.icon as keyof typeof Ionicons.glyphMap,
       badge: ordersBadge,
       onPress: () =>
-        guarded(orders.screen, "Orders", () =>
-          router.push(orders.route as never),
+        guarded(workQueue.screen, workQueue.label, () =>
+          router.push(workQueue.route as never),
         ),
     },
     {
@@ -101,13 +128,18 @@ export default function BottomBar({
       label: "Create",
       icon: "add",
       fab: true,
-      onPress: () =>
-        guarded("orders/create", "Create Order", () =>
-          router.push({
-            pathname: "/orders/create",
-            params: { openMode: "create", openedAt: String(Date.now()) },
-          } as never),
-        ),
+      onPress: () => {
+        if (createTargets.length === 0) {
+          setDeniedLabel("Create");
+          return;
+        }
+        // A single option needs no sheet — that would be a tap for nothing.
+        if (createTargets.length === 1) {
+          openCreateTarget(createTargets[0]);
+          return;
+        }
+        setCreateSheetOpen(true);
+      },
     },
     {
       key: "reports",
@@ -197,6 +229,53 @@ export default function BottomBar({
             >
               <Text style={styles.okText}>Got it</Text>
             </TouchableOpacity>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* Create chooser — shown only when the user may create more than one
+          kind of document, so a single-permission user never taps twice. */}
+      <Modal
+        visible={createSheetOpen}
+        transparent
+        animationType="slide"
+        statusBarTranslucent
+        onRequestClose={() => setCreateSheetOpen(false)}
+      >
+        <TouchableOpacity
+          style={styles.sheetBackdrop}
+          activeOpacity={1}
+          onPress={() => setCreateSheetOpen(false)}
+        >
+          <TouchableOpacity style={styles.sheet} activeOpacity={1} onPress={() => {}}>
+            <View style={styles.sheetHandle} />
+            <Text style={styles.sheetTitle}>Create new</Text>
+
+            {createTargets.map((target) => (
+              <TouchableOpacity
+                key={target.key}
+                style={styles.sheetRow}
+                activeOpacity={0.8}
+                onPress={() => openCreateTarget(target)}
+              >
+                <View style={styles.sheetIcon}>
+                  <Ionicons
+                    name={target.icon as keyof typeof Ionicons.glyphMap}
+                    size={20}
+                    color={COLORS.primary}
+                  />
+                </View>
+                <View style={styles.sheetRowText}>
+                  <Text style={styles.sheetRowLabel}>{target.label}</Text>
+                  <Text style={styles.sheetRowDesc}>{target.description}</Text>
+                </View>
+                <Ionicons
+                  name="chevron-forward"
+                  size={18}
+                  color={COLORS.textSecondary}
+                />
+              </TouchableOpacity>
+            ))}
           </TouchableOpacity>
         </TouchableOpacity>
       </Modal>
@@ -318,5 +397,60 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontSize: 15,
     fontWeight: "700",
+  },
+
+  // ── Create chooser sheet ──────────────────────────────────────────────
+  sheetBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(15,23,42,0.45)",
+    justifyContent: "flex-end",
+  },
+  sheet: {
+    backgroundColor: "#fff",
+    borderTopLeftRadius: 22,
+    borderTopRightRadius: 22,
+    paddingHorizontal: 18,
+    paddingTop: 10,
+    paddingBottom: 34,
+  },
+  sheetHandle: {
+    alignSelf: "center",
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: "#E5E7EB",
+    marginBottom: 14,
+  },
+  sheetTitle: {
+    fontSize: 17,
+    fontWeight: "800",
+    color: COLORS.text,
+    marginBottom: 14,
+  },
+  sheetRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 14,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    marginBottom: 10,
+  },
+  sheetIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(79,70,229,0.08)",
+  },
+  sheetRowText: { flex: 1, minWidth: 0 },
+  sheetRowLabel: { fontSize: 15, fontWeight: "700", color: COLORS.text },
+  sheetRowDesc: {
+    fontSize: 12,
+    color: COLORS.textSecondary,
+    marginTop: 2,
   },
 });
