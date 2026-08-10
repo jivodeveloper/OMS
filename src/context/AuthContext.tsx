@@ -16,7 +16,11 @@ import {
   uiConfigService,
   subscribeUILabels,
   getUILabels,
+  subscribeUIFields,
+  getUIFields,
   type UILabelMap,
+  type UIFieldMap,
+  type UIFieldConfig,
 } from "../services/uiConfig.service";
 import {
   getNotificationDedupeKey,
@@ -37,6 +41,8 @@ interface AuthContextType {
   isLoggedIn: boolean;
   /** Dynamic UI field labels ({ field_key: display_name }) for this session. */
   uiLabels: UILabelMap;
+  /** Dynamic field behaviour ({ field_key: { label, enabled, required } }). */
+  uiFields: UIFieldMap;
   login: (
     credentials: LoginRequest,
   ) => Promise<{ success: boolean; message: string }>;
@@ -84,6 +90,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [uiLabels, setUiLabels] = useState<UILabelMap>(getUILabels);
+  const [uiFields, setUiFields] = useState<UIFieldMap>(getUIFields);
   // Whether to SUPPRESS the "Session expired" alert. Default true so it never
   // fires during app startup / before a healthy session exists. It's flipped
   // off once a valid session is confirmed, and back on during intentional
@@ -100,6 +107,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
   useEffect(() => {
     setUiLabels(getUILabels());
     return subscribeUILabels(setUiLabels);
+  }, []);
+
+  useEffect(() => {
+    setUiFields(getUIFields());
+    return subscribeUIFields(setUiFields);
   }, []);
 
   // Scope the API cache to the signed-in user, so cached payloads can never be
@@ -339,6 +351,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
         isLoading,
         isLoggedIn: !!user,
         uiLabels,
+        uiFields,
         login,
         logout,
         refreshUser,
@@ -372,4 +385,21 @@ export const useUILabels = () => {
     return typeof value === "string" && value.trim() ? value : fallback;
   };
   return { labels: uiLabels, t };
+};
+
+/**
+ * Read dynamic field behaviour (enabled/required + label) in a component.
+ * Returns a `field(key, fallback)` reader that re-renders on config changes:
+ *
+ *   const { field } = useFieldConfig();
+ *   const po = field("po_number", { label: "PO Number", enabled: true, required: false });
+ *   if (po.enabled) { ...render... }
+ */
+export const useFieldConfig = () => {
+  const { uiFields } = useAuth();
+  const field = (key: string, fallback: UIFieldConfig): UIFieldConfig => {
+    const value = uiFields[key];
+    return value && typeof value === "object" ? value : fallback;
+  };
+  return { fields: uiFields, field };
 };

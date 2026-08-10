@@ -5,6 +5,7 @@ const KEYS = {
   REFRESH_TOKEN: 'refresh_token',
   USER: 'user',
   UI_LABELS: 'ui_labels',
+  UI_FIELDS: 'ui_fields',
   HIDDEN_NOTIFICATION_IDS: 'hidden_notification_ids',
   NOTIFICATION_PERMISSION: 'notification_permission_state',
   // Stable per-install device identifier. Created once, then persisted for the
@@ -64,6 +65,22 @@ export const storage = {
 
   getUiLabels: async (): Promise<Record<string, string>> => {
     const raw = await AsyncStorage.getItem(KEYS.UI_LABELS);
+    if (!raw) return {};
+    try {
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch {
+      return {};
+    }
+  },
+
+  // Dynamic field behaviour config ({ field_key: { label, enabled, required } }).
+  saveUiFields: async (fields: Record<string, unknown>) => {
+    await AsyncStorage.setItem(KEYS.UI_FIELDS, JSON.stringify(fields));
+  },
+
+  getUiFields: async (): Promise<Record<string, any>> => {
+    const raw = await AsyncStorage.getItem(KEYS.UI_FIELDS);
     if (!raw) return {};
     try {
       const parsed = JSON.parse(raw);
@@ -156,6 +173,7 @@ export const storage = {
       KEYS.REFRESH_TOKEN,
       KEYS.USER,
       KEYS.UI_LABELS,
+      KEYS.UI_FIELDS,
       KEYS.HIDDEN_NOTIFICATION_IDS,
     ]);
   },

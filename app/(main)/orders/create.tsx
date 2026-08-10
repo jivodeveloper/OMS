@@ -17,7 +17,7 @@ import DateTimePicker from "@react-native-community/datetimepicker";
 import { Surface, TextInput } from "react-native-paper";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
-import { useAuth, useUILabels } from "@/src/context/AuthContext";
+import { useAuth, useUILabels, useFieldConfig } from "@/src/context/AuthContext";
 import { COLORS, SPACING, RADIUS, GRADIENTS } from "@/src/constants/theme";
 import Dropdown from "@/src/components/common/DropdownProps";
 import StateWrapper from "@/src/components/common/StateWrapper";
@@ -490,6 +490,7 @@ export function OrderEntryScreen({
 } = {}) {
   const { user } = useAuth();
   const { t } = useUILabels();
+  const { field } = useFieldConfig();
   const {
     orderId: editOrderId,
     mode,
@@ -510,7 +511,16 @@ export function OrderEntryScreen({
   const isExplicitCreateMode = openMode === "create";
   const isEditMode = !isExplicitCreateMode && mode === "edit" && !!editOrderId;
   const isFocMode = screenVariant === "foc";
-  const shouldShowPoNumber = userRole === "billing";
+  // Admin-controlled PO field behaviour (label + enabled + required). Defaults
+  // keep the original hardcoded behaviour until the config loads.
+  const poField = field("po_number", {
+    label: "PO Number",
+    enabled: true,
+    required: false,
+  });
+  // PO is available to anyone on the order-create page (not billing-only); the
+  // admin `enabled` flag decides whether it shows.
+  const shouldShowPoNumber = poField.enabled;
 
   const [loading, setLoading] = useState(false);
   const [successModal, setSuccessModal] = useState(false);
@@ -2405,7 +2415,11 @@ export function OrderEntryScreen({
     if (!resolvedBillToId && !resolvedShipToId) {
       return appAlert("Error", "Select at least one address");
     }
-    // if (!poNumber) return appAlert("Error", "Select Po Number");
+    // PO number is mandatory only when the field is shown AND admin-marked
+    // required (controlled from the web UI Labels admin screen).
+    if (shouldShowPoNumber && poField.required && !String(poNumber).trim()) {
+      return appAlert("Error", `${poField.label} is required`);
+    }
     if (!delivery) return appAlert("Error", "Select delivery date");
     if (!branch) return appAlert("Error", "Select dispatch location");
 
@@ -3137,7 +3151,7 @@ export function OrderEntryScreen({
             {shouldShowPoNumber && (
               <View style={styles.field}>
                 <FixedLabelTextInput
-                  label="PO Number"
+                  label={poField.required ? `${poField.label} *` : poField.label}
                   value={poNumber}
                   onChangeText={setPoNumber}
                   mode="outlined"
