@@ -252,16 +252,22 @@ export default function NotificationsScreen() {
   const markAllRead = useCallback(async () => {
     const unread = notifications.filter((n) => !n.read);
     if (unread.length === 0) return;
-    // Optimistic: flip everything to read, then persist each in the background.
+    // Optimistic: flip everything to read, then persist in the background.
     setNotifications((cur) => cur.map((n) => ({ ...n, read: true })));
     try {
-      await Promise.all(
-        unread.map((n) => orderService.markNotificationRead(n.id)),
-      );
+      // One request instead of one PATCH per unread row. The endpoint marks
+      // every unread notification for the caller server-side, so it is also
+      // more correct than the old fan-out: that only covered the rows this
+      // screen had loaded, leaving anything older still unread.
+      await orderService.markAllNotificationsRead();
     } catch (e) {
       console.log("Error marking all read:", e);
+      // Re-sync from the server so the optimistic flip cannot leave the UI
+      // claiming rows are read when the write failed. "silent" so the list
+      // corrects itself without flashing a spinner.
+      loadNotifications("silent");
     }
-  }, [notifications]);
+  }, [notifications, loadNotifications]);
 
   const openNotification = useCallback(async (item: NotificationCard) => {
     try {
