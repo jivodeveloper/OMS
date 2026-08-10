@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   LayoutAnimation,
   Platform,
@@ -6,17 +6,27 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TouchableOpacity,
   UIManager,
   View,
 } from "react-native";
-import { Surface } from "react-native-paper";
-import { router, useLocalSearchParams } from "expo-router";
+import { Ionicons } from "@expo/vector-icons";
+import {
+  router,
+  useFocusEffect,
+  useLocalSearchParams,
+} from "expo-router";
+import { useIsFocused } from "@react-navigation/native";
 import { COLORS } from "@/src/constants/theme";
+import { fs, ms, sp } from "@/src/utils/responsive";
 import { showToast } from "@/src/components/common/Toast";
+import { setHeaderEditHandler } from "@/src/utils/headerEdit";
 import ApprovalHeaderCard from "../components/ApprovalHeaderCard";
 import GeneralInformationCard from "../components/GeneralInformationCard";
+import InvoiceSummaryCard from "@/src/features/payments/components/InvoiceSummaryCard";
 import PaymentAccordion from "../components/PaymentAccordion";
 import AttachmentList from "../components/AttachmentList";
+import AttachmentViewer from "../components/AttachmentViewer";
 import ApprovalBottomBar from "../components/ApprovalBottomBar";
 import ApprovalDetailsSkeleton from "../components/ApprovalDetailsSkeleton";
 import EmptyApprovalState from "../components/EmptyApprovalState";
@@ -24,8 +34,9 @@ import ApproveDialog from "../components/dialogs/ApproveDialog";
 import RejectDialog from "../components/dialogs/RejectDialog";
 import ApprovalLoadingDialog from "../components/dialogs/ApprovalLoadingDialog";
 import ApprovalSuccessDialog from "../components/dialogs/ApprovalSuccessDialog";
+import SapErrorDialog from "../components/dialogs/SapErrorDialog";
 import { useApprovalDetails } from "../hooks/useApprovalDetails";
-import type { ApprovalAttachment } from "../types";
+import type { ApprovalAttachment, ApprovalDecision } from "../types";
 
 // Android needs this opt-in for LayoutAnimation to run at all.
 if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -33,24 +44,71 @@ if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental
 }
 
 export default function ApprovalDetailsScreen() {
-  const params = useLocalSearchParams<{ requestNo?: string }>();
+  // `documentId` is the PaymentReceipt id — the payload this screen renders.
+  // `id` is the approval request id, kept for callers that still send it.
+  const params = useLocalSearchParams<{
+    requestNo?: string;
+    documentId?: string;
+    id?: string;
+  }>();
+
+  /**
+   * Where a decided payment sends the approver.
+   *
+   * Payment Tracking with a refetch signal, so the entry appears in its NEW
+   * status instead of the stale row they tapped. This screen also serves the
+   * generic approval list, though — `documentId` is sent only by the payments
+   * tracking screen, so it discriminates, and everything else backs out the way
+   * it came. Defined here because BOTH exits use it: the Done button and the
+   * success dialog's own dismiss timer.
+   */
+  const leaveAfterDecision = useCallback(() => {
+    if (params.documentId) {
+      router.replace({
+        pathname: "/(main)/payments/payment-tracking",
+        params: { refreshAt: String(Date.now()) },
+      } as never);
+      return;
+    }
+    router.back();
+  }, [params.documentId]);
+
   const {
     detail,
     loading,
     refreshing,
     error,
     stage,
+    isFinal,
     decision,
     onRefresh,
     retry,
+    clearError,
     openApprove,
     openReject,
     closeDialog,
     submitDecision,
-  } = useApprovalDetails(params.requestNo);
+  } = useApprovalDetails(params.requestNo, params.documentId, () => {
+    // The success dialog dismissed itself. Leave exactly the way the Done
+    // button does — otherwise waiting out the timer and tapping Done would
+    // land the approver in two different places.
+    showToast(
+      decisionRef.current === "approve"
+        ? "Payment approved."
+        : "Payment rejected and sent back to the creator.",
+      decisionRef.current === "approve" ? "success" : "info",
+    );
+    leaveAfterDecision();
+  });
+
+  // The callback above is created once, so it cannot close over `decision`
+  // directly — a ref keeps it reading the current value.
+  const decisionRef = useRef<ApprovalDecision>("approve");
 
   // Only one payment open at a time keeps the screen short.
   const [expandedPaymentId, setExpandedPaymentId] = useState<string | null>(null);
+  const [viewing, setViewing] = useState<ApprovalAttachment | null>(null);
+  const isFocused = useIsFocused();
 
   const togglePayment = useCallback((id: string) => {
     LayoutAnimation.configureNext(
@@ -63,16 +121,44 @@ export default function ApprovalDetailsScreen() {
     setExpandedPaymentId((prev) => (prev === id ? null : id));
   }, []);
 
+  /**
+   * Open one attachment.
+   *
+   * The download endpoint is permission-checked and needs the Authorization
+   * header, so it cannot simply be handed to Linking.openURL — that would be a
+   * bare request and come back 401. Fetching it with the token and caching it
+   * locally is the real fix; until that exists, say so plainly rather than
+   * opening something that fails.
+   */
+  /** Open the Receive Payment screen in edit mode — same form, prefilled. */
+  const handleEdit = useCallback(() => {
+    if (!detail) return;
+    router.push({
+      pathname: "/(main)/payments/receive-payment",
+      params: { receiptId: String(detail.documentId) },
+    } as never);
+  }, [detail]);
+
+
+  /** Open one attachment in the in-app viewer. */
   const handleAttachment = useCallback((attachment: ApprovalAttachment) => {
-    // UI-only: opening/downloading files arrives with the backend phase.
-    showToast(`${attachment.name} is not available in this preview.`, "info");
+    if (!attachment.downloadUrl) {
+      showToast(`${attachment.name} has no stored file.`, "info");
+      return;
+    }
+    setViewing(attachment);
   }, []);
 
-  const handleInvoicePress = useCallback((invoice: string) => {
-    showToast(`Invoice ${invoice} opens in a later phase.`, "info");
-  }, []);
 
-  /** Done on the success dialog: close, confirm, and return to the list. */
+  /**
+   * Done on the success dialog: close, confirm, and leave.
+   *
+   * A payment goes to Payment Tracking with a refetch signal, so the approver
+   * sees the entry in its NEW status rather than the stale row they left. This
+   * screen also serves the generic approval list, though — `documentId` is only
+   * ever sent by the payments tracking screen, so it is the discriminator, and
+   * anything else keeps the plain back-out to wherever it came from.
+   */
   const handleDone = useCallback(() => {
     closeDialog();
     showToast(
@@ -81,12 +167,48 @@ export default function ApprovalDetailsScreen() {
         : "Request rejected.",
       decision === "approve" ? "success" : "error",
     );
-    router.back();
-  }, [closeDialog, decision]);
+    leaveAfterDecision();
+  }, [closeDialog, decision, leaveAfterDecision]);
+
+  useEffect(() => {
+    decisionRef.current = decision;
+  }, [decision]);
+
+  /**
+   * Publish Edit into the navbar while THIS screen is focused, and withdraw it
+   * the moment it is not.
+   *
+   * Tied to focus rather than mount: pushing the edit form leaves this screen
+   * mounted underneath, so an unmount-only cleanup left the icon showing on the
+   * next screen — which is how it appeared on pages that have nothing to edit.
+   */
+  useFocusEffect(
+    useCallback(() => {
+      setHeaderEditHandler(canEditRef.current ? handleEditRef.current : null);
+      return () => setHeaderEditHandler(null);
+    }, []),
+  );
+
+  // Refs so the focus effect above can stay dependency-free — re-running it on
+  // every detail change would re-register during the blur transition and put
+  // the icon back after the cleanup had removed it.
+  const canEditRef = useRef(false);
+  const handleEditRef = useRef(handleEdit);
+  useEffect(() => {
+    canEditRef.current = !!detail?.canEdit;
+    handleEditRef.current = handleEdit;
+    // Keep the live registration in step while this screen IS focused.
+    if (isFocused) {
+      setHeaderEditHandler(detail?.canEdit ? handleEdit : null);
+    }
+  }, [detail?.canEdit, handleEdit, isFocused]);
 
   if (loading) return <ApprovalDetailsSkeleton />;
 
-  if (error || !detail) {
+  // Only a LOAD failure blanks the screen. An error raised while the document
+  // is on screen — a SAP rejection after approving — belongs beside it as a
+  // banner, because the document is exactly what the user needs to see.
+  if (!detail) {
     return (
       <View style={styles.container}>
         <EmptyApprovalState
@@ -115,16 +237,54 @@ export default function ApprovalDetailsScreen() {
         <ApprovalHeaderCard detail={detail} />
 
         <View style={styles.body}>
-          <GeneralInformationCard
-            detail={detail}
-            onPressInvoice={handleInvoicePress}
-          />
+
+          {/* Why it came back. Shown above everything else because it is the
+              first thing the creator needs — the fix depends on it. */}
+          {detail.rejectionReason ? (
+            <View style={styles.rejectBanner}>
+              <Ionicons
+                name="alert-circle"
+                size={ms(20)}
+                color={COLORS.error}
+              />
+              <View style={styles.rejectText}>
+                <Text style={styles.rejectTitle}>
+                  Rejected{detail.rejectedBy ? ` by ${detail.rejectedBy}` : ""}
+                </Text>
+                <Text style={styles.rejectReason}>{detail.rejectionReason}</Text>
+                {detail.canEdit ? (
+                  <Text style={styles.rejectHint}>
+                    Tap Edit at the top to correct it and resubmit.
+                  </Text>
+                ) : null}
+              </View>
+            </View>
+          ) : null}
+
+          <GeneralInformationCard detail={detail} />
+
+          {/* Same card as the create form, so the figures an approver checks
+              are the ones the creator saw. Hidden for an advance, and for older
+              receipts that stored no invoice figure. */}
+          {detail.invoiceAmount > 0 ? (
+            <InvoiceSummaryCard
+              invoiceNo={detail.invoice}
+              invoiceAmount={detail.invoiceAmount}
+              receivedAmount={detail.amount}
+            />
+          ) : null}
 
           {/* ── Payment information ── */}
-          <Surface style={styles.card}>
+          <View style={styles.card}>
             <View style={styles.sectionHeader}>
-              <View style={styles.sectionIndicator} />
-              <Text style={styles.sectionTitle}>PAYMENT INFORMATION</Text>
+              <View style={styles.sectionIcon}>
+                <Ionicons
+                  name="wallet"
+                  size={ms(16)}
+                  color={COLORS.primary}
+                />
+              </View>
+              <Text style={styles.sectionTitle}>Payment Information</Text>
             </View>
 
             {detail.payments.map((payment) => (
@@ -133,9 +293,10 @@ export default function ApprovalDetailsScreen() {
                 payment={payment}
                 expanded={expandedPaymentId === payment.id}
                 onToggle={() => togglePayment(payment.id)}
+                onViewAttachment={handleAttachment}
               />
             ))}
-          </Surface>
+          </View>
 
           <AttachmentList
             attachments={detail.attachments}
@@ -145,7 +306,12 @@ export default function ApprovalDetailsScreen() {
         </View>
       </ScrollView>
 
-      <ApprovalBottomBar onReject={openReject} onApprove={openApprove} />
+      {/* Only for someone who can act on it RIGHT NOW. A creator never sees
+          it, and nobody sees it once the document is decided — an Approve
+          button that cannot approve is worse than no button. */}
+      {detail.canDecide ? (
+        <ApprovalBottomBar onReject={openReject} onApprove={openApprove} />
+      ) : null}
 
       {/* ── Decision flow: confirm → loading → success ── */}
       <ApproveDialog
@@ -158,9 +324,26 @@ export default function ApprovalDetailsScreen() {
         onClose={closeDialog}
         onConfirm={(remarks) => submitDecision("reject", remarks)}
       />
+      <AttachmentViewer attachment={viewing} onClose={() => setViewing(null)} />
+
+
+      {/* SAP refused the posting. A dialog rather than a page: the document is
+          still valid and still on screen behind it — only the posting failed. */}
+      <SapErrorDialog
+        visible={!!error}
+        message={error ?? ""}
+        canEdit={!!detail.canEdit}
+        onEdit={() => {
+          clearError();
+          handleEdit();
+        }}
+        onClose={clearError}
+      />
+
       <ApprovalLoadingDialog visible={stage === "loading"} decision={decision} />
       <ApprovalSuccessDialog
         visible={stage === "success"}
+        isFinal={isFinal}
         decision={decision}
         requestNo={detail.requestNo}
         date={detail.createdDate}
@@ -186,21 +369,66 @@ const styles = StyleSheet.create({
   body: {
     padding: 16,
   },
+  // Matches GeneralInformationCard exactly — same radius, padding, border and
+  // shadow — so the page reads as one stack of cards rather than three styles.
   card: {
     backgroundColor: COLORS.surface,
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 16,
+    borderRadius: sp(16),
+    padding: sp(16),
+    marginBottom: sp(14),
     borderWidth: 1,
     borderColor: COLORS.borderLight,
+    shadowColor: COLORS.shadowColor,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
     elevation: 2,
+  },
+  rejectBanner: {
+    flexDirection: "row",
+    gap: sp(10),
+    backgroundColor: COLORS.errorLight,
+    borderWidth: 1,
+    borderColor: COLORS.errorBorder,
+    borderRadius: sp(14),
+    padding: sp(14),
+    marginBottom: sp(14),
+  },
+  rejectText: {
+    flex: 1,
+    minWidth: 0,
+  },
+  rejectTitle: {
+    fontSize: fs(13),
+    fontWeight: "800",
+    color: COLORS.error,
+  },
+  rejectReason: {
+    fontSize: fs(13),
+    lineHeight: fs(19),
+    color: COLORS.text,
+    marginTop: sp(3),
+  },
+  rejectHint: {
+    fontSize: fs(11),
+    color: COLORS.textSecondary,
+    marginTop: sp(5),
   },
   sectionHeader: {
     flexDirection: "row",
     alignItems: "center",
-    marginBottom: 14,
+    gap: sp(8),
+    marginBottom: sp(14),
   },
-  sectionIndicator: {
+  sectionIcon: {
+    width: ms(28),
+    height: ms(28),
+    borderRadius: ms(14),
+    backgroundColor: COLORS.primaryLighter,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  sectionIndicatorLegacy: {
     width: 2,
     height: 16,
     backgroundColor: COLORS.primary,
@@ -208,9 +436,8 @@ const styles = StyleSheet.create({
     marginRight: 8,
   },
   sectionTitle: {
-    fontSize: 11,
-    fontWeight: "600",
-    color: COLORS.primaryDark,
-    letterSpacing: 1,
+    fontSize: fs(15),
+    fontWeight: "700",
+    color: COLORS.text,
   },
 });

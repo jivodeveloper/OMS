@@ -7,7 +7,7 @@ import PaymentTrackingScreen from "@/src/features/payments/PaymentTrackingScreen
 export default function DepositTrackingRoute() {
   return (
     <ScreenGuard screen="payments/deposit-tracking">
-      <PaymentTrackingScreen kind="DEPOSIT" mine />
+      <PaymentTrackingScreen kind="DEPOSIT" />
     </ScreenGuard>
   );
 }

@@ -19,9 +19,7 @@ import { notificationService } from "@/src/services/notification.service";
 import { storage } from "@/src/utils/storage";
 import {
   canAccessScreen,
-  rolesOf,
-  screensFromExtraPages,
-  SCREEN_ROLES,
+  isPaymentsOnlyUser,
 } from "@/src/constants/pages";
 import {
   getNotificationDedupeKey,
@@ -32,6 +30,7 @@ import {
 import { shouldShowPermissionPrompt } from "@/src/utils/notificationPermission";
 import { isNotificationSuppressed } from "@/src/utils/notificationGate";
 import { useHeaderRefresh } from "@/src/utils/headerRefresh";
+import { useHeaderEdit } from "@/src/utils/headerEdit";
 import { refreshLiveData, refreshNotifications } from "@/src/cache";
 import { DRAWER_WIDTH } from "@/src/utils/responsive";
 import NotificationPermissionModal from "@/src/components/NotificationPermissionModal";
@@ -44,10 +43,10 @@ export default function MainLayout() {
   const { user, refreshUser } = useAuth();
   const pathname = usePathname();
   const userRole = user?.role?.toLowerCase() || "";
-  const grantedScreens = screensFromExtraPages(user?.extra_pages || []);
   // A screen (e.g. Create Order) can publish a refresh action; when present it
   // renders as a header button just before the notification bell.
   const headerRefresh = useHeaderRefresh();
+  const headerEdit = useHeaderEdit();
   const [unreadNotificationCount, setUnreadNotificationCount] = useState(0);
   const [showPermissionModal, setShowPermissionModal] = useState(false);
   const [permissionSubmitting, setPermissionSubmitting] = useState(false);
@@ -257,9 +256,6 @@ export default function MainLayout() {
     }
   }, [lastNotificationResponse, loadUnreadNotificationCount, user]);
 
-  // Single source of truth shared with the bottom bar (see constants/pages).
-  const canSee = SCREEN_ROLES;
-
   const visibleStyle = {
     borderRadius: RADIUS.md,
     marginHorizontal: 12,
@@ -293,16 +289,40 @@ export default function MainLayout() {
     user?.roles,
   );
 
-  // Every role the user holds (primary + extra_roles). Matching on the primary
-  // alone hid the payments screens from anyone whose payment function came from
-  // an extra role.
-  const heldRoles = rolesOf(userRole, user?.roles);
+  // Mirrors what dashboard.tsx renders, so the header and the page agree.
+  const paymentsOnlyHome = isPaymentsOnlyUser(
+    user?.role,
+    user?.extra_pages || [],
+    user?.roles,
+  );
+  // Same choice dashboard.tsx makes: anyone holding payments sees the payments
+  // home, everyone else on this branch is a deposits user. The header has to
+  // follow, or a deposits user reads "Payments Dashboard" above deposit data.
+  const homeIsDeposits =
+    paymentsOnlyHome &&
+    !canAccessScreen(
+      "payments/payment-tracking",
+      (user?.role || "").toLowerCase(),
+      user?.extra_pages || [],
+      user?.roles,
+    );
 
+  /**
+   * Whether a screen appears in the sidebar.
+   *
+   * Delegates to canAccessScreen — the SAME rule ScreenGuard enforces when the
+   * page is opened. This used to be a second copy that only knew about roles
+   * and grants, so once payments screens moved to action permissions the two
+   * disagreed: the sidebar listed pages the guard then refused.
+   */
   const isVisible = (screen: string) => {
     if (!userRole && screen === "dashboard") return true;
-    if (grantedScreens.has(screen)) return true;
-    const roles = canSee[screen];
-    return !!roles && roles.some((r) => heldRoles.includes(r));
+    return canAccessScreen(
+      screen,
+      userRole,
+      user?.extra_pages || [],
+      user?.roles,
+    );
   };
 
   return (
@@ -329,8 +349,9 @@ export default function MainLayout() {
             route.name === "payments/payment-tracking" ||
             route.name === "payments/deposit-tracking" ||
             route.name === "payments/tracking-details" ||
+            route.name === "payments/deposit-details" ||
+            route.name === "payments/tracking-progress" ||
             route.name === "approval/payment-requests" ||
-            route.name === "approval/deposit-requests" ||
             route.name === "approval/approval-details";
           // Approval Details carries an Edit action next to the bell.
           const isApprovalDetails = route.name === "approval/approval-details";
@@ -366,14 +387,25 @@ export default function MainLayout() {
                     return;
                   }
 
+                  // expo-router's own history knows where we came from even
+                  // when the Drawer navigator does not: pushing between two
+                  // drawer screens builds no navigator stack, so canGoBack()
+                  // returned false and every Back reset to the dashboard —
+                  // from Payment Details, Progress, everywhere.
+                  if (router.canGoBack()) {
+                    router.back();
+                    return;
+                  }
                   if (navigation.canGoBack()) {
                     navigation.goBack();
-                  } else {
-                    navigation.reset({
-                      index: 0,
-                      routes: [{ name: "dashboard" as never }],
-                    });
+                    return;
                   }
+                  // Genuinely nothing behind us (a deep link, say). The
+                  // dashboard is the only sensible destination.
+                  navigation.reset({
+                    index: 0,
+                    routes: [{ name: "dashboard" as never }],
+                  });
                 }}
                 style={{ marginLeft: 12 }}
               >
@@ -390,18 +422,16 @@ export default function MainLayout() {
 
               return (
                 <View style={styles.headerActions}>
-                  {isApprovalDetails ? (
+                  {/* Edit lives here, beside the screen title. Rendered only
+                      while the open screen has published a handler — that is
+                      how the header knows whether THIS document may be edited,
+                      which depends on its status and the viewer's permissions. */}
+                  {headerEdit.available ? (
                     <TouchableOpacity
                       hitSlop={HEADER_ICON_HIT_SLOP}
-                      onPress={() => {
-                        // Edit mode lands with the create/edit request screen.
-                        showToast(
-                          "Edit mode arrives with the request form screen.",
-                          "info",
-                        );
-                      }}
+                      onPress={() => headerEdit.run()}
                       style={styles.headerBellButton}
-                      accessibilityLabel="Edit request"
+                      accessibilityLabel="Edit this entry"
                     >
                       <Ionicons
                         name="create-outline"
@@ -410,6 +440,10 @@ export default function MainLayout() {
                       />
                     </TouchableOpacity>
                   ) : null}
+                  {/* The Approval Details "edit" icon was removed: an approver
+                      decides on a request, they do not edit it — only the
+                      creator can, by resubmitting a rejected entry. It only
+                      ever showed a "coming soon" toast. */}
                   {/* Top "+" create shortcut removed — the bottom bar's centre
                       Create button is the single entry point for new orders. */}
                   {isOrderEntry && headerRefresh.available ? (
@@ -473,7 +507,13 @@ export default function MainLayout() {
           name="dashboard"
           options={{
             drawerLabel: ({ color }) => renderDrawerLabel("Dashboard", color),
-            title: "Dashboard",
+            // A payments-only user's home IS the payments dashboard — calling
+            // it "Dashboard" suggested the sales one they cannot open.
+            title: homeIsDeposits
+              ? "Deposits Dashboard"
+              : paymentsOnlyHome
+                ? "Payments Dashboard"
+                : "Dashboard",
             drawerIcon: ({ color }) => (
               <Ionicons name="grid-outline" size={22} color={color} />
             ),
@@ -576,38 +616,23 @@ export default function MainLayout() {
               : hiddenStyle,
           }}
         />
+        {/* Payment Requests is retired: Payment Tracking now serves approvers
+            and creators from one screen, deciding scope and the "View Details"
+            destination from the caller's action permissions. The route file is
+            kept so an old deep link still resolves, but it is never listed. */}
         <Drawer.Screen
           name="approval/payment-requests"
           options={{
-            drawerLabel: ({ color }) =>
-              renderDrawerLabel("Payment Requests", color),
             title: "Payment Requests",
-            drawerIcon: ({ color }) => (
-              <Ionicons name="shield-checkmark-outline" size={22} color={color} />
-            ),
-            drawerItemStyle: isVisible("approval/payment-requests")
-              ? visibleStyle
-              : hiddenStyle,
-          }}
-        />
-        <Drawer.Screen
-          name="approval/deposit-requests"
-          options={{
-            drawerLabel: ({ color }) =>
-              renderDrawerLabel("Deposit Requests", color),
-            title: "Deposit Requests",
-            drawerIcon: ({ color }) => (
-              <Ionicons name="wallet-outline" size={22} color={color} />
-            ),
-            drawerItemStyle: isVisible("approval/deposit-requests")
-              ? visibleStyle
-              : hiddenStyle,
+            drawerItemStyle: hiddenStyle,
           }}
         />
         <Drawer.Screen
           name="approval/approval-details"
           options={{
-            title: "Approval Details",
+            // Serves creators and approvers alike now, so the title is about
+            // the document rather than about approving it.
+            title: "Payment Details",
             drawerItemStyle: hiddenStyle,
           }}
         />
@@ -622,6 +647,28 @@ export default function MainLayout() {
             drawerItemStyle: isVisible("payments/bank-deposit")
               ? visibleStyle
               : hiddenStyle,
+          }}
+        />
+        <Drawer.Screen
+          name="payments/dashboard"
+          options={{
+            drawerLabel: ({ color }) =>
+              renderDrawerLabel("Payments Dashboard", color),
+            title: "Payments Dashboard",
+            drawerIcon: ({ color }) => (
+              <Ionicons name="pie-chart-outline" size={22} color={color} />
+            ),
+            drawerItemStyle: isVisible("payments/dashboard")
+              ? visibleStyle
+              : hiddenStyle,
+          }}
+        />
+        {/* Reached from a row in the dashboard, never from the menu. */}
+        <Drawer.Screen
+          name="payments/dashboard-person"
+          options={{
+            title: "Collection Details",
+            drawerItemStyle: hiddenStyle,
           }}
         />
         <Drawer.Screen
@@ -653,9 +700,25 @@ export default function MainLayout() {
           }}
         />
         <Drawer.Screen
+          name="payments/deposit-details"
+          options={{
+            title: "Deposit Details",
+            // Reached from a deposit card, never from the drawer itself.
+            drawerItemStyle: hiddenStyle,
+          }}
+        />
+        <Drawer.Screen
           name="payments/tracking-details"
           options={{
-            title: "Details",
+            title: "Payment Details",
+            // Reached from a tracking card, never from the drawer itself.
+            drawerItemStyle: hiddenStyle,
+          }}
+        />
+        <Drawer.Screen
+          name="payments/tracking-progress"
+          options={{
+            title: "Payment Progress",
             // Reached from a tracking card, never from the drawer itself.
             drawerItemStyle: hiddenStyle,
           }}

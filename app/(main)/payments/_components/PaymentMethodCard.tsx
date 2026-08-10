@@ -14,8 +14,10 @@ import {
   PAYMENT_METHOD_OPTIONS,
   type PaymentMethodType,
 } from "../_lib/constants";
+import { TRANSFER_METHODS, UPI_REFERENCE_MAX } from "../_lib/constants";
 import { validateCashBreakdown } from "../_lib/validation";
 import type { AttachmentStub, CashNoteRow, PaymentMethodEntry } from "../_lib/types";
+import type { PickedFile } from "../_lib/pickAttachment";
 
 interface PaymentMethodCardProps {
   entry: PaymentMethodEntry;
@@ -42,7 +44,10 @@ export default function PaymentMethodCard({
   const cashError = validateCashBreakdown(entry);
   // Cash is recorded through the note breakdown; UPI and Cheque carry proof
   // instead, so the attachment field belongs to those two only.
-  const supportsAttachment = entry.method === "upi" || entry.method === "cheque";
+  // Everything but cash has a document behind it: a screenshot, an advice, or
+  // the cheque itself.
+  const supportsAttachment = entry.method !== "cash";
+  const isTransfer = TRANSFER_METHODS.includes(entry.method);
 
   const addNoteRow = () => {
     const row: CashNoteRow = {
@@ -66,17 +71,17 @@ export default function PaymentMethodCard({
     onChange({ noteRows: entry.noteRows.filter((row) => row.id !== id) });
   };
 
-  // Dummy attachment — a real document picker replaces this when the feature is
-  // wired up, the surrounding UI stays the same.
-  const addAttachment = () => {
-    const file: AttachmentStub = {
-      id: `file-${entry.id}-${entry.attachments.length + 1}-${Date.now()}`,
-      name:
-        entry.method === "cheque"
-          ? `cheque-${entry.attachments.length + 1}.jpg`
-          : `upi-screenshot-${entry.attachments.length + 1}.png`,
-    };
-    onChange({ attachments: [...entry.attachments, file] });
+  /** Files that already passed type and size validation inside the picker. */
+  const addAttachment = (files: PickedFile[]) => {
+    if (!files.length) return;
+    const added: AttachmentStub[] = files.map((file) => ({
+      id: file.id,
+      name: file.name,
+      uri: file.uri,
+      mimeType: file.mimeType,
+      size: file.size,
+    }));
+    onChange({ attachments: [...entry.attachments, ...added] });
   };
 
   const removeAttachment = (id: string) => {
@@ -164,7 +169,27 @@ export default function PaymentMethodCard({
             />
           ) : null}
 
-          {/* UPI carries no reference field — the screenshot is the record. */}
+          {/* ── UPI / Bank transfer / NEFT / RTGS ──
+              No bank field: an administrator maps each of these to a SAP house
+              bank account once, and the backend resolves the G/L. Asking a
+              collector to pick one would be asking them to know SAP. */}
+          {isTransfer ? (
+            <FormField
+              // Optional: the UTR is not always to hand when the receipt is
+              // raised. It is still capped and validated when supplied, so a
+              // malformed reference cannot look reconcilable.
+              label="UPI Reference / UTR"
+              value={entry.reference}
+              onChangeText={(text) =>
+                onChange({ reference: text.slice(0, UPI_REFERENCE_MAX) })
+              }
+              placeholder="Enter UPI Transaction ID"
+              leftIcon="pound"
+              optional
+              maxLength={UPI_REFERENCE_MAX}
+              autoCapitalize="characters"
+            />
+          ) : null}
 
           {/* ── Cheque ── */}
           {entry.method === "cheque" ? (
@@ -180,12 +205,20 @@ export default function PaymentMethodCard({
                 leftIcon="numeric"
               />
 
+              {/* The bank the CUSTOMER's cheque is drawn on, as printed on the
+                  paper — HDFC, SBI, AXIS, anything. Deliberately free text and
+                  NOT checked against our own accounts: it identifies the payer's
+                  instrument, and OMS resolves our deposit account separately
+                  from the admin mapping. Sent to SAP verbatim as BankCode. */}
               <FormField
-                label="Bank Name"
+                label="Customer Cheque Bank"
                 value={entry.bankName}
-                onChangeText={(text) => onChange({ bankName: text })}
-                placeholder="Enter bank name"
+                onChangeText={(text) =>
+                  onChange({ bankName: text.toUpperCase() })
+                }
+                placeholder="e.g. HDFC"
                 leftIcon="bank-outline"
+                autoCapitalize="characters"
               />
 
               {/* Cheque Date — web uses a native date input, native uses the
@@ -270,7 +303,9 @@ export default function PaymentMethodCard({
           {supportsAttachment ? (
             <AttachmentPicker
               label={
-                entry.method === "upi" ? "Upload Screenshot" : "Upload Cheque Image"
+                entry.method === "cheque"
+                  ? "Upload Cheque Image"
+                  : "Upload Screenshot"
               }
               attachments={entry.attachments}
               onAdd={addAttachment}

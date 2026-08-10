@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  Alert,
   KeyboardAvoidingView,
   LayoutAnimation,
   Platform,
@@ -17,11 +16,14 @@ import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { COLORS, RADIUS, SPACING } from "@/src/constants/theme";
+import { appAlert } from "@/src/components/common/AppDialog";
 import Dropdown from "@/src/components/common/DropdownProps";
 import ScreenGuard from "@/src/components/common/ScreenGuard";
 import FormField from "./_components/FormField";
 import DepositPaymentRow from "./_components/DepositPaymentRow";
-import UploadCard from "./_components/UploadCard";
+import AttachmentPicker from "./_components/AttachmentPicker";
+import type { PickedFile } from "./_lib/pickAttachment";
+import PaymentSuccessDialog from "@/src/features/payments/components/PaymentSuccessDialog";
 import { formatAmount } from "./_lib/constants";
 import {
   messageFrom,
@@ -94,9 +96,18 @@ function BankDepositScreen() {
   const [depositTouched, setDepositTouched] = useState(false);
   const [shortfallReason, setShortfallReason] = useState("");
 
-  const [depositSlip, setDepositSlip] = useState<string | null>(null);
-  const [depositReceipt, setDepositReceipt] = useState<string | null>(null);
+  // Real picked files. These were previously two strings set to a hardcoded
+  // "deposit-slip.jpg" — the card showed a filename but nothing was ever
+  // uploaded, so the deposit posted with no proof attached.
+  const [slipFiles, setSlipFiles] = useState<PickedFile[]>([]);
+  const [receiptFiles, setReceiptFiles] = useState<PickedFile[]>([]);
   const [saving, setSaving] = useState(false);
+  const [success, setSuccess] = useState<{
+    depositNo: string;
+    date: string;
+    time: string;
+    note?: string;
+  } | null>(null);
 
   // ── Live master data ──────────────────────────────────────────────────
   const companies = useCompanies();
@@ -111,6 +122,9 @@ function BankDepositScreen() {
   const [payments, setPayments] = useState<DepositableReceipt[]>([]);
   const [paymentsLoading, setPaymentsLoading] = useState(false);
   const [paymentsError, setPaymentsError] = useState("");
+  // Bumped after a deposit is raised, to re-run the effect below: the receipts
+  // just banked must disappear from the picker.
+  const [receiptsRefreshKey, setReceiptsRefreshKey] = useState(0);
 
   useEffect(() => {
     if (!selectedCompany) {
@@ -138,7 +152,7 @@ function BankDepositScreen() {
     return () => {
       active = false;
     };
-  }, [selectedCompany]);
+  }, [selectedCompany, receiptsRefreshKey]);
 
   // Party filter options are derived from what actually loaded, so the list can
   // never offer a party with no depositable payments.
@@ -183,11 +197,6 @@ function BankDepositScreen() {
     selectedIds.includes(String(payment.id)),
   );
 
-  const totalSelected = selectedPayments.reduce(
-    (sum, payment) => sum + Number(payment.total_amount || 0),
-    0,
-  );
-
   /** Sum one payment method across a receipt's lines — a receipt can mix them. */
   const sumMethod = (receipt: DepositableReceipt, kind: "CASH" | "CHEQUE") =>
     (receipt.methods ?? [])
@@ -204,15 +213,21 @@ function BankDepositScreen() {
   const toRowShape = (receipt: DepositableReceipt): DepositablePayment => {
     const cash = sumMethod(receipt, "CASH");
     const cheque = sumMethod(receipt, "CHEQUE");
-    const method: DepositPaymentMethod =
-      cheque > cash ? "Cheque" : cash > 0 ? "Cash" : "UPI";
+    // Only ever Cash or Cheque: the endpoint no longer offers UPI-only
+    // receipts, and for a mixed receipt it is the physical part that gets
+    // carried to the bank. Labelling one "UPI" would name the very portion
+    // that is NOT being deposited.
+    const method: DepositPaymentMethod = cheque > cash ? "Cheque" : "Cash";
     return {
       id: String(receipt.id),
       party: receipt.card_name,
       invoice: receipt.receipt_no,
       date: receipt.payment_date,
       method,
-      amount: Number(receipt.total_amount || 0),
+      // The bankable part only, matching what the totals below sum. Showing
+      // the full receipt value here would make the row and the "Collected"
+      // figure disagree on a mixed-method receipt.
+      amount: cash + cheque,
       status: "pending",
     };
   };
@@ -223,6 +238,19 @@ function BankDepositScreen() {
   );
   const totalCheque = selectedPayments.reduce(
     (sum, p) => sum + sumMethod(p, "CHEQUE"),
+    0,
+  );
+
+  /**
+   * What the selection is worth AS A DEPOSIT — cash + cheque only.
+   *
+   * Deliberately NOT `total_amount`: on a receipt that mixes methods that
+   * figure includes the UPI portion, which is already in the bank and is not
+   * being carried anywhere. Using it asked the user to deposit ₹200 for a
+   * receipt where only ₹100 was ever in hand.
+   */
+  const totalSelected = selectedPayments.reduce(
+    (sum, p) => sum + sumMethod(p, "CASH") + sumMethod(p, "CHEQUE"),
     0,
   );
 
@@ -314,6 +342,35 @@ function BankDepositScreen() {
    * Two calls, like the receipt flow: if the submit fails the deposit survives
    * as a draft rather than being lost, and the message says so.
    */
+  /**
+   * Clear the form after a deposit is raised.
+   *
+   * This screen stays mounted, so without it the next deposit opens holding
+   * the last one's receipts, amount and attachments — and the receipts it
+   * lists have already been banked, so the selection is not just stale but
+   * invalid. Company and date are re-seeded rather than blanked: a collector
+   * raising several deposits in a row is almost always in the same company,
+   * and the date should be today, not whatever was typed last time.
+   */
+  const resetForm = useCallback(() => {
+    setDepositedBy(null);
+    setBankAccount(null);
+    setDepositType(null);
+    setRemarks("");
+    setSelectedIds([]);
+    setDepositAmount("");
+    setDepositTouched(false);
+    setShortfallReason("");
+    setSlipFiles([]);
+    setReceiptFiles([]);
+    setSearch("");
+    setPartyFilter("all");
+    setListExpanded(true);
+    setDepositDate(new Date().toISOString().slice(0, 10));
+    // Re-fetch: the receipts just banked must disappear from the picker.
+    setReceiptsRefreshKey((n) => n + 1);
+  }, []);
+
   const handleSubmit = async () => {
     if (submitBlocked) return;
     setSaving(true);
@@ -322,7 +379,7 @@ function BankDepositScreen() {
         company: selectedCompany as Company,
         deposit_date: depositDate,
         deposited_by: depositedBy ? Number(depositedBy) : null,
-        bank_account: Number(bankAccount),
+        bank_key: String(bankAccount),
         deposit_type: String(depositType).toUpperCase() as
           | "CASH"
           | "CHEQUE"
@@ -334,23 +391,55 @@ function BankDepositScreen() {
         receipt_ids: selectedIds.map((id) => Number(id)),
       });
 
+      // Upload BEFORE submitting. Once the deposit enters the approval chain
+      // an approver may open it immediately, and proof that arrives after they
+      // have looked is proof they never saw.
+      const failedUploads: string[] = [];
+      for (const [files, kind] of [
+        [slipFiles, "DEPOSIT_SLIP"],
+        [receiptFiles, "DEPOSIT_RECEIPT"],
+      ] as const) {
+        for (const file of files) {
+          try {
+            await paymentsService.uploadDepositAttachment(
+              deposit.id,
+              { uri: file.uri, name: file.name, mimeType: file.mimeType },
+              kind,
+            );
+          } catch {
+            failedUploads.push(file.name);
+          }
+        }
+      }
+
       try {
         await paymentsService.submitDeposit(deposit.id);
       } catch (err) {
-        Alert.alert(
+        appAlert(
           "Saved as draft",
           `${deposit.deposit_no ?? "The deposit"} was created but could not be submitted: ${messageFrom(err)}. Submit it again from the deposits list.`,
         );
         return;
       }
 
-      Alert.alert(
-        "Deposit recorded",
-        `${deposit.deposit_no ?? "The deposit"} has been submitted for approval.`,
-        [{ text: "OK", onPress: () => router.back() }],
-      );
+      const now = new Date();
+      setSuccess({
+        depositNo: deposit.deposit_no ?? "The deposit",
+        date: now.toLocaleDateString("en-IN", {
+          day: "2-digit",
+          month: "short",
+          year: "numeric",
+        }),
+        time: now.toLocaleTimeString("en-IN", {
+          hour: "2-digit",
+          minute: "2-digit",
+        }),
+        note: failedUploads.length
+          ? `${failedUploads.length} attachment(s) could not be uploaded: ${failedUploads.join(", ")}.`
+          : undefined,
+      });
     } catch (err) {
-      Alert.alert("Could not record deposit", messageFrom(err));
+      appAlert("Could not record deposit", messageFrom(err));
     } finally {
       setSaving(false);
     }
@@ -365,9 +454,13 @@ function BankDepositScreen() {
 
   return (
     <View style={styles.container}>
+      {/* `behavior` was undefined on Android, which makes KeyboardAvoidingView
+          inert — the keyboard then covered the last fields, Remarks worst of
+          all since it sits at the very bottom. "height" works with
+          android:windowSoftInputMode=adjustResize. Same fix as receive-payment. */}
       <KeyboardAvoidingView
         style={styles.flex}
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
       >
         {/* ── Balance banner, flush under the navbar ──────────────────── */}
         <LinearGradient
@@ -427,6 +520,7 @@ function BankDepositScreen() {
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
+          automaticallyAdjustKeyboardInsets
         >
           <View style={styles.intro}>
             <Text style={styles.introTitle}>Bank Deposit</Text>
@@ -989,24 +1083,23 @@ function BankDepositScreen() {
               <Text style={styles.sectionOptional}>Optional</Text>
             </View>
 
-            <View style={styles.uploadRow}>
-              <UploadCard
-                title="Bank Deposit Slip"
-                hint="Tap to Upload"
-                icon="document-attach-outline"
-                fileName={depositSlip}
-                onPress={() => setDepositSlip("deposit-slip.jpg")}
-                onClear={() => setDepositSlip(null)}
-              />
-              <UploadCard
-                title="Deposit Receipt"
-                hint="Tap to Upload"
-                icon="receipt-outline"
-                fileName={depositReceipt}
-                onPress={() => setDepositReceipt("deposit-receipt.jpg")}
-                onClear={() => setDepositReceipt(null)}
-              />
-            </View>
+            <AttachmentPicker
+              label="Bank Deposit Slip"
+              attachments={slipFiles}
+              onAdd={(files) => setSlipFiles((prev) => [...prev, ...files])}
+              onRemove={(id) =>
+                setSlipFiles((prev) => prev.filter((f) => f.id !== id))
+              }
+            />
+            <View style={styles.uploadGap} />
+            <AttachmentPicker
+              label="Deposit Receipt"
+              attachments={receiptFiles}
+              onAdd={(files) => setReceiptFiles((prev) => [...prev, ...files])}
+              onRemove={(id) =>
+                setReceiptFiles((prev) => prev.filter((f) => f.id !== id))
+              }
+            />
           </Surface>
 
           {/* ── 6. Remarks ────────────────────────────────────────────── */}
@@ -1054,6 +1147,28 @@ function BankDepositScreen() {
           </Button>
         </View>
       </KeyboardAvoidingView>
+
+      {success ? (
+        <PaymentSuccessDialog
+          visible
+          kind="created"
+          title="Deposit Created!"
+          numberLabel="Deposit No"
+          receiptNo={success.depositNo}
+          date={success.date}
+          time={success.time}
+          note={success.note}
+          onDone={() => {
+            setSuccess(null);
+            resetForm();
+            // Deposits land on their own tracking list, not the payments one.
+            router.replace({
+              pathname: "/(main)/payments/deposit-tracking",
+              params: { refreshAt: String(Date.now()) },
+            } as never);
+          }}
+        />
+      ) : null}
     </View>
   );
 }
@@ -1135,6 +1250,8 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: "600",
   },
+  // Breathing room between the two attachment pickers.
+  uploadGap: { height: SPACING.md },
   scrollContent: {
     paddingHorizontal: SPACING.md,
     paddingTop: SPACING.md,

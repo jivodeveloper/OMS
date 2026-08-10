@@ -6,9 +6,19 @@ export interface CashNoteRow {
   quantity: string;
 }
 
+/**
+ * A file chosen on the device, before upload.
+ *
+ * `uri` is a local path (camera capture, gallery item, or a copy of a document
+ * pulled from Drive/Files) — it is what the multipart upload sends and what the
+ * preview thumbnail renders.
+ */
 export interface AttachmentStub {
   id: string;
   name: string;
+  uri: string;
+  mimeType: string;
+  size: number;
 }
 
 /**
@@ -27,7 +37,9 @@ export interface PaymentMethodEntry {
   chequeNumber: string;
   bankName: string;
   chequeDate: string;
-  /** UPI and Cheque — proof of payment. */
+  /** UPI / bank transfer / NEFT / RTGS — the payer's transaction reference. */
+  reference: string;
+  /** Every method except cash — proof of payment. */
   attachments: AttachmentStub[];
 }
 
@@ -38,6 +50,14 @@ export interface ReceivePaymentForm {
   party: string | null;
   invoice: string | null;
   isAdvance: boolean;
+  /**
+   * SAP branch, chosen by the user — ADVANCE ONLY.
+   *
+   * An invoice payment inherits its branch from the invoice and the field is
+   * read-only there, because SAP refuses a payment whose branch differs from
+   * the invoice being paid.
+   */
+  sapBranchId: string | null;
   remarks: string;
   methods: PaymentMethodEntry[];
 }

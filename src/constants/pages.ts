@@ -30,6 +30,8 @@ export const ASSIGNABLE_PAGES: AppPage[] = [
       "payments/receive-payment",
       "payments/payment-tracking",
       "payments/tracking-details",
+      "payments/tracking-progress",
+      "approval/approval-details",
     ],
   },
   {
@@ -38,7 +40,22 @@ export const ASSIGNABLE_PAGES: AppPage[] = [
     screens: [
       "payments/bank-deposit",
       "payments/deposit-tracking",
+      "payments/deposit-details",
       "payments/tracking-details",
+      "payments/tracking-progress",
+      "approval/approval-details",
+    ],
+  },
+  {
+    // Analytics only — company-wide collection totals. Deliberately NOT
+    // implied by any of the four action permissions: doing the work and
+    // seeing everyone's figures are different kinds of access. The server
+    // enforces the same key on every analytics endpoint.
+    key: "Payments_Dashboard",
+    label: "Payments Dashboard",
+    screens: [
+      "payments/dashboard",
+      "payments/dashboard-person",
     ],
   },
   {
@@ -46,12 +63,14 @@ export const ASSIGNABLE_PAGES: AppPage[] = [
     label: "Payment Requests",
     // One grant opens the list and the detail screen it navigates to; granting
     // the list alone would dead-end every "View Details" tap.
-    screens: ["approval/payment-requests", "approval/approval-details"],
-  },
-  {
-    key: "Deposit_Requests",
-    label: "Deposit Requests",
-    screens: ["approval/deposit-requests", "approval/approval-details"],
+    screens: [
+      "approval/approval-details",
+      // Payment Requests was replaced by Payment Tracking, which now serves
+      // approvers too — so this grant has to open it.
+      "payments/payment-tracking",
+      "payments/tracking-details",
+      "payments/tracking-progress",
+    ],
   },
 ];
 
@@ -71,6 +90,9 @@ export const PAYMENT_ACTIONS = {
   DEPOSIT_APPROVE: "Deposit_Approve",
 } as const;
 
+/** Every action key, for screens any payments involvement should open. */
+const ALL_PAYMENT_ACTIONS = Object.values(PAYMENT_ACTIONS);
+
 export type PaymentAction =
   (typeof PAYMENT_ACTIONS)[keyof typeof PAYMENT_ACTIONS];
 
@@ -79,7 +101,7 @@ export type PaymentAction =
  *
  * The backend returns a `roles` array (primary role + extra_roles) alongside the
  * single `role` string. Reading only `role` would miss a user whose payment
- * function was granted via extra_roles — they would hold payment_approver and
+ * function was granted via extra_roles — they would hold the payments role and
  * still be shown nothing.
  */
 export const rolesOf = (
@@ -87,19 +109,15 @@ export const rolesOf = (
   roles?: string[] | null,
 ): string[] => {
   const all = new Set<string>();
-  if (role) all.add(String(role).trim().toLowerCase());
+  const add = (value: string) => {
+    const name = String(value).trim().toLowerCase();
+    if (name) all.add(name);
+  };
+  if (role) add(role);
   (roles || []).forEach((r) => {
-    if (r) all.add(String(r).trim().toLowerCase());
+    if (r) add(r);
   });
   return [...all];
-};
-
-/** Roles that confer an action permission — mirrors payments/permissions.py. */
-const ROLE_ACTIONS: Record<string, PaymentAction> = {
-  payment_creator: PAYMENT_ACTIONS.PAYMENTS_CREATE,
-  payment_approver: PAYMENT_ACTIONS.PAYMENTS_APPROVE,
-  deposit_creator: PAYMENT_ACTIONS.DEPOSIT_CREATE,
-  deposit_approver: PAYMENT_ACTIONS.DEPOSIT_APPROVE,
 };
 
 /**
@@ -116,10 +134,11 @@ export const hasPaymentAction = (
   extraPages: string[] = [],
   roles?: string[] | null,
 ): boolean => {
-  const held = rolesOf(role, roles);
-  if (held.includes("admin")) return true;
-  if (extraPages.includes(action)) return true;
-  return held.some((r) => ROLE_ACTIONS[r] === action);
+  // The ticked boxes are the ONLY source, matching granted_keys() on the
+  // server. A role is identity — "this account works on payments" — not
+  // authority, so it must not add permissions the admin did not tick.
+  if (rolesOf(role, roles).includes("admin")) return true;
+  return extraPages.includes(action);
 };
 
 // Expand a user's granted keys into the set of mobile screen names to unlock.
@@ -147,33 +166,50 @@ export const SCREEN_ROLES: Record<string, string[]> = {
   "orders/orderlist": ["billing"],
   "reports/daily-report": ["admin", "billing"],
   // CREATE screens go to creators ONLY. An approver reviews documents, they do
-  // not raise them, so listing payment_approver here showed them a form they
-  // could fill in but never submit — the server rejects the create.
-  "payments/receive-payment": ["admin", "payment_creator"],
-  "payments/bank-deposit": ["admin", "deposit_creator"],
+  // not raise them, so listing an approver-only role here showed them a form
+  // they could fill in but never submit — the server rejects the create.
+  "payments/receive-payment": ["admin", "payments_and_deposit", "payments_deposit_creator"],
+  "payments/bank-deposit": ["admin", "payments_and_deposit", "payments_deposit_creator"],
 
-  // Tracking is for the people who RAISE documents — it answers "where has my
-  // entry got to". Approvers get the request queues instead. Admins see both.
-  "payments/payment-tracking": ["admin", "payment_creator"],
-  "payments/deposit-tracking": ["admin", "deposit_creator"],
+  // Tracking serves BOTH audiences from one screen: a creator sees their own
+  // entries, an approver sees everything they can act on (the screen decides
+  // the scope from the action permissions). Payment Requests was removed in
+  // favour of this, so the approver roles must be listed here or an approver
+  // would have no queue at all.
+  "payments/payment-tracking": ["admin", "payments_and_deposit", "payments_deposit_creator", "payments_deposit_approver"],
+  "payments/deposit-tracking": ["admin", "payments_and_deposit", "payments_deposit_creator", "payments_deposit_approver"],
+  "payments/deposit-details": ["admin", "payments_and_deposit", "payments_deposit_creator", "payments_deposit_approver"],
   // Shared detail screen, reachable from either tracking list.
   "payments/tracking-details": [
     "admin",
-    "payment_creator",
-    "deposit_creator",
+    "payments_and_deposit",
+    "payments_deposit_creator",
+    "payments_deposit_approver",
+  ],
+  // Progress is READ-ONLY — it shows where an entry has reached and what SAP
+  // said. Anyone involved in the payments module may open it, creator or
+  // approver, which is why every payments role is listed.
+  "payments/tracking-progress": [
+    "admin",
+    "payments_and_deposit",
+    "payments_deposit_creator",
+    "payments_deposit_approver",
   ],
 
   // Request queues go to the matching APPROVERS only. Split per document type
   // so a payment approver is not shown deposits they cannot act on.
-  "approval/payment-requests": ["admin", "approver", "payment_approver"],
-  "approval/deposit-requests": ["admin", "approver", "deposit_approver"],
+  "approval/payment-requests": ["admin", "approver", "payments_and_deposit", "payments_deposit_approver"],
   // Detail screen is reachable by deep link, so it needs its own entry rather
   // than inheriting from whichever list opened it.
+  // Both audiences land here now — it is the single payment detail screen.
+  // A creator sees the same page without the decide/edit actions, so leaving
+  // them out would block them from their own document.
   "approval/approval-details": [
     "admin",
     "approver",
-    "payment_approver",
-    "deposit_approver",
+    "payments_and_deposit",
+    "payments_deposit_creator",
+    "payments_deposit_approver",
   ],
   "admin/order-flow": ["admin"],
   "admin/sales-quotation": ["admin"],
@@ -194,6 +230,40 @@ export const SCREEN_ROLES: Record<string, string[]> = {
  * dashboard is always reachable (it's the landing screen); everything else is
  * granted by role (SCREEN_ROLES) or by an explicit extra_pages grant.
  */
+/**
+ * Payments screens, and which ACTION permissions open them.
+ *
+ * These screens are governed by the four Payment Permissions checkboxes rather
+ * than by role, so any role — manager, billing, anything — can be given
+ * payments work simply by ticking a box, and a payments role with nothing
+ * ticked gets nothing.
+ *
+ * CREATE screens list only the create actions: an approver reviews documents,
+ * they do not raise them, so showing them a form the server would reject is
+ * worse than not showing it.
+ */
+const PAYMENT_ACTION_SCREENS: Record<string, PaymentAction[]> = {
+  "payments/receive-payment": [PAYMENT_ACTIONS.PAYMENTS_CREATE],
+  "payments/bank-deposit": [PAYMENT_ACTIONS.DEPOSIT_CREATE],
+  "payments/payment-tracking": [
+    PAYMENT_ACTIONS.PAYMENTS_CREATE,
+    PAYMENT_ACTIONS.PAYMENTS_APPROVE,
+  ],
+  "payments/deposit-tracking": [
+    PAYMENT_ACTIONS.DEPOSIT_CREATE,
+    PAYMENT_ACTIONS.DEPOSIT_APPROVE,
+  ],
+  "payments/deposit-details": [
+    PAYMENT_ACTIONS.DEPOSIT_CREATE,
+    PAYMENT_ACTIONS.DEPOSIT_APPROVE,
+  ],
+  // Shared screens: any payments involvement opens them.
+  "payments/tracking-details": ALL_PAYMENT_ACTIONS,
+  "payments/tracking-progress": ALL_PAYMENT_ACTIONS,
+  "approval/approval-details": ALL_PAYMENT_ACTIONS,
+  "approval/payment-requests": [PAYMENT_ACTIONS.PAYMENTS_APPROVE],
+};
+
 export const canAccessScreen = (
   screen: string,
   role: string | null | undefined,
@@ -203,6 +273,13 @@ export const canAccessScreen = (
   // Home (dashboard) and the user's own Profile are always reachable.
   if (screen === "dashboard" || screen === "profile") return true;
   if (screensFromExtraPages(extraPages).has(screen)) return true;
+  // Payments screens follow the ACTION permissions an admin ticked, not the
+  // role. A manager ticked for Payments_Create must reach the payment form;
+  // a payments-role user who was ticked for nothing must not.
+  const viaAction = PAYMENT_ACTION_SCREENS[screen];
+  if (viaAction) {
+    return viaAction.some((action) => extraPages.includes(action));
+  }
   const allowed = SCREEN_ROLES[screen];
   if (!allowed) return false;
   // Match on EVERY role held (primary + extra_roles), not just the primary.
@@ -328,6 +405,34 @@ export const createTargetsFor = (
  * "Payments" (their tracking list) instead. Orders keeps priority when the user
  * genuinely has an orders screen, since that is the established flow.
  */
+/**
+ * Does this user work in payments/deposits but NOT in orders?
+ *
+ * Uses the SAME order-screen list that resolveWorkQueueRoute tries, so "the
+ * second tab says Payments" and "the home page shows payments" can never
+ * disagree — both answer from one source. A user who holds both keeps the
+ * sales dashboard: orders is the bigger surface and losing it would be a
+ * downgrade.
+ */
+export const isPaymentsOnlyUser = (
+  role: string | null | undefined,
+  extraPages: string[] = [],
+  roles?: string[] | null,
+): boolean => {
+  const normalizedRole = (role || "").toLowerCase();
+  const can = (screen: string) =>
+    canAccessScreen(screen, normalizedRole, extraPages, roles);
+
+  const own = ORDERS_BY_ROLE[normalizedRole];
+  if (own && can(own.screen)) return false;
+  if (ORDERS_FALLBACKS.some(can)) return false;
+
+  // No orders anywhere. Payments only counts if they actually hold one.
+  return (
+    can("payments/payment-tracking") || can("payments/deposit-tracking")
+  );
+};
+
 export const resolveWorkQueueRoute = (
   role: string | null | undefined,
   extraPages: string[] = [],
@@ -355,6 +460,9 @@ export const resolveWorkQueueRoute = (
   // No orders access — fall back to whichever payments queue they hold.
   // Approvers get their request queue; creators get their tracking list.
   const candidates: (AppRoute & { label: string; icon: string })[] = [
+    // Straight to the tracking list. The SUMMARY now lives on the dashboard
+    // (a payments-only user's home page is the payments home), so sending the
+    // tab there too would make Home and Payments the same screen.
     {
       screen: "payments/payment-tracking",
       route: "/(main)/payments/payment-tracking",
@@ -373,12 +481,6 @@ export const resolveWorkQueueRoute = (
       label: "Deposits",
       icon: "business-outline",
     },
-    {
-      screen: "approval/deposit-requests",
-      route: "/(main)/approval/deposit-requests",
-      label: "Deposits",
-      icon: "business-outline",
-    },
   ];
   for (const candidate of candidates) {
     if (can(candidate.screen)) return candidate;
@@ -390,4 +492,44 @@ export const resolveWorkQueueRoute = (
     label: "Home",
     icon: "home-outline",
   };
+};
+
+/**
+ * The Reports bottom-bar tab destination.
+ *
+ * The tab used to be pinned to the sales daily report, so a payments user —
+ * who has no orders access at all — tapped Reports and got a permission
+ * dialog. Their reporting surface is the Payments Dashboard, so that is where
+ * the tab goes for them.
+ *
+ * Sales reports keep priority when the user holds them: that is the
+ * established destination, and someone with both should not lose it.
+ *
+ * Returns `null` when the user has neither, so the caller can show the
+ * "no permission" dialog against the label the user actually tapped rather
+ * than sending them to a screen that would refuse them.
+ */
+export const resolveReportsRoute = (
+  role: string | null | undefined,
+  extraPages: string[] = [],
+  roles?: string[] | null,
+): (AppRoute & { label: string }) | null => {
+  const can = (screen: string) =>
+    canAccessScreen(screen, (role || "").toLowerCase(), extraPages, roles);
+
+  if (can("reports/daily-report")) {
+    return {
+      screen: "reports/daily-report",
+      route: "/reports/daily-report",
+      label: "Reports",
+    };
+  }
+  if (can("payments/dashboard")) {
+    return {
+      screen: "payments/dashboard",
+      route: "/(main)/payments/dashboard",
+      label: "Payments Dashboard",
+    };
+  }
+  return null;
 };

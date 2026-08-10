@@ -1,4 +1,10 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   ActivityIndicator,
   FlatList,
@@ -12,7 +18,7 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
-import { router } from "expo-router";
+import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 
 import Dropdown from "@/src/components/common/DropdownProps";
 import InlineOrderDateFilter, {
@@ -26,6 +32,7 @@ import paymentsService, {
   type PaymentReceipt,
 } from "@/src/services/payments.service";
 import { useCompanies } from "./usePaymentMasters";
+import { usePaymentPermissions } from "./usePaymentPermissions";
 
 /**
  * Tracking list for payments and deposits.
@@ -53,27 +60,93 @@ interface TrackRow {
   createdBy: string;
   company: string;
   level: string;
+  /** Approval request id — null until the document has been submitted. */
+  approvalId: number | null;
+  /** Invoice figures for the summary strip. Zero when not invoice-linked. */
+  invoiceNo: string;
+  invoiceAmount: number;
+  /** Who handed the money over. Empty when it came from the party direct. */
+  receivedFrom: string;
+  /**
+   * Deposit only: what was collected vs what actually reached the bank, and
+   * how many parties' money is in it. Zero on a payment row, which has an
+   * invoice comparison instead.
+   */
+  collectedAmount: number;
+  partyCount: number;
   chips: { icon: keyof typeof Ionicons.glyphMap; text: string }[];
 }
 
 /**
- * Status options, in the creator's language rather than the database's.
+ * One filter option. `query` is appended to the list request verbatim, so a
+ * view can be expressed either as a document status or as an approver-relative
+ * server view — the screen does not need to know which.
+ */
+interface StatusOption {
+  label: string;
+  value: string;
+  query: string;
+}
+
+/**
+ * Filter options.
  *
- * "Completed" means the entry cleared every approval level AND posted to SAP —
- * the only state a creator considers finished. APPROVED and POSTING_TO_SAP are
- * folded into "Pending" rather than offered separately: an entry in either is
- * still in flight, and listing them invited the reading that APPROVED was the
- * end of the road.
+ * For an APPROVER these are relative to THEM, not to the document:
+ *
+ *   Pending    waiting on a rung THIS user can act on right now. A receipt
+ *              parked at level 2 is invisible to the level-1 approver, and
+ *              vice versa — plain "PENDING_APPROVAL" cannot express that,
+ *              which is why the server resolves it from the approval ladder.
+ *   Approved   entries THIS user personally approved (whatever happened after).
+ *   Rejected   entries THIS user personally rejected.
+ *   Completed  posted to SAP — the end of the road, for anyone.
+ *
+ * A CREATOR has no rungs, so theirs stay document-status filters.
  *
  * DRAFT is absent because the app submits on create — a draft never persists.
  */
-const STATUS_OPTIONS = [
-  { label: "All", value: "all" },
-  { label: "Pending", value: "PENDING_APPROVAL,APPROVED,POSTING_TO_SAP" },
-  { label: "Completed", value: "POSTED" },
-  { label: "Rejected", value: "REJECTED" },
-  { label: "Pending Error", value: "PENDING_ERROR" },
-  { label: "Awaiting SAP Check", value: "SAP_UNKNOWN" },
+const APPROVER_STATUS_OPTIONS: StatusOption[] = [
+  // "All" means everything THIS approver has a stake in — awaiting them, or
+  // already decided by them. Not every document in the company: a rung-2
+  // approver seeing a rung-1 document has no action to take on it.
+  {
+    label: "All",
+    value: "all",
+    query: "approval_view=mine&group_by_status=true",
+  },
+  {
+    label: "Pending",
+    value: "awaiting_me",
+    query: "approval_view=awaiting_me",
+  },
+  {
+    label: "Approved",
+    value: "approved_by_me",
+    query: "approval_view=approved_by_me",
+  },
+  {
+    label: "Rejected",
+    value: "rejected_by_me",
+    query: "approval_view=rejected_by_me",
+  },
+  {
+    // Scoped like the others: an approver's "Completed" is what THEY cleared
+    // that then posted, not every posted document in the company.
+    label: "Completed",
+    value: "POSTED",
+    query: "approval_view=approved_by_me&status=POSTED",
+  },
+];
+
+const CREATOR_STATUS_OPTIONS: StatusOption[] = [
+  { label: "All", value: "all", query: "group_by_status=true" },
+  {
+    label: "Pending",
+    value: "PENDING",
+    query: "status=PENDING_APPROVAL,APPROVED,POSTING_TO_SAP",
+  },
+  { label: "Completed", value: "POSTED", query: "status=POSTED" },
+  { label: "Rejected", value: "REJECTED", query: "status=REJECTED" },
 ];
 
 /** Status -> pill colour. Anything unmapped falls back to neutral grey. */
@@ -129,6 +202,28 @@ const dateWindow = (value: DateFilterValue): { from: string; to: string } | null
   return { from: `${value.value}-01-01`, to: `${value.value}-12-31` };
 };
 
+/**
+ * How this payment sits against its invoice.
+ *
+ * The SAME thresholds as InvoiceSummaryCard, so a card in the list and the card
+ * on the detail screen can never label the same payment differently. Kept as a
+ * function on TrackRow rather than shared code because the list row is a
+ * flattened shape, not the full detail model.
+ */
+const settlement = (row: TrackRow) => {
+  const remaining = row.invoiceAmount - row.amount;
+  if (remaining < -0.005) {
+    return { bg: COLORS.errorLight, fg: COLORS.error, label: "Exceeds invoice" };
+  }
+  if (Math.abs(remaining) <= 0.005) {
+    return { bg: COLORS.successLight, fg: COLORS.success, label: "Accepted" };
+  }
+  if (row.amount <= 0.005) {
+    return { bg: COLORS.errorLight, fg: COLORS.error, label: "Not Received" };
+  }
+  return { bg: COLORS.warningLight, fg: COLORS.warning, label: "Part payment" };
+};
+
 const formatMoney = (value: number) =>
   `₹${value.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
@@ -157,6 +252,24 @@ const receiptToRow = (r: PaymentReceipt): TrackRow => ({
   createdBy: r.created_by_name || "—",
   company: r.company,
   level: r.approval?.level_label ?? "",
+  approvalId: r.approval?.id ?? null,
+  // The balance owed when the invoice was picked. Older receipts stored 0, so
+  // the strip hides itself rather than showing a false comparison.
+  invoiceNo: r.allocations?.[0]?.sap_doc_num
+    ? `INV-${r.allocations[0].sap_doc_num}`
+    : "",
+  invoiceAmount: Number(
+    r.allocations?.[0]?.balance_at_selection ||
+      r.allocations?.[0]?.invoice_total ||
+      0,
+  ),
+  // Only when a COLLECTION PERSON carried it. "PARTY" means the party paid
+  // directly, and that name is already the card title on the row — repeating
+  // it as "Received from" would just be the same name twice.
+  receivedFrom:
+    r.received_from_type === "PERSON" ? r.received_from_name || "" : "",
+  collectedAmount: 0,
+  partyCount: 0,
   chips: [
     { icon: "calendar-outline", text: `Date: ${(r.payment_date || "").slice(0, 10) || "—"}` },
     { icon: "business-outline", text: r.company },
@@ -167,7 +280,15 @@ const depositToRow = (d: BankDeposit): TrackRow => ({
   id: d.id,
   docNo: d.deposit_no,
   party: d.bank_account_name || "Bank deposit",
-  subtitle: `${d.lines?.length ?? 0} receipt${(d.lines?.length ?? 0) === 1 ? "" : "s"}`,
+  subtitle: `${d.lines?.length ?? 0} receipt${(d.lines?.length ?? 0) === 1 ? "" : "s"}`
+    + (() => {
+      // How many DISTINCT parties' money is in this deposit — the figure a
+      // depositor is asked about, and not the same as the receipt count.
+      const parties = new Set(
+        (d.lines ?? []).map((l) => l.card_name).filter(Boolean),
+      );
+      return parties.size > 1 ? ` · ${parties.size} parties` : "";
+    })(),
   amount: Number(d.deposit_amount) || 0,
   status: d.status,
   statusLabel: STATUS_LABEL[d.status] ?? d.status_display ?? d.status,
@@ -175,6 +296,18 @@ const depositToRow = (d: BankDeposit): TrackRow => ({
   createdBy: d.created_by_name || "—",
   company: d.company,
   level: d.approval?.level_label ?? "",
+  approvalId: d.approval?.id ?? null,
+  // A deposit banks receipts rather than settling an invoice, so there is no
+  // invoice figure to compare against.
+  invoiceNo: "",
+  invoiceAmount: 0,
+  // Who physically carried it to the bank. Distinct from created_by: a clerk
+  // may raise the deposit for a collector who made the trip.
+  receivedFrom: d.deposited_by_name || "",
+  collectedAmount: Number(d.collected_amount) || 0,
+  partyCount: new Set(
+    (d.lines ?? []).map((l) => l.card_name).filter(Boolean),
+  ).size,
   chips: [
     { icon: "calendar-outline", text: `Date: ${(d.deposit_date || "").slice(0, 10) || "—"}` },
     { icon: "wallet-outline", text: d.deposit_type },
@@ -183,19 +316,68 @@ const depositToRow = (d: BankDeposit): TrackRow => ({
 
 interface Props {
   kind: TrackingKind;
-  /** When true the list is scoped to documents this user raised. */
+  /**
+   * Force the "only my entries" scope. Normally left undefined: an approver
+   * needs to see what they must act on, a creator only their own, and that is
+   * decided from permissions below rather than by the caller.
+   */
   mine?: boolean;
 }
 
-export default function PaymentTrackingScreen({ kind, mine = true }: Props) {
+export default function PaymentTrackingScreen({ kind, mine }: Props) {
   const isPayment = kind === "PAYMENT";
+  const perms = usePaymentPermissions();
+
+  // An approver's queue IS this screen — there is no separate requests page —
+  // so they must see everything they can act on, not just what they raised.
+  // A creator without approve rights still sees only their own entries.
+  const canApprove = isPayment ? perms.canApprovePayment : perms.canApproveDeposit;
+  const scopedToMine = mine ?? !canApprove;
+  const statusOptions = canApprove
+    ? APPROVER_STATUS_OPTIONS
+    : CREATOR_STATUS_OPTIONS;
 
   const [rows, setRows] = useState<TrackRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
 
-  const [statusView, setStatusView] = useState("all");
+  // Defaults to Pending: the entries a user opens this screen to chase. The
+  // VALUE differs by role (an approver's Pending means "awaiting me"), so it is
+  // set from the resolved option list rather than hardcoded.
+  const [statusView, setStatusView] = useState("PENDING");
+
+  /**
+   * Preselect a status when the caller asks for one.
+   *
+   * The home page's activity cards link here, and its labels ("Total
+   * Payments", "Pending", "Approved", "Rejected") are shared across roles
+   * while the option VALUES are not — an approver's Pending is
+   * "awaiting_me", a creator's is a document status. So the caller passes a
+   * LABEL and the option list resolves it, which keeps the two screens
+   * agreeing without the home page needing to know the viewer's role.
+   */
+  const { statusLabel } = useLocalSearchParams<{ statusLabel?: string }>();
+  const appliedStatusLabel = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (!statusLabel || statusLabel === appliedStatusLabel.current) return;
+    appliedStatusLabel.current = statusLabel;
+    const wanted = statusLabel.toLowerCase();
+    // A creator's list has no "Approved" — their equivalent is "Completed"
+    // (posted to SAP), because a creator has no rung to have approved at.
+    // Falling back keeps the home card meaningful for both roles instead of
+    // silently doing nothing for one of them.
+    const aliases: Record<string, string[]> = {
+      approved: ["approved", "completed"],
+    };
+    const candidates = aliases[wanted] ?? [wanted];
+    const match = candidates
+      .map((name) =>
+        statusOptions.find((o) => o.label.toLowerCase() === name),
+      )
+      .find(Boolean);
+    if (match) setStatusView(match.value);
+  }, [statusLabel, statusOptions]);
   const [searchQuery, setSearchQuery] = useState("");
   const [companyFilter, setCompanyFilter] = useState<Company | "">("");
   const [dateFilter, setDateFilter] = useState<DateFilterValue>(null);
@@ -209,10 +391,24 @@ export default function PaymentTrackingScreen({ kind, mine = true }: Props) {
       else setRefreshing(true);
       setError("");
       try {
+        // The option carries its own query string — it may be a plain status
+        // filter or an approver-relative server view.
+        //
+        // Falls back to PENDING, not to statusOptions[0] ("All"): permissions
+        // resolve after the first render, so the selection briefly refers to
+        // the other role's option set. Landing on "All" there would silently
+        // widen the list instead of showing what the user asked for.
+        const option =
+          statusOptions.find((o) => o.value === statusView) ??
+          statusOptions.find((o) => o.label === "Pending") ??
+          statusOptions[0];
         const params: Record<string, string> = {};
-        if (statusView !== "all") params.status = statusView;
+        for (const pair of option.query.split("&")) {
+          const [key, value] = pair.split("=");
+          if (key && value) params[key] = value;
+        }
         if (companyFilter) params.company = companyFilter;
-        if (mine) params.mine = "true";
+        if (scopedToMine) params.mine = "true";
         const window = dateWindow(dateFilter);
         if (window) {
           params.date_from = window.from;
@@ -239,12 +435,52 @@ export default function PaymentTrackingScreen({ kind, mine = true }: Props) {
         setRefreshing(false);
       }
     },
-    [isPayment, statusView, companyFilter, dateFilter, mine],
+    // `scopedToMine`, NOT the `mine` prop: it is derived from permissions,
+    // which arrive asynchronously. Depending on the prop meant the first fetch
+    // ran with the pre-permission guess and never re-ran once the real answer
+    // landed — an approver saw an empty list.
+    [isPayment, statusView, statusOptions, companyFilter, dateFilter, scopedToMine],
   );
 
   useEffect(() => {
     void load("initial");
   }, [load]);
+
+  /**
+   * Refetch whenever this screen comes back into view.
+   *
+   * An approver returns here straight after deciding, and a creator after
+   * editing. Without this they land on the list they left — the entry they just
+   * approved still sitting in Pending — which reads as the decision not having
+   * worked. Skipped on the very first focus, since the mount effect above has
+   * already fetched.
+   */
+  const hasFocusedOnce = useRef(false);
+  useFocusEffect(
+    useCallback(() => {
+      if (!hasFocusedOnce.current) {
+        hasFocusedOnce.current = true;
+        return;
+      }
+      void load("refresh");
+    }, [load]),
+  );
+
+  /**
+   * An explicit refetch signal from a screen that just changed the data.
+   *
+   * The focus effect above covers the ordinary case, but this screen lives in
+   * the Drawer and so stays mounted: arriving here from a redirect is not
+   * always a fresh focus. Redirecting with a changing `refreshAt` makes the
+   * refetch explicit instead of depending on mount timing.
+   */
+  const { refreshAt } = useLocalSearchParams<{ refreshAt?: string }>();
+  const lastRefreshAt = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (!refreshAt || refreshAt === lastRefreshAt.current) return;
+    lastRefreshAt.current = refreshAt;
+    void load("refresh");
+  }, [refreshAt, load]);
 
   const onRefresh = useCallback(() => void load("refresh"), [load]);
 
@@ -261,10 +497,42 @@ export default function PaymentTrackingScreen({ kind, mine = true }: Props) {
     );
   }, [rows, searchQuery]);
 
+  /**
+   * ONE details screen for both audiences.
+   *
+   * Creator and approver see exactly the same page; only the actions differ,
+   * and the screen decides those from the caller's permissions plus the
+   * document's state. Routing two different screens meant the same payment
+   * looked like two different things depending on who opened it.
+   */
   const openDetails = useCallback(
     (row: TrackRow) => {
+      // A DEPOSIT has its own detail screen. approval-details renders a
+      // payment — party, invoice, tender lines — none of which a deposit has,
+      // so it showed an empty shell with blank fields.
+      if (!isPayment) {
+        router.push({
+          pathname: "/(main)/payments/deposit-details",
+          params: { id: String(row.id) },
+        } as never);
+        return;
+      }
       router.push({
-        pathname: "/(main)/payments/tracking-details",
+        pathname: "/(main)/approval/approval-details",
+        params: {
+          documentId: String(row.id),
+          id: row.approvalId != null ? String(row.approvalId) : "",
+          requestNo: row.docNo,
+        },
+      } as never);
+    },
+    [isPayment],
+  );
+
+  const openProgress = useCallback(
+    (row: TrackRow) => {
+      router.push({
+        pathname: "/(main)/payments/tracking-progress",
         params: { id: String(row.id), kind },
       } as never);
     },
@@ -286,52 +554,218 @@ export default function PaymentTrackingScreen({ kind, mine = true }: Props) {
               </Text>
             </View>
           </View>
-
-          <Text style={styles.createdAt}>Created: {formatDate(item.date)}</Text>
-
-          <Text style={styles.party} numberOfLines={2}>
-            {item.party}
-          </Text>
-          {!!item.subtitle && <Text style={styles.partyCode}>{item.subtitle}</Text>}
-
-          <View style={styles.chipRow}>
-            {item.chips.map((chip) => (
-              <View key={chip.text} style={styles.chip}>
-                <Ionicons name={chip.icon} size={13} color={COLORS.primary} />
-                <Text style={styles.chipText} numberOfLines={1}>
-                  {chip.text}
-                </Text>
-              </View>
-            ))}
-            {!!item.level && (
-              <View style={styles.chip}>
-                <Ionicons name="git-branch-outline" size={13} color={COLORS.primary} />
-                <Text style={styles.chipText}>{item.level}</Text>
-              </View>
-            )}
+          {/* Party on the left, date/company chips on the right of the SAME
+              row — the chips are secondary detail and stacking them above the
+              party pushed the name, which is what the eye looks for, down the
+              card. Wraps on a narrow screen rather than squeezing the name. */}
+          <View style={styles.partyRow}>
+            <View style={styles.partyCol}>
+              <Text style={styles.party} numberOfLines={2}>
+                {item.party}
+              </Text>
+              {!!item.subtitle && (
+                <Text style={styles.partyCode}>{item.subtitle}</Text>
+              )}
+            </View>
+            <View style={styles.chipRow}>
+              {item.chips.map((chip) => (
+                <View key={chip.text} style={styles.chip}>
+                  <Ionicons name={chip.icon} size={13} color={COLORS.primary} />
+                  <Text style={styles.chipText} numberOfLines={1}>
+                    {chip.text}
+                  </Text>
+                </View>
+              ))}
+            </View>
           </View>
+
+          {/* Who physically handed the money over. Only rendered for a named
+              collection person — see receiptToRow. */}
+          {!!item.receivedFrom && (
+            <View style={styles.receivedFromRow}>
+              <Ionicons
+                name="person-circle-outline"
+                size={ms(14)}
+                color={COLORS.textSecondary}
+              />
+              <Text style={styles.receivedFromLabel}>
+                {isPayment ? "Received from" : "Deposited by"}
+              </Text>
+              <Text style={styles.receivedFromName} numberOfLines={1}>
+                {item.receivedFrom}
+              </Text>
+            </View>
+          )}
+
+          {/* Collected vs actually banked — the deposit equivalent of the
+              invoice strip below. A shortfall is the thing a reviewer is
+              looking for, and the deposit total alone cannot show it. */}
+          {!isPayment && item.collectedAmount > 0 ? (
+            <>
+              <View style={styles.divider} />
+              <View style={styles.invoiceRow}>
+                <View style={styles.invoiceIcon}>
+                  <Ionicons
+                    name="cash"
+                    size={ms(16)}
+                    color={COLORS.primary}
+                  />
+                </View>
+                <View style={styles.invoiceCol}>
+                  <Text style={styles.invoiceLabel}>Collected</Text>
+                  <Text style={styles.invoiceValue} numberOfLines={1}>
+                    {formatMoney(item.collectedAmount)}
+                  </Text>
+                  {item.partyCount > 0 ? (
+                    <Text style={styles.invoiceNo} numberOfLines={1}>
+                      {item.partyCount} part{item.partyCount === 1 ? "y" : "ies"}
+                    </Text>
+                  ) : null}
+                </View>
+
+                <View style={styles.invoiceDivider} />
+
+                <View style={[styles.invoiceIcon, styles.receivedIcon]}>
+                  <Ionicons name="wallet" size={ms(16)} color={COLORS.success} />
+                </View>
+                <View style={styles.invoiceCol}>
+                  <Text style={styles.invoiceLabel}>Deposited</Text>
+                  <Text style={styles.receivedValue} numberOfLines={1}>
+                    {formatMoney(item.amount)}
+                  </Text>
+                  {(() => {
+                    const short = item.collectedAmount - item.amount;
+                    if (short <= 0.005) {
+                      return (
+                        <View
+                          style={[
+                            styles.invoiceChip,
+                            { backgroundColor: COLORS.successLight },
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              styles.invoiceChipText,
+                              { color: COLORS.success },
+                            ]}
+                          >
+                            Full amount
+                          </Text>
+                        </View>
+                      );
+                    }
+                    return (
+                      <View
+                        style={[
+                          styles.invoiceChip,
+                          { backgroundColor: COLORS.warningLight },
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.invoiceChipText,
+                            { color: COLORS.warning },
+                          ]}
+                        >
+                          Short {formatMoney(short)}
+                        </Text>
+                      </View>
+                    );
+                  })()}
+                </View>
+              </View>
+            </>
+          ) : null}
+
+          {/* Invoice vs received, at a glance. A card in a list has to answer
+              "is this settled?" without being opened, which the total alone
+              cannot — 1,35,000 means nothing until you know what was owed. */}
+          {item.invoiceAmount > 0 ? (
+            <>
+              <View style={styles.divider} />
+              <View style={styles.invoiceRow}>
+                <View style={styles.invoiceIcon}>
+                  <Ionicons
+                    name="document-text"
+                    size={ms(16)}
+                    color={COLORS.primary}
+                  />
+                </View>
+                <View style={styles.invoiceCol}>
+                  <Text style={styles.invoiceLabel}>Invoice Amount</Text>
+                  <Text style={styles.invoiceValue} numberOfLines={1}>
+                    {formatMoney(item.invoiceAmount)}
+                  </Text>
+                  {!!item.invoiceNo && (
+                    <Text style={styles.invoiceNo} numberOfLines={1}>
+                      {item.invoiceNo}
+                    </Text>
+                  )}
+                </View>
+
+                <View style={styles.invoiceDivider} />
+
+                <View style={[styles.invoiceIcon, styles.receivedIcon]}>
+                  <Ionicons
+                    name="wallet"
+                    size={ms(16)}
+                    color={COLORS.success}
+                  />
+                </View>
+                <View style={styles.invoiceCol}>
+                  <Text style={styles.invoiceLabel}>Received Amount</Text>
+                  <Text style={styles.receivedValue} numberOfLines={1}>
+                    {formatMoney(item.amount)}
+                  </Text>
+                  <View
+                    style={[
+                      styles.invoiceChip,
+                      { backgroundColor: settlement(item).bg },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.invoiceChipText,
+                        { color: settlement(item).fg },
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {settlement(item).label}
+                    </Text>
+                  </View>
+                </View>
+              </View>
+            </>
+          ) : null}
 
           <View style={styles.divider} />
 
-          <View style={styles.totalRow}>
-            <Text style={styles.totalLabel}>Total Amount</Text>
-            <Text style={styles.totalValue}>{formatMoney(item.amount)}</Text>
-          </View>
-
+          {/* Two actions, matching Order Tracking: blue Details, green
+              Progress. Details answers "what is this?", Progress answers
+              "where has it got to?" — they are separate questions. */}
           <View style={styles.actionRow}>
             <TouchableOpacity
-              style={styles.detailsBtn}
+              style={[styles.actionBtn, styles.progressBtn]}
+              onPress={() => openProgress(item)}
+              activeOpacity={0.85}
+            >
+              <Ionicons name="git-branch-outline" size={18} color="#fff" />
+              <Text style={styles.actionBtnText}>View Progress</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.actionBtn, styles.detailsBtn]}
               onPress={() => openDetails(item)}
               activeOpacity={0.85}
             >
-              <Ionicons name="eye-outline" size={17} color="#fff" />
-              <Text style={styles.detailsBtnText}>View Details</Text>
+              <Ionicons name="eye-outline" size={18} color="#fff" />
+              <Text style={styles.actionBtnText}>View Details</Text>
             </TouchableOpacity>
           </View>
         </View>
       );
     },
-    [openDetails],
+    [openDetails, openProgress],
   );
 
   const renderEmpty = () => {
@@ -371,8 +805,13 @@ export default function PaymentTrackingScreen({ kind, mine = true }: Props) {
         <View style={styles.statusDropdownWrap}>
           <Dropdown
             label="Status"
-            data={STATUS_OPTIONS}
-            value={statusView}
+            data={statusOptions}
+            value={
+              statusOptions.some((o) => o.value === statusView)
+                ? statusView
+                : (statusOptions.find((o) => o.label === "Pending")?.value ??
+                   statusOptions[0].value)
+            }
             onChange={setStatusView}
             searchable={false}
             floatingLabel
@@ -676,14 +1115,28 @@ const styles = StyleSheet.create({
     fontSize: fs(14),
     fontWeight: "700",
     color: COLORS.text,
-    marginTop: sp(10),
+    // No marginTop: the row that wraps it owns the spacing now.
   },
   partyCode: { fontSize: fs(12), color: COLORS.textSecondary, marginTop: 2 },
-  chipRow: {
+  // Party and chips share a row; the chips sit right and wrap beneath on a
+  // narrow screen instead of crushing the party name.
+  partyRow: {
     flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
     flexWrap: "wrap",
     gap: sp(8),
     marginTop: sp(10),
+  },
+  partyCol: {
+    flexShrink: 1,
+    minWidth: ms(150),
+  },
+  chipRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "flex-end",
+    gap: sp(8),
   },
   chip: {
     flexDirection: "row",
@@ -708,18 +1161,98 @@ const styles = StyleSheet.create({
   },
   totalLabel: { fontSize: fs(13), color: COLORS.textSecondary, fontWeight: "600" },
   totalValue: { fontSize: fs(17), fontWeight: "800", color: COLORS.text },
+  // Two icon+figure columns that WRAP rather than clip: on a narrow screen the
+  // received column drops beneath the invoice one instead of truncating.
+  // Sits under the party code, so the row reads: who paid -> who carried it.
+  receivedFromRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: sp(5),
+    marginTop: sp(6),
+  },
+  receivedFromLabel: {
+    fontSize: fs(11),
+    color: COLORS.textSecondary,
+  },
+  receivedFromName: {
+    flex: 1,
+    fontSize: fs(11),
+    fontWeight: "700",
+    color: COLORS.text,
+  },
+  invoiceRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    flexWrap: "wrap",
+    gap: sp(8),
+    paddingVertical: sp(10),
+  },
+  invoiceIcon: {
+    width: ms(34),
+    height: ms(34),
+    borderRadius: sp(9),
+    backgroundColor: COLORS.primaryLighter,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  receivedIcon: {
+    backgroundColor: COLORS.successLight,
+  },
+  invoiceCol: {
+    flex: 1,
+    minWidth: ms(110),
+  },
+  invoiceDivider: {
+    width: 1,
+    alignSelf: "stretch",
+    backgroundColor: COLORS.borderLight,
+    marginHorizontal: sp(2),
+  },
+  invoiceLabel: {
+    fontSize: fs(11),
+    color: COLORS.textSecondary,
+    marginBottom: sp(2),
+  },
+  invoiceValue: {
+    fontSize: fs(14),
+    fontWeight: "800",
+    color: COLORS.primary,
+  },
+  receivedValue: {
+    fontSize: fs(14),
+    fontWeight: "800",
+    color: COLORS.success,
+  },
+  invoiceNo: {
+    fontSize: fs(10),
+    color: COLORS.textMuted,
+    marginTop: sp(2),
+  },
+  invoiceChip: {
+    alignSelf: "flex-start",
+    borderRadius: 999,
+    paddingHorizontal: sp(8),
+    paddingVertical: sp(2),
+    marginTop: sp(4),
+  },
+  invoiceChipText: {
+    fontSize: fs(10),
+    fontWeight: "700",
+  },
   actionRow: { flexDirection: "row", gap: sp(10), marginTop: sp(14) },
-  detailsBtn: {
+  // Same pair as orders/ordertracking.tsx so the two lists match.
+  actionBtn: {
     flex: 1,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 7,
-    backgroundColor: COLORS.primary,
-    borderRadius: sp(12),
+    gap: 6,
+    borderRadius: sp(10),
     paddingVertical: sp(12),
   },
-  detailsBtnText: { color: "#fff", fontSize: fs(14), fontWeight: "700" },
+  detailsBtn: { backgroundColor: COLORS.primary },
+  progressBtn: { backgroundColor: "#4CAF50" },
+  actionBtnText: { color: "#fff", fontSize: fs(14), fontWeight: "600" },
 
   // ── States ────────────────────────────────────────────────────────────
   loadingWrap: { flex: 1, alignItems: "center", justifyContent: "center" },

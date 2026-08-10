@@ -24,6 +24,8 @@ export interface ApprovalRequest {
   requestNo: string;
   type: ApprovalType;
   party: string;
+  /** SAP business-partner code. Optional here — list rows predate it. */
+  partyCode?: string;
   company: string;
   amount: number;
   status: ApprovalStatus;
@@ -46,9 +48,11 @@ export type AttachmentKind = "image" | "pdf";
 export interface ApprovalAttachment {
   id: string;
   name: string;
-  /** Display-ready size, e.g. "1.2 MB". */
+  /** Display-ready label — the attachment type, e.g. "Cheque image". */
   size: string;
   kind: AttachmentKind;
+  /** Server path for viewing/downloading. Absent on legacy rows. */
+  downloadUrl?: string;
 }
 
 export interface CashNoteRow {
@@ -70,28 +74,65 @@ export interface ApprovalPayment {
   remarks?: string;
   /** UPI only. */
   upiReference?: string;
-  /** Cheque only. */
+  /** Cheque only — the bank the CUSTOMER's cheque is drawn on. */
   chequeNumber?: string;
   bankName?: string;
   chequeDate?: string;
-  /** UPI and Cheque — proof of payment. */
-  attachment?: Omit<ApprovalAttachment, "id">;
+  /**
+   * OUR account for this line, resolved from the admin mapping.
+   *
+   * Deliberately separate from `bankName`: one is the payer's bank, the other
+   * is where we deposit. Showing them under one heading was what made the
+   * cheque flow confusing.
+   */
+  depositAccount?: {
+    bankName: string;
+    glAccount: string;
+    accountNumber: string;
+    branch: string;
+  } | null;
+  /**
+   * Proof of payment belonging to THIS method — a cheque image, a UPI
+   * screenshot. A method can carry several (front and back of a cheque), so
+   * this is a list; the separate Attachments card shows only what is left over.
+   */
+  attachments?: ApprovalAttachment[];
 }
 
 export interface ApprovalDetail {
   requestNo: string;
   status: ApprovalStatus;
   party: string;
+  /** SAP business-partner code, shown beside the party name. */
+  partyCode: string;
   company: string;
   createdBy: string;
   createdDate: string;
   createdTime: string;
   invoice: string;
+  /** Invoice figures for the summary card. Zero when it is an advance. */
+  invoiceAmount: number;
   paymentType: string;
   amount: number;
   remarks: string;
   payments: ApprovalPayment[];
   attachments: ApprovalAttachment[];
+  /** Server-decided: what the viewer may do. Drives the action bar. */
+  canDecide: boolean;
+  canEdit: boolean;
+  canResubmit: boolean;
+  /** Why it was sent back, so the creator can fix it. Empty when not rejected. */
+  rejectionReason: string;
+  rejectedBy: string;
+  /** Receipt id, for navigating to the edit form. */
+  documentId: number;
+  /**
+   * The collection person who physically handed the money over. Empty when the
+   * party paid directly — that name is already shown as the party.
+   */
+  receivedFrom: string;
+  /** Branch this will post to, with its source — "DELHI (Auto from Invoice)". */
+  sapBranch: string;
 }
 
 /** Which dialog the approve/reject flow is currently showing. */

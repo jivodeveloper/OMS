@@ -11,6 +11,13 @@ interface ApprovalSuccessDialogProps {
   visible: boolean;
   decision: ApprovalDecision;
   requestNo: string;
+  /**
+   * True when this was the FINAL approval — the chain is complete and the
+   * document has gone to SAP. Without it the dialog always claimed the
+   * document was "forwarded to the next approval level", which is a lie on a
+   * single-level workflow and on the last rung of any other.
+   */
+  isFinal?: boolean;
   /** Display-ready stamp, e.g. "28 Jul 2026". */
   date: string;
   time: string;
@@ -22,6 +29,7 @@ export default function ApprovalSuccessDialog({
   visible,
   decision,
   requestNo,
+  isFinal = false,
   date,
   time,
   onDone,
@@ -36,9 +44,11 @@ export default function ApprovalSuccessDialog({
         accent={accent}
         title={isApprove ? "Request Approved!" : "Request Rejected"}
         subtitle={
-          isApprove
-            ? "Request approved successfully and forwarded to the next approval level."
-            : "The request has been rejected and sent back to the creator."
+          !isApprove
+            ? "The request has been rejected and sent back to the creator."
+            : isFinal
+              ? "Approved and sent to SAP for posting."
+              : "Request approved successfully and forwarded to the next approval level."
         }
         onClose={onDone}
         animateIcon

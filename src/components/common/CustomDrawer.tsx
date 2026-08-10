@@ -60,6 +60,17 @@ const BOTTOM_BAR_ROUTES = new Set<string>([
   "orders/drafts", // Drafts (feature hidden — kept for future re-enable)
   "reports/daily-report", // Reports
   "profile", // Profile
+
+  // The second tab is not always Orders: for a payments user it resolves to
+  // their payments or deposits queue (resolveWorkQueueRoute), and the Create
+  // FAB opens the two payment forms. Those screens are therefore already one
+  // tap away from the footer, so listing them in the sidebar as well shows the
+  // same destination twice.
+  "payments/payment-tracking", // Payments tab
+  "payments/deposit-tracking", // Deposits tab
+  "payments/receive-payment", // Create -> Receive Payment
+  "payments/bank-deposit", // Create -> Bank Deposit
+  "payments/dashboard", // Reports tab (analytics)
 ]);
 
 /** Routes grouped after the primary block get a divider before them. */

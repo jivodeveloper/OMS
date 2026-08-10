@@ -8,6 +8,7 @@ import { COLORS } from "@/src/constants/theme";
 import {
   canAccessScreen,
   createTargetsFor,
+  resolveReportsRoute,
   resolveWorkQueueRoute,
 } from "@/src/constants/pages";
 import { useDrawerOpen } from "@/src/utils/drawerState";
@@ -49,6 +50,11 @@ export default function BottomBar({
   // several open the chooser sheet.
   const createTargets = createTargetsFor(role, extraPages, user?.roles);
 
+  // Where Reports goes for THIS user: the sales daily report when they hold
+  // it, otherwise the Payments Dashboard. Null when they have neither, so the
+  // tab shows the permission dialog instead of navigating somewhere refused.
+  const reports = resolveReportsRoute(role, extraPages, user?.roles);
+
   // Highlight the tab that matches the current route (so the global bar shows
   // the right active tab on every screen). An explicit `active` prop wins.
   const activeTab: TabKey = useMemo(() => {
@@ -57,6 +63,9 @@ export default function BottomBar({
     if (p.includes("create")) return "create";
     if (p.includes("profile")) return "profile";
     if (p.includes("report")) return "reports";
+    // Checked BEFORE the generic /payments/ match below, which would otherwise
+    // light the work-queue tab while the user is looking at analytics.
+    if (p.includes("/payments/dashboard")) return "reports";
     if (
       p.includes("orderlist") ||
       p.includes("ordertracking") ||
@@ -66,6 +75,12 @@ export default function BottomBar({
       p.includes("orderprogress")
     )
       return "orders";
+    // The second tab is not always Orders — for a payments user it resolves to
+    // Payments or Deposits (see resolveWorkQueueRoute). Those routes were not
+    // matched here, so every payment screen fell through to "home" and lit the
+    // wrong tab. Matching the whole section keeps the bar honest wherever the
+    // tab happens to point.
+    if (p.includes("/payments/") || p.includes("/approval/")) return "orders";
     return "home";
   }, [active, pathname]);
 
@@ -145,10 +160,15 @@ export default function BottomBar({
       key: "reports",
       label: "Reports",
       icon: "bar-chart-outline",
-      onPress: () =>
-        guarded("reports/daily-report", "Reports", () =>
-          router.push("/reports/daily-report" as never),
-        ),
+      onPress: () => {
+        if (!reports) {
+          setDeniedLabel("Reports");
+          return;
+        }
+        guarded(reports.screen, reports.label, () =>
+          router.push(reports.route as never),
+        );
+      },
     },
     {
       key: "profile",

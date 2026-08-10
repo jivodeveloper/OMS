@@ -2,6 +2,7 @@ import React from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { COLORS } from "@/src/constants/theme";
+import { fs, sp } from "@/src/utils/responsive";
 
 interface ApprovalBottomBarProps {
   onReject: () => void;
@@ -55,12 +56,12 @@ export default React.memo(ApprovalBottomBar);
 const styles = StyleSheet.create({
   bar: {
     flexDirection: "row",
-    gap: 12,
+    gap: sp(12),
     backgroundColor: COLORS.surface,
-    paddingHorizontal: 16,
-    paddingTop: 10,
+    paddingHorizontal: sp(16),
+    paddingTop: sp(10),
     // Extra bottom padding lifts the bar clear of the global bottom nav.
-    paddingBottom: 24,
+    paddingBottom: sp(24),
     borderTopWidth: 1,
     borderTopColor: COLORS.borderLight,
     shadowColor: COLORS.primaryDark,
@@ -74,10 +75,10 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 7,
-    borderRadius: 12,
+    gap: sp(7),
+    borderRadius: sp(12),
     borderWidth: 1.5,
-    paddingVertical: 13,
+    paddingVertical: sp(13),
     overflow: "hidden",
   },
   // iOS has no ripple, so press feedback falls back to a dim.
@@ -89,7 +90,7 @@ const styles = StyleSheet.create({
     borderColor: COLORS.error,
   },
   rejectText: {
-    fontSize: 15,
+    fontSize: fs(15),
     fontWeight: "700",
     color: COLORS.error,
   },
@@ -98,7 +99,7 @@ const styles = StyleSheet.create({
     borderColor: COLORS.success,
   },
   approveText: {
-    fontSize: 15,
+    fontSize: fs(15),
     fontWeight: "700",
     color: COLORS.success,
   },

@@ -117,15 +117,30 @@ export function useCompanies() {
   };
 }
 
-/** Parties for a company — empty until one is chosen. */
-export function useParties(company: Company | null, search = "") {
+/**
+ * Parties for a company — empty until one is chosen.
+ *
+ * `withOpenInvoices` is the invoice-payment mode: only parties that actually
+ * owe money. Pass false for an advance, which is not invoice-linked and can
+ * legitimately come from a party with nothing outstanding. Changing the flag
+ * reloads the list, because it is a different question being asked of SAP.
+ */
+export function useParties(
+  company: Company | null,
+  search = "",
+  withOpenInvoices = false,
+) {
   const list = useAsyncList<PartyOption>(
-    () => paymentsService.getParties(company as Company, search),
-    [company, search],
+    () =>
+      paymentsService.getParties(company as Company, search, withOpenInvoices),
+    [company, search, withOpenInvoices],
     !!company,
   );
   return {
     ...list,
+    // Name and code only. The user searches by either, and the amounts belong
+    // on the invoice picker — a party total here would just be noise next to
+    // the per-invoice figures shown at the next step.
     options: list.data.map<Option>((p) => ({
       label: p.label || `${p.card_name} (${p.card_code})`,
       value: p.card_code,
@@ -142,9 +157,14 @@ export function useOpenInvoices(company: Company | null, cardCode: string | null
   );
   return {
     ...list,
+    // The HANA columns are doc_num / doc_entry. Reading sap_doc_num here (the
+    // name used in the ALLOCATION payload) silently produced "INV-undefined".
     options: list.data.map<Option>((inv) => ({
-      label: `INV-${inv.sap_doc_num} · ₹${Number(inv.balance_due).toLocaleString("en-IN")}`,
-      value: String(inv.sap_doc_entry),
+      label: `INV-${inv.doc_num} · ₹${Number(inv.balance_due).toLocaleString(
+        "en-IN",
+        { minimumFractionDigits: 2, maximumFractionDigits: 2 },
+      )}`,
+      value: String(inv.doc_entry),
     })),
   };
 }
@@ -170,9 +190,11 @@ export function useBankAccounts(company: Company | null) {
   );
   return {
     ...list,
+    // The ACCOUNT key, not a local row id: SAP is the master and one bank can
+    // hold several accounts, so the G/L is what distinguishes them.
     options: list.data.map<Option>((b) => ({
-      label: b.masked_number ? `${b.name} — ${b.masked_number}` : b.name,
-      value: String(b.id),
+      label: b.label || b.display_name,
+      value: b.key,
     })),
   };
 }

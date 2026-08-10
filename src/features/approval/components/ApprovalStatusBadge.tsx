@@ -1,6 +1,7 @@
 import React from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { COLORS } from "@/src/constants/theme";
+import { fs } from "@/src/utils/responsive";
 import type { ApprovalStatus } from "../types";
 
 interface ApprovalStatusBadgeProps {
@@ -56,7 +57,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   text: {
-    fontSize: 10,
+    fontSize: fs(10),
     fontWeight: "700",
   },
 });

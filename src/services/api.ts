@@ -411,7 +411,16 @@ const sendAuthed = async (
     }
   }
 
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  // FormData must be sent verbatim: JSON.stringify(formData) yields "{}" (the
+  // file silently disappears), and setting Content-Type by hand omits the
+  // multipart boundary fetch generates. So for uploads we neither stringify nor
+  // set the header.
+  const isMultipart =
+    typeof FormData !== 'undefined' && body instanceof FormData;
+
+  const headers: Record<string, string> = isMultipart
+    ? {}
+    : { 'Content-Type': 'application/json' };
   // Attach device/version metadata to every request from this single place.
   // Applied BEFORE Authorization so the provider can never clobber the token.
   if (deviceHeaderProvider) {
@@ -426,7 +435,9 @@ const sendAuthed = async (
   const init: RequestInit = {
     method,
     headers,
-    ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+    ...(body !== undefined
+      ? { body: isMultipart ? (body as unknown as FormData) : JSON.stringify(body) }
+      : {}),
   };
 
   const result = await requestWithFallback(endpoint, init);

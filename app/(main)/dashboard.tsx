@@ -30,6 +30,11 @@ import StatewiseBarChart from "@/src/components/dashboard/StateWiseBarChart";
 import AnimatedCard from "@/src/components/dashboard/AnimatedCard";
 import AnimatedNumber from "@/src/components/dashboard/AnimatedNumber";
 import StateWrapper from "@/src/components/common/StateWrapper";
+import {
+  canAccessScreen,
+  isPaymentsOnlyUser,
+} from "@/src/constants/pages";
+import PaymentHomeScreen from "@/src/features/payments/PaymentHomeScreen";
 import { refreshLiveData } from "@/src/cache";
 import { fs, ms, sp } from "@/src/utils/responsive";
 import {
@@ -124,6 +129,38 @@ const isWithinSelectedPeriod = (value: string | undefined, year: number, month: 
 };
 
 export default function DashboardScreen() {
+  const { user } = useAuth();
+
+  /**
+   * A payments-only user gets the payments home HERE, as the dashboard.
+   *
+   * The rest of this screen is the sales dashboard: it fetches order metrics
+   * and renders order charts, none of which such a user can even open. Showing
+   * it meant their home page was a wall of empty sales figures. Returning
+   * early keeps that whole path untouched for everyone who does hold orders.
+   */
+  const paymentsOnly = isPaymentsOnlyUser(
+    user?.role,
+    user?.extra_pages || [],
+    user?.roles,
+  );
+  if (paymentsOnly) {
+    // Deposits-only users see deposits; anyone with payments sees payments.
+    const kind = canAccessScreen(
+      "payments/payment-tracking",
+      (user?.role || "").toLowerCase(),
+      user?.extra_pages || [],
+      user?.roles,
+    )
+      ? "payment"
+      : "deposit";
+    return <PaymentHomeScreen kind={kind} />;
+  }
+
+  return <SalesDashboard />;
+}
+
+function SalesDashboard() {
   const router = useRouter();
   const { user } = useAuth();
   const insets = useSafeAreaInsets();

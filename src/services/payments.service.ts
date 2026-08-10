@@ -29,16 +29,38 @@ export interface PartyOption {
   label: string;
   company: Company;
   state?: string;
+  /**
+   * Present only when the server was asked for balances (`with_open_invoices`
+   * or `include_balance`). Read live from SAP, so absent on the plain list.
+   */
+  open_invoice_count?: number;
+  open_balance?: string;
 }
 
+/**
+ * One open A/R invoice, exactly as the HANA query names its columns.
+ *
+ * The keys are `doc_entry` / `doc_num`, NOT `sap_doc_entry` / `sap_doc_num` —
+ * those prefixed names belong to the ALLOCATION payload we send back when
+ * creating a receipt. Mixing them up yields `undefined` at runtime with no type
+ * error, which is exactly what produced "INV-undefined" in the picker.
+ */
 export interface OpenInvoice {
-  sap_doc_entry: number;
-  sap_doc_num: number;
+  doc_entry: number;
+  doc_num: number;
   doc_date: string;
   due_date: string;
-  doc_total: string;
-  paid_to_date: string;
-  balance_due: string;
+  party_ref: string | null;
+  card_code: string;
+  card_name: string;
+  currency: string;
+  doc_total: number;
+  paid_to_date: number;
+  balance_due: number;
+  days_overdue: number;
+  /** SAP branch this invoice belongs to — the payment must match it. */
+  bpl_id: number | null;
+  bpl_name: string;
 }
 
 export interface CollectionPerson {
@@ -50,13 +72,22 @@ export interface CollectionPerson {
   is_active: boolean;
 }
 
+/**
+ * One SAP House Bank Account (DSC1). OMS keeps no bank table — SAP is the
+ * master, so a bank added there appears here after the next cache refresh.
+ *
+ * `key` identifies the ACCOUNT ("CODE:GL"), because one bank can hold several.
+ * That is what a dropdown sends and what the backend resolves the G/L from.
+ */
 export interface BankAccount {
-  id: number;
-  name: string;
-  company: Company;
-  account_type: "CASH" | "BANK";
-  masked_number: string;
-  is_active: boolean;
+  bank_code: string;
+  display_name: string;
+  gl_account: string;
+  account_number: string;
+  branch: string;
+  ifsc: string;
+  key: string;
+  label: string;
 }
 
 export type PaymentMethodKind = "CASH" | "UPI" | "CHEQUE";
@@ -75,6 +106,19 @@ export interface AllocationPayload {
   sap_doc_entry: number;
   sap_doc_num?: number;
   amount_applied: string;
+  /**
+   * Snapshots taken when the invoice was picked, so the detail screen can show
+   * what was owed at the time without re-reading SAP — and so a later payment
+   * against the same invoice does not rewrite this one's history.
+   */
+  invoice_total?: string;
+  balance_at_selection?: string;
+}
+
+/** One SAP branch a payment may be posted to. */
+export interface SapBranch {
+  bpl_id: number;
+  bpl_name: string;
 }
 
 export interface CreateReceiptPayload {
@@ -85,6 +129,8 @@ export interface CreateReceiptPayload {
   received_from_type: "PARTY" | "PERSON";
   received_from_person?: number | null;
   is_advance?: boolean;
+  /** Advance only — an invoice payment inherits its branch from the invoice. */
+  sap_branch_id?: number | null;
   remarks?: string;
   methods: MethodPayload[];
   allocations?: AllocationPayload[];
@@ -113,6 +159,16 @@ export interface PaymentReceipt {
    */
   sap_doc_entry: number | null;
   sap_doc_num: number | null;
+  sap_branch_id: number | null;
+  sap_branch_name: string;
+  /** The branch this WILL post to, and where it came from. */
+  sap_branch?: {
+    bpl_id: number | null;
+    name: string;
+    source: "invoice" | "user" | "none";
+    editable: boolean;
+    conflict: boolean;
+  } | null;
   sap_posted_at: string | null;
   /**
    * SAP's own words from the latest posting attempt — the success confirmation
@@ -120,6 +176,11 @@ export interface PaymentReceipt {
    * fix before resubmitting.
    */
   sap_response: string;
+  is_advance: boolean;
+  created_by_username: string;
+  received_from_type: "PARTY" | "PERSON";
+  received_from_person: number | null;
+  received_from_name?: string;
   /** Cash/UPI/cheque lines making up the total. */
   methods: {
     id: number;
@@ -127,8 +188,40 @@ export interface PaymentReceipt {
     amount: string;
     upi_reference?: string;
     cheque_number?: string;
+    /** The CUSTOMER's bank on a cheque — not one of ours. */
     bank_name?: string;
     cheque_date?: string | null;
+    /** OUR account for this line, resolved from the admin mapping. */
+    deposit_account?: {
+      bank_name: string;
+      gl_account: string;
+      account_number: string;
+      branch: string;
+    } | null;
+    /** Note breakdown — cash lines only. */
+    denominations?: { id: number; denomination: number; quantity: number;
+                      line_total?: string }[];
+  }[];
+  /** Which SAP invoices this receipt was applied to. Empty for an advance. */
+  allocations: {
+    id: number;
+    sap_doc_entry: number;
+    sap_doc_num: number | null;
+    invoice_type: number;
+    amount_applied: string;
+    /** Snapshots from when the invoice was selected. */
+    invoice_total?: string;
+    balance_at_selection?: string;
+  }[];
+  /** Uploaded proof — cheque images, UPI screenshots. */
+  attachments: {
+    id: number;
+    attachment_type: string;
+    type_display: string;
+    original_name: string;
+    uploaded_by_name: string;
+    download_url: string;
+    created_at: string;
   }[];
   approval: {
     id: number;
@@ -136,7 +229,24 @@ export interface PaymentReceipt {
     current_level: number;
     total_levels: number;
     level_label: string;
+    round_number?: number;
+    /** Populated only while the latest round stands rejected. */
+    rejection_reason?: string;
+    rejected_by?: string;
+    rejected_at?: string | null;
   } | null;
+  /**
+   * What the CALLER may do with this document, decided server-side.
+   *
+   * Present on the detail endpoint only. The client cannot derive these: the
+   * rules depend on the approval ladder and forbid self-approval, so working
+   * them out locally would mean two authorities that can disagree.
+   */
+  permissions?: {
+    can_decide: boolean;
+    can_edit: boolean;
+    can_resubmit: boolean;
+  };
 }
 
 /**
@@ -161,7 +271,8 @@ export interface CreateDepositPayload {
   company: Company;
   deposit_date: string;
   deposited_by?: number | null;
-  bank_account: number;
+  /** SAP house bank account key ("CODE:GL"). The backend resolves the G/L. */
+  bank_key: string;
   deposit_type: "CASH" | "CHEQUE" | "MIXED";
   collected_amount: string;
   deposit_amount: string;
@@ -179,7 +290,9 @@ export interface BankDeposit {
   deposit_date: string;
   deposited_by: number | null;
   deposited_by_name: string;
-  bank_account: number;
+  bank_key: string;
+  bank_code: string;
+  bank_gl_account: string;
   bank_account_name: string;
   deposit_type: "CASH" | "CHEQUE" | "MIXED";
   collected_amount: string;
@@ -212,6 +325,16 @@ export interface BankDeposit {
     total_levels: number;
     level_label: string;
   } | null;
+  /**
+   * What the CALLER may do with this deposit. Same shape and same server
+   * helper as a receipt, so both detail screens gate their action bar
+   * identically. Present on the detail endpoint only.
+   */
+  permissions?: {
+    can_decide: boolean;
+    can_edit: boolean;
+    can_resubmit: boolean;
+  };
 }
 
 /** One row of a document's status timeline. */
@@ -222,30 +345,6 @@ export interface StatusHistoryRow {
   reason: string;
   actor_kind: string;
   changed_by_username: string;
-  created_at: string;
-}
-
-/**
- * One SAP posting attempt. Append-only on the server — a row is never edited
- * or removed, so a failed attempt stays visible after a later one succeeds.
- */
-export interface SapPostingHistoryRow {
-  id: number;
-  attempt_number: number;
-  action:
-    | "POST_STARTED"
-    | "POST_SUCCESS"
-    | "POST_FAILED"
-    | "POST_TIMEOUT"
-    | "RESUBMITTED"
-    | "MANUAL_RECOVERY";
-  action_display: string;
-  status: "POSTING" | "SUCCESS" | "FAILED" | "UNKNOWN";
-  status_display: string;
-  sap_doc_entry: number | null;
-  sap_doc_num: number | null;
-  sap_response: string;
-  created_by_username: string;
   created_at: string;
 }
 
@@ -302,10 +401,29 @@ export const paymentsService = {
     return rows<CompanyOption>(res);
   },
 
-  getParties: async (company: Company, search = ""): Promise<PartyOption[]> => {
+  /**
+   * Parties in a company.
+   *
+   * `withOpenInvoices` narrows the list to those that actually owe money — sent
+   * when the user is paying against an invoice. For an ADVANCE it must stay
+   * false: an advance is not invoice-linked, so a party with nothing
+   * outstanding is still a legitimate payer.
+   */
+  getParties: async (
+    company: Company,
+    search = "",
+    withOpenInvoices = false,
+  ): Promise<PartyOption[]> => {
     const query = new URLSearchParams({ company });
     if (search.trim()) query.append("search", search.trim());
-    const res = await api.get(`/payments/parties/?${query.toString()}`);
+    if (withOpenInvoices) query.append("with_open_invoices", "true");
+    const res = await api.get(
+      `/payments/parties/?${query.toString()}`,
+      undefined,
+      // Balances move whenever anyone takes a payment, so the filtered list
+      // must not be served stale.
+      withOpenInvoices ? { cache: "no-store" } : undefined,
+    );
     return rows<PartyOption>(res);
   },
 
@@ -330,15 +448,39 @@ export const paymentsService = {
     return rows<CollectionPerson>(res);
   },
 
+  /** SAP branches for this company, for the advance-payment picker. */
+  getSapBranches: async (company: Company): Promise<SapBranch[]> => {
+    const res = await api.get(
+      `/payments/sap-branches/?company=${encodeURIComponent(company)}`,
+    );
+    return rows<SapBranch>(res);
+  },
+
   getBankAccounts: async (company?: Company): Promise<BankAccount[]> => {
     const suffix = company ? `?company=${company}` : "";
-    const res = await api.get(`/payments/bank-accounts/${suffix}`);
+    const res = await api.get(`/payments/banks/${suffix}`);
     return rows<BankAccount>(res);
   },
 
   // ---- Receipts --------------------------------------------------------
   createReceipt: async (payload: CreateReceiptPayload): Promise<PaymentReceipt> => {
     const res = await api.post("/payments/receipts/", payload);
+    return unwrap<PaymentReceipt>(res);
+  },
+
+  /**
+   * Edit a receipt's content.
+   *
+   * Partial by design: send only what changed. Omitting `methods` or
+   * `allocations` leaves the stored rows alone; sending them REPLACES the set.
+   * The server re-checks that editing is still allowed, so a stale app cannot
+   * rewrite an approved or posted document.
+   */
+  updateReceipt: async (
+    id: number,
+    payload: Partial<CreateReceiptPayload>,
+  ): Promise<PaymentReceipt> => {
+    const res = await api.patch(`/payments/receipts/${id}/`, payload);
     return unwrap<PaymentReceipt>(res);
   },
 
@@ -404,29 +546,50 @@ export const paymentsService = {
     return unwrap<BankDeposit>(res);
   },
 
+  /**
+   * Attach one file to a receipt.
+   *
+   * Sent as multipart/form-data with the `{ uri, name, type }` shape React
+   * Native's FormData understands — Content-Type is deliberately NOT set by
+   * hand, because fetch has to add its own multipart boundary.
+   */
+  uploadReceiptAttachment: async (
+    receiptId: number,
+    file: { uri: string; name: string; mimeType: string },
+    attachmentType: "CHEQUE_IMAGE" | "UPI_SCREENSHOT",
+  ): Promise<void> => {
+    const body = new FormData();
+    body.append("file", {
+      uri: file.uri,
+      name: file.name,
+      type: file.mimeType,
+    } as unknown as Blob);
+    body.append("attachment_type", attachmentType);
+    await api.post(`/payments/receipts/${receiptId}/attachments/`, body);
+  },
+
+  /** Attach one file to a deposit. See uploadReceiptAttachment. */
+  uploadDepositAttachment: async (
+    depositId: number,
+    file: { uri: string; name: string; mimeType: string },
+    attachmentType: "DEPOSIT_SLIP" | "DEPOSIT_RECEIPT",
+  ): Promise<void> => {
+    const body = new FormData();
+    body.append("file", {
+      uri: file.uri,
+      name: file.name,
+      type: file.mimeType,
+    } as unknown as Blob);
+    body.append("attachment_type", attachmentType);
+    await api.post(`/payments/deposits/${depositId}/attachments/`, body);
+  },
+
   /** Status timeline for a receipt — who changed what, and when. */
   getReceiptHistory: async (id: number): Promise<StatusHistoryRow[]> => {
     const res = await api.get(`/payments/receipts/${id}/history/`, undefined, {
       cache: "no-store",
     });
     return rows<StatusHistoryRow>(res);
-  },
-
-  /**
-   * Every SAP posting attempt on a receipt, newest first.
-   *
-   * Separate from `getReceiptHistory`: that timeline tracks the approval
-   * lifecycle (who submitted, who approved), while this one records what
-   * happened when the document was pushed to SAP — including the failures a
-   * successful re-post would otherwise hide.
-   */
-  getReceiptSapHistory: async (id: number): Promise<SapPostingHistoryRow[]> => {
-    const res = await api.get(
-      `/payments/receipts/${id}/sap-history/`,
-      undefined,
-      { cache: "no-store" },
-    );
-    return rows<SapPostingHistoryRow>(res);
   },
 };
 

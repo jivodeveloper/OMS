@@ -2,18 +2,32 @@ import React from "react";
 import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { COLORS } from "@/src/constants/theme";
-import type { ApprovalPayment, PaymentMethodType } from "../types";
+import { fs, ms, sp } from "@/src/utils/responsive";
+import type {
+  ApprovalAttachment,
+  ApprovalPayment,
+  PaymentMethodType,
+} from "../types";
 
 interface PaymentAccordionProps {
   payment: ApprovalPayment;
   expanded: boolean;
   onToggle: () => void;
+  /** Opens one of this method's own proofs. */
+  onViewAttachment?: (file: ApprovalAttachment) => void;
 }
 
 const METHOD_ICON: Record<PaymentMethodType, keyof typeof Ionicons.glyphMap> = {
   Cash: "cash-outline",
   UPI: "phone-portrait-outline",
   Cheque: "document-text-outline",
+};
+
+/** One-line description under the method name, as in the reference layout. */
+const METHOD_SUBTITLE: Record<PaymentMethodType, string> = {
+  Cash: "Cash payment received",
+  UPI: "Paid by UPI transfer",
+  Cheque: "Cheque received from party",
 };
 
 const formatAmount = (amount: number) =>
@@ -24,7 +38,12 @@ const formatAmount = (amount: number) =>
  * expanded body varies by method. The parent animates the height change, so
  * this component only decides what to render.
  */
-function PaymentAccordion({ payment, expanded, onToggle }: PaymentAccordionProps) {
+function PaymentAccordion({
+  payment,
+  expanded,
+  onToggle,
+  onViewAttachment,
+}: PaymentAccordionProps) {
   const noteTotal =
     payment.noteRows?.reduce(
       (sum, row) => sum + row.denomination * row.quantity,
@@ -47,7 +66,12 @@ function PaymentAccordion({ payment, expanded, onToggle }: PaymentAccordionProps
           <Ionicons name={METHOD_ICON[payment.type]} size={17} color={COLORS.primary} />
         </View>
 
-        <Text style={styles.method}>{payment.type}</Text>
+        <View style={styles.headerText}>
+          <Text style={styles.method}>{payment.type}</Text>
+          <Text style={styles.methodSub} numberOfLines={1}>
+            {METHOD_SUBTITLE[payment.type]}
+          </Text>
+        </View>
 
         <Text style={styles.amount}>₹{formatAmount(payment.amount)}</Text>
         <Ionicons
@@ -95,36 +119,89 @@ function PaymentAccordion({ payment, expanded, onToggle }: PaymentAccordionProps
             />
           ) : null}
 
-          {/* ── Cheque ── */}
+          {/* ── Cheque: what the CUSTOMER handed over ── */}
           {payment.type === "Cheque" ? (
             <>
               <DetailRow label="Cheque Number" value={payment.chequeNumber ?? "—"} />
-              <DetailRow label="Bank Name" value={payment.bankName ?? "—"} />
+              <DetailRow
+                label="Customer Cheque Bank"
+                value={payment.bankName ?? "—"}
+              />
               <DetailRow label="Cheque Date" value={payment.chequeDate ?? "—"} />
             </>
           ) : null}
 
-          {/* Proof preview — placeholder tile, no real image in this phase. */}
-          {payment.attachment ? (
+          {/* ── Where WE bank it ──
+              A separate block with its own heading, because the customer's
+              bank and our deposit account are different things and reading
+              them as one list is what caused the confusion. */}
+          {payment.depositAccount ? (
+            <View style={styles.depositBlock}>
+              <Text style={styles.subHeading}>SAP Posting</Text>
+              <DetailRow
+                label="Company Deposit Account"
+                value={payment.depositAccount.bankName}
+              />
+              <DetailRow
+                label="GL Account"
+                value={payment.depositAccount.glAccount}
+              />
+              {payment.depositAccount.accountNumber ? (
+                <DetailRow
+                  label="Account Number"
+                  value={payment.depositAccount.accountNumber}
+                />
+              ) : null}
+            </View>
+          ) : null}
+
+          {/* This method's own proof — a cheque image, a UPI screenshot.
+              Shown HERE rather than in the Attachments card so the approver
+              sees the evidence beside the line it belongs to. */}
+          {payment.attachments?.length ? (
             <View style={styles.previewWrap}>
               <Text style={styles.subHeading}>
                 {payment.type === "UPI" ? "Screenshot" : "Cheque Image"}
               </Text>
-              <View style={styles.previewRow}>
-                <View style={styles.previewThumb}>
-                  <Ionicons name="image-outline" size={20} color={COLORS.textMuted} />
+              {payment.attachments.map((file) => (
+                <View key={file.id} style={styles.previewRow}>
+                  <View style={styles.previewThumb}>
+                    <Ionicons
+                      name={
+                        file.kind === "pdf"
+                          ? "document-text-outline"
+                          : "image-outline"
+                      }
+                      size={ms(20)}
+                      color={
+                        file.kind === "pdf" ? COLORS.error : COLORS.textMuted
+                      }
+                    />
+                  </View>
+                  <View style={styles.previewText}>
+                    <Text style={styles.previewName} numberOfLines={1}>
+                      {file.name}
+                    </Text>
+                    {!!file.size && (
+                      <Text style={styles.previewSize}>{file.size}</Text>
+                    )}
+                  </View>
+                  <TouchableOpacity
+                    style={styles.previewBtn}
+                    activeOpacity={0.8}
+                    onPress={() => onViewAttachment?.(file)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`View ${file.name}`}
+                  >
+                    <Ionicons
+                      name="eye-outline"
+                      size={ms(15)}
+                      color={COLORS.primary}
+                    />
+                    <Text style={styles.previewBtnText}>View</Text>
+                  </TouchableOpacity>
                 </View>
-                <View style={styles.previewText}>
-                  <Text style={styles.previewName} numberOfLines={1}>
-                    {payment.attachment.name}
-                  </Text>
-                  <Text style={styles.previewSize}>{payment.attachment.size}</Text>
-                </View>
-                <TouchableOpacity style={styles.previewBtn} activeOpacity={0.8}>
-                  <Ionicons name="eye-outline" size={15} color={COLORS.primary} />
-                  <Text style={styles.previewBtnText}>View</Text>
-                </TouchableOpacity>
-              </View>
+              ))}
             </View>
           ) : null}
         </View>
@@ -189,14 +266,22 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  method: {
+  headerText: {
     flex: 1,
-    fontSize: 14,
+    minWidth: 0,
+  },
+  methodSub: {
+    fontSize: fs(11),
+    color: COLORS.textSecondary,
+    marginTop: sp(1),
+  },
+  method: {
+    fontSize: fs(14),
     fontWeight: "700",
     color: COLORS.text,
   },
   amount: {
-    fontSize: 14,
+    fontSize: fs(14),
     fontWeight: "800",
     color: COLORS.primaryDark,
   },
@@ -220,24 +305,24 @@ const styles = StyleSheet.create({
     paddingVertical: 5,
   },
   detailLabel: {
-    fontSize: 12,
+    fontSize: fs(12),
     color: COLORS.textSecondary,
   },
   detailValue: {
     flex: 1,
-    fontSize: 12,
+    fontSize: fs(12),
     fontWeight: "700",
     color: COLORS.text,
     textAlign: "right",
   },
   stackedValue: {
-    fontSize: 12,
+    fontSize: fs(12),
     lineHeight: 18,
     color: COLORS.text,
     marginTop: 3,
   },
   subHeading: {
-    fontSize: 11,
+    fontSize: fs(11),
     fontWeight: "700",
     color: COLORS.textSecondary,
     letterSpacing: 0.4,
@@ -252,11 +337,11 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
   },
   noteLabel: {
-    fontSize: 12,
+    fontSize: fs(12),
     color: COLORS.text,
   },
   noteValue: {
-    fontSize: 12,
+    fontSize: fs(12),
     fontWeight: "600",
     color: COLORS.textSecondary,
   },
@@ -270,14 +355,21 @@ const styles = StyleSheet.create({
     borderTopColor: "#EAEEF5",
   },
   totalLabel: {
-    fontSize: 12,
+    fontSize: fs(12),
     fontWeight: "600",
     color: COLORS.textSecondary,
   },
   totalValue: {
-    fontSize: 13,
+    fontSize: fs(13),
     fontWeight: "800",
     color: COLORS.primaryDark,
+  },
+  // Sets the accounting block apart from the business fields above it.
+  depositBlock: {
+    marginTop: sp(10),
+    paddingTop: sp(10),
+    borderTopWidth: 1,
+    borderTopColor: COLORS.borderLight,
   },
   previewWrap: {
     marginTop: 4,
@@ -306,12 +398,12 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   previewName: {
-    fontSize: 12,
+    fontSize: fs(12),
     fontWeight: "600",
     color: COLORS.text,
   },
   previewSize: {
-    fontSize: 10,
+    fontSize: fs(10),
     color: COLORS.textMuted,
     marginTop: 1,
   },
@@ -327,7 +419,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
   },
   previewBtnText: {
-    fontSize: 11,
+    fontSize: fs(11),
     fontWeight: "700",
     color: COLORS.primary,
   },

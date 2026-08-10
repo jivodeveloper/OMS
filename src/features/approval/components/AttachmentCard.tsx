@@ -2,6 +2,7 @@ import React from "react";
 import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { COLORS } from "@/src/constants/theme";
+import { fs } from "@/src/utils/responsive";
 import type { ApprovalAttachment } from "../types";
 
 interface AttachmentCardProps {
@@ -81,12 +82,12 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   name: {
-    fontSize: 13,
+    fontSize: fs(13),
     fontWeight: "600",
     color: COLORS.text,
   },
   meta: {
-    fontSize: 11,
+    fontSize: fs(11),
     color: COLORS.textMuted,
     marginTop: 2,
   },

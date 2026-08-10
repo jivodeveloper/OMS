@@ -53,8 +53,25 @@ export interface ApiApprovalRequest {
   created_at: string;
 }
 
+/**
+ * One rung of the ladder, whether or not it has been reached.
+ *
+ * `position` is 1-based and is what `current_level` counts. It is NOT the same
+ * as `sequence`: the PAYMENTS workflow numbers its rungs 2 and 3, so matching
+ * on `sequence` would resolve the wrong approver.
+ */
+export interface ApiApprovalLevel {
+  position: number;
+  sequence: number;
+  name: string;
+  role: string;
+  approvers: string[];
+}
+
 export interface ApiApprovalDetail extends ApiApprovalRequest {
   actions: ApiApprovalAction[];
+  /** The full ladder, so a timeline can show rungs not yet reached. */
+  levels: ApiApprovalLevel[];
   /** Server-computed: may THIS user act on THIS request right now. */
   can_act: boolean;
 }

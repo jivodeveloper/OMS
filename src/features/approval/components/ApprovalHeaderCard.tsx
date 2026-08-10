@@ -3,17 +3,32 @@ import { StyleSheet, Text, View } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import { COLORS } from "@/src/constants/theme";
+import { fs, ms, sp } from "@/src/utils/responsive";
 import type { ApprovalDetail } from "../types";
 
 interface ApprovalHeaderCardProps {
   detail: ApprovalDetail;
 }
 
+/** Pill colour follows the outcome, not one flat accent. */
+const STATUS_COLOR: Record<string, string> = {
+  Pending: COLORS.warning,
+  Approved: COLORS.success,
+  Rejected: COLORS.error,
+};
+
 /**
  * Gradient summary header — same construction as the Order Details header
  * (flush under the navbar, 24pt bottom corners) so the two screens match.
+ *
+ * Carries only what identifies the document: its number, who paid, and where it
+ * has got to. Company, created-by, date and time all live in General
+ * Information — repeating them here made the header tall enough to push the
+ * actual content off the first screen.
  */
 function ApprovalHeaderCard({ detail }: ApprovalHeaderCardProps) {
+  const statusColor = STATUS_COLOR[detail.status] ?? COLORS.warning;
+
   return (
     <LinearGradient
       colors={[COLORS.primaryDark, COLORS.primary]}
@@ -22,34 +37,33 @@ function ApprovalHeaderCard({ detail }: ApprovalHeaderCardProps) {
       style={styles.header}
     >
       <View style={styles.topRow}>
-        <Text style={styles.requestNo} numberOfLines={1}>
+        <Text style={styles.requestNo} numberOfLines={1} adjustsFontSizeToFit>
           {detail.requestNo}
         </Text>
+
+
         <View style={styles.statusPill}>
-          <Text style={styles.statusText}>{detail.status}</Text>
+          <Text style={[styles.statusText, { color: statusColor }]}>
+            {detail.status}
+          </Text>
         </View>
       </View>
 
-      <Text style={styles.party} numberOfLines={1}>
-        {detail.party}
-      </Text>
-
-      <View style={styles.metaRow}>
-        <Ionicons name="business-outline" size={13} color="#BFDBFE" />
-        <Text style={styles.metaText} numberOfLines={1}>
-          {detail.company}
+      {/* Party and its SAP code share a row: the name is what a person reads,
+          the code is what they quote to accounts. */}
+      <View style={styles.partyRow}>
+        <Ionicons name="person-outline" size={ms(14)} color="#BFDBFE" />
+        <Text style={styles.party} numberOfLines={1}>
+          {detail.party}
         </Text>
-      </View>
-
-      <View style={styles.footerRow}>
-        <View style={styles.footerItem}>
-          <Ionicons name="calendar-outline" size={13} color="#BFDBFE" />
-          <Text style={styles.footerText}>{detail.createdDate}</Text>
-        </View>
-        <View style={styles.footerItem}>
-          <Ionicons name="time-outline" size={13} color="#BFDBFE" />
-          <Text style={styles.footerText}>{detail.createdTime}</Text>
-        </View>
+        {!!detail.partyCode && (
+          <>
+            <View style={styles.separator} />
+            <Text style={styles.partyCode} numberOfLines={1}>
+              {detail.partyCode}
+            </Text>
+          </>
+        )}
       </View>
     </LinearGradient>
   );
@@ -59,69 +73,55 @@ export default React.memo(ApprovalHeaderCard);
 
 const styles = StyleSheet.create({
   header: {
-    paddingHorizontal: 18,
-    paddingTop: 16,
-    paddingBottom: 18,
-    borderBottomLeftRadius: 24,
-    borderBottomRightRadius: 24,
+    paddingHorizontal: sp(18),
+    paddingTop: sp(16),
+    paddingBottom: sp(18),
+    borderBottomLeftRadius: sp(24),
+    borderBottomRightRadius: sp(24),
   },
   topRow: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
-    gap: 10,
+    gap: sp(10),
   },
   requestNo: {
     flex: 1,
+    minWidth: 0,
     color: "#fff",
-    fontSize: 20,
+    fontSize: fs(19),
     fontWeight: "800",
     letterSpacing: 0.2,
   },
   statusPill: {
     backgroundColor: "#fff",
     borderRadius: 999,
-    paddingVertical: 5,
-    paddingHorizontal: 12,
+    paddingVertical: sp(5),
+    paddingHorizontal: sp(12),
   },
   statusText: {
-    fontSize: 11,
+    fontSize: fs(11),
     fontWeight: "800",
-    color: COLORS.warning,
+  },
+  partyRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: sp(6),
+    marginTop: sp(12),
   },
   party: {
+    flexShrink: 1,
     color: "#fff",
-    fontSize: 14,
+    fontSize: fs(14),
     fontWeight: "700",
-    marginTop: 10,
   },
-  metaRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 5,
-    marginTop: 4,
+  separator: {
+    width: 1,
+    height: ms(12),
+    backgroundColor: "rgba(255,255,255,0.35)",
   },
-  metaText: {
-    flex: 1,
+  partyCode: {
     color: "#DBEAFE",
-    fontSize: 12,
-  },
-  footerRow: {
-    flexDirection: "row",
-    gap: 16,
-    marginTop: 12,
-    paddingTop: 10,
-    borderTopWidth: 1,
-    borderTopColor: "rgba(255,255,255,0.18)",
-  },
-  footerItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 5,
-  },
-  footerText: {
-    color: "#fff",
-    fontSize: 12,
+    fontSize: fs(12),
     fontWeight: "600",
   },
 });

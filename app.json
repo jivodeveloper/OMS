@@ -24,16 +24,20 @@
         "NSAppTransportSecurity": {
           "NSAllowsArbitraryLoads": true,
           "NSAllowsLocalNetworking": true
-        }
+        },
+        "NSCameraUsageDescription": "Take a photo of a cheque, UPI screenshot or deposit slip to attach to a payment.",
+        "NSPhotoLibraryUsageDescription": "Attach a cheque image, UPI screenshot or deposit slip from your photos.",
+        "NSPhotoLibraryAddUsageDescription": "Save photos you capture for a payment attachment."
       }
     },
     "android": {
       "googleServicesFile": "./google-services.json",
       "usesCleartextTraffic": true,
-      "softwareKeyboardLayoutMode": "pan",
+      "softwareKeyboardLayoutMode": "resize",
       "versionCode": 7,
       "permissions": [
-        "INTERNET", "POST_NOTIFICATIONS"
+        "INTERNET", "POST_NOTIFICATIONS", "CAMERA",
+        "READ_MEDIA_IMAGES", "READ_EXTERNAL_STORAGE"
       ],
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
@@ -52,6 +56,13 @@
     "plugins": [
       "expo-router",
       "@react-native-community/datetimepicker",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Attach a cheque image, UPI screenshot or deposit slip from your photos.",
+          "cameraPermission": "Take a photo of a cheque, UPI screenshot or deposit slip to attach to a payment."
+        }
+      ],
       [
         "expo-notifications",
         {

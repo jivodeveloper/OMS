@@ -4,6 +4,15 @@
 
 export type PaymentMethodType = "cash" | "upi" | "cheque";
 
+/**
+ * Tenders that settle straight into a bank account.
+ *
+ * UPI needs no bank field on the form: an administrator maps it to a SAP house
+ * bank account once and the backend resolves the G/L. Only a CHEQUE asks for a
+ * bank, because the physical cheque belongs to the payer's.
+ */
+export const TRANSFER_METHODS: PaymentMethodType[] = ["upi"];
+
 export const COMPANY_OPTIONS: { label: string; value: string }[] = [
   { label: "JIVO_OIL", value: "jivo-oil" },
   { label: "JIVO_BEVRAGES", value: "jivo-bevrages" },
@@ -83,6 +92,9 @@ export const PAYMENT_METHOD_OPTIONS: {
   { label: "UPI", value: "upi", icon: "phone-portrait-outline" },
   { label: "Cheque", value: "cheque", icon: "document-text-outline" },
 ];
+
+/** Matches the server rule in payments/serializers.py. */
+export const UPI_REFERENCE_MAX = 50;
 
 export const NOTE_DENOMINATIONS = [10, 20, 50, 100, 200, 500].map((value) => ({
   label: `₹${value}`,

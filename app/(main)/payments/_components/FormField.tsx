@@ -15,6 +15,10 @@ interface FormFieldProps {
   maxLength?: number;
   leftIcon?: string;
   prefix?: string;
+  /** Lets a screen scroll this field clear of the keyboard when it is focused. */
+  onFocus?: () => void;
+  /** "characters" shows a caps keyboard — used for codes like a bank name. */
+  autoCapitalize?: "none" | "sentences" | "words" | "characters";
 }
 
 /**
@@ -34,6 +38,8 @@ export default function FormField({
   maxLength,
   leftIcon,
   prefix,
+  onFocus,
+  autoCapitalize,
 }: FormFieldProps) {
   return (
     <View style={styles.field}>
@@ -45,12 +51,14 @@ export default function FormField({
       <TextInput
         value={value}
         onChangeText={onChangeText}
+        onFocus={onFocus}
         mode="outlined"
         placeholder={placeholder}
         multiline={multiline}
         numberOfLines={multiline ? 3 : 1}
         keyboardType={keyboardType}
         maxLength={maxLength}
+        autoCapitalize={autoCapitalize}
         textColor={COLORS.black}
         style={[styles.input, multiline && styles.inputMultiline]}
         outlineStyle={styles.inputOutline}
