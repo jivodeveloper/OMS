@@ -115,6 +115,22 @@ export interface ApprovalDetail {
   paymentType: string;
   amount: number;
   remarks: string;
+  /**
+   * What SAP did with the receipt, for the SAP Information card.
+   *
+   * `status` here is the RECEIPT's status (POSTED / PENDING_ERROR / …), which
+   * is not the same as `status` above — that one is the APPROVAL's state. A
+   * receipt can be fully approved and still have failed to post, and the card
+   * has to report the posting, not the approval.
+   */
+  sap: {
+    status: string;
+    sap_doc_entry: number | null;
+    sap_doc_num: number | null;
+    sap_trans_id: number | null;
+    sap_posted_at: string | null;
+    sap_response: string;
+  };
   payments: ApprovalPayment[];
   attachments: ApprovalAttachment[];
   /** Server-decided: what the viewer may do. Drives the action bar. */

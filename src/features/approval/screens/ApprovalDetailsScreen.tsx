@@ -23,6 +23,7 @@ import { showToast } from "@/src/components/common/Toast";
 import { setHeaderEditHandler } from "@/src/utils/headerEdit";
 import ApprovalHeaderCard from "../components/ApprovalHeaderCard";
 import GeneralInformationCard from "../components/GeneralInformationCard";
+import SapInfoCard from "@/src/features/payments/components/SapInfoCard";
 import InvoiceSummaryCard from "@/src/features/payments/components/InvoiceSummaryCard";
 import PaymentAccordion from "../components/PaymentAccordion";
 import AttachmentList from "../components/AttachmentList";
@@ -36,7 +37,7 @@ import ApprovalLoadingDialog from "../components/dialogs/ApprovalLoadingDialog";
 import ApprovalSuccessDialog from "../components/dialogs/ApprovalSuccessDialog";
 import SapErrorDialog from "../components/dialogs/SapErrorDialog";
 import { useApprovalDetails } from "../hooks/useApprovalDetails";
-import type { ApprovalAttachment, ApprovalDecision } from "../types";
+import type { ApprovalAttachment } from "../types";
 
 // Android needs this opt-in for LayoutAnimation to run at all.
 if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -88,22 +89,9 @@ export default function ApprovalDetailsScreen() {
     openReject,
     closeDialog,
     submitDecision,
-  } = useApprovalDetails(params.requestNo, params.documentId, () => {
-    // The success dialog dismissed itself. Leave exactly the way the Done
-    // button does — otherwise waiting out the timer and tapping Done would
-    // land the approver in two different places.
-    showToast(
-      decisionRef.current === "approve"
-        ? "Payment approved."
-        : "Payment rejected and sent back to the creator.",
-      decisionRef.current === "approve" ? "success" : "info",
-    );
-    leaveAfterDecision();
-  });
-
-  // The callback above is created once, so it cannot close over `decision`
-  // directly — a ref keeps it reading the current value.
-  const decisionRef = useRef<ApprovalDecision>("approve");
+  } = useApprovalDetails(params.requestNo, params.documentId);
+  // The dialog no longer dismisses itself, so there is no auto-leave callback:
+  // navigation happens only when the approver taps Done (see handleDone).
 
   // Only one payment open at a time keeps the screen short.
   const [expandedPaymentId, setExpandedPaymentId] = useState<string | null>(null);
@@ -135,7 +123,13 @@ export default function ApprovalDetailsScreen() {
     if (!detail) return;
     router.push({
       pathname: "/(main)/payments/receive-payment",
-      params: { receiptId: String(detail.documentId) },
+      params: {
+        receiptId: String(detail.documentId),
+        // Back from the edit form returns to THIS detail screen, not to
+        // whatever the drawer last had — the same `from` contract the
+        // tracking list uses when it opens this page.
+        from: "approval/approval-details",
+      },
     } as never);
   }, [detail]);
 
@@ -160,19 +154,12 @@ export default function ApprovalDetailsScreen() {
    * anything else keeps the plain back-out to wherever it came from.
    */
   const handleDone = useCallback(() => {
+    // No toast. The dialog the approver just read already stated the outcome —
+    // including whether SAP accepted the posting — so a banner repeating it
+    // over the next screen adds nothing and covers the row they came to see.
     closeDialog();
-    showToast(
-      decision === "approve"
-        ? "Request approved successfully."
-        : "Request rejected.",
-      decision === "approve" ? "success" : "error",
-    );
     leaveAfterDecision();
-  }, [closeDialog, decision, leaveAfterDecision]);
-
-  useEffect(() => {
-    decisionRef.current = decision;
-  }, [decision]);
+  }, [closeDialog, leaveAfterDecision]);
 
   /**
    * Publish Edit into the navbar while THIS screen is focused, and withdraw it
@@ -263,6 +250,13 @@ export default function ApprovalDetailsScreen() {
 
           <GeneralInformationCard detail={detail} />
 
+          {/* ── SAP outcome ──
+              Same card, same position, as the deposit detail screen. Renders
+              nothing until a posting has been attempted, so a receipt still in
+              approval shows no empty SAP box. Only the outcome — the approval
+              ladder stays on View Progress. */}
+          <SapInfoCard doc={detail.sap} kind="payment" />
+
           {/* Same card as the create form, so the figures an approver checks
               are the ones the creator saw. Hidden for an advance, and for older
               receipts that stored no invoice figure. */}
@@ -337,7 +331,15 @@ export default function ApprovalDetailsScreen() {
           clearError();
           handleEdit();
         }}
-        onClose={clearError}
+        // Closing leaves for the tracking list, the same as Done on the
+        // success dialog. The approval DID land — only the SAP posting failed —
+        // so the entry has moved on and the stale detail page behind this
+        // dialog no longer reflects it. Editing is the one exception: that
+        // stays here and opens the form.
+        onClose={() => {
+          clearError();
+          leaveAfterDecision();
+        }}
       />
 
       <ApprovalLoadingDialog visible={stage === "loading"} decision={decision} />

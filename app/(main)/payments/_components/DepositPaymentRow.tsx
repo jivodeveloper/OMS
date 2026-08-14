@@ -86,6 +86,14 @@ export default function DepositPaymentRow({
             </Text>
           </View>
         </View>
+
+        {/* Cheque identity, so the employee can match the row to the physical
+            cheque before banking it. Cash rows have nothing to verify. */}
+        {payment.chequeDetail ? (
+          <Text style={styles.chequeDetail} numberOfLines={1}>
+            {payment.chequeDetail}
+          </Text>
+        ) : null}
       </View>
     </TouchableOpacity>
   );
@@ -142,6 +150,12 @@ const styles = StyleSheet.create({
   metaText: {
     fontSize: 11,
     color: COLORS.textSecondary,
+  },
+  chequeDetail: {
+    marginTop: 6,
+    fontSize: 11,
+    fontWeight: "600",
+    color: COLORS.primary,
   },
   metaDot: {
     fontSize: 11,

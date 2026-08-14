@@ -1,17 +1,21 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
+  TouchableOpacity,
   View,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
-import { router, useLocalSearchParams } from "expo-router";
+import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
+import { useIsFocused } from "@react-navigation/native";
 
+import { setHeaderEditHandler } from "@/src/utils/headerEdit";
 import ApprovalBottomBar from "@/src/features/approval/components/ApprovalBottomBar";
+import SapInfoCard from "@/src/features/payments/components/SapInfoCard";
 import ApproveDialog from "@/src/features/approval/components/dialogs/ApproveDialog";
 import RejectDialog from "@/src/features/approval/components/dialogs/RejectDialog";
 import ApprovalLoadingDialog from "@/src/features/approval/components/dialogs/ApprovalLoadingDialog";
@@ -73,6 +77,10 @@ export default function DepositDetailsScreen() {
   const id = Number(params.id);
 
   const [deposit, setDeposit] = useState<BankDeposit | null>(null);
+  // Receipt rows the reader has opened. Collapsed by default: a deposit can
+  // hold many receipts, and expanding them all would bury the summary the
+  // approver reads first.
+  const [expandedLines, setExpandedLines] = useState<Set<number>>(new Set());
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
@@ -192,19 +200,60 @@ export default function DepositDetailsScreen() {
     [deposit?.approval?.id, id],
   );
 
+  const isFocused = useIsFocused();
+
+  /** Open the Bank Deposit form in edit mode — same screen, prefilled. */
+  const handleEdit = useCallback(() => {
+    if (!deposit) return;
+    router.push({
+      pathname: "/(main)/payments/bank-deposit",
+      params: {
+        depositId: String(deposit.id),
+        // Back from the form returns to THIS page, not the drawer's last stop.
+        from: "payments/deposit-details",
+      },
+    } as never);
+  }, [deposit]);
+
+  /**
+   * Publish Edit into the navbar while THIS screen is focused, and withdraw it
+   * the moment it is not — the same contract the payment detail screen uses.
+   *
+   * Tied to focus rather than mount: pushing the edit form leaves this screen
+   * mounted underneath, so an unmount-only cleanup would leave the icon showing
+   * on the form itself.
+   */
+  const canEditRef = useRef(false);
+  const handleEditRef = useRef(handleEdit);
+  useFocusEffect(
+    useCallback(() => {
+      setHeaderEditHandler(canEditRef.current ? handleEditRef.current : null);
+      return () => setHeaderEditHandler(null);
+    }, []),
+  );
+  useEffect(() => {
+    canEditRef.current = !!deposit?.permissions?.can_edit;
+    handleEditRef.current = handleEdit;
+    if (isFocused) {
+      setHeaderEditHandler(
+        deposit?.permissions?.can_edit ? handleEdit : null,
+      );
+    }
+  }, [deposit?.permissions?.can_edit, handleEdit, isFocused]);
+
   const leaveAfterDecision = useCallback(() => {
+    // No toast. The dialog the approver just dismissed already stated the
+    // outcome — including whether SAP accepted the posting — so a banner
+    // repeating it over the tracking list adds nothing and covers the row they
+    // came to check.
     setStage("none");
-    showToast(
-      decision === "approve" ? "Deposit approved." : "Deposit rejected.",
-      decision === "approve" ? "success" : "info",
-    );
     // Land on the list with a refetch, so the row shows its NEW status rather
     // than the stale one the approver tapped.
     router.replace({
       pathname: "/(main)/payments/deposit-tracking",
       params: { refreshAt: String(Date.now()) },
     } as never);
-  }, [decision]);
+  }, []);
 
   if (loading) {
     return (
@@ -239,6 +288,29 @@ export default function DepositDetailsScreen() {
   );
 
   const canDecide = !!deposit.permissions?.can_decide;
+
+  // What is physically in this deposit, counted from the receipts rather than
+  // read off deposit_type. "MIXED" tells an approver nothing about what they
+  // are signing for; "2 cash · 1 cheque" tells them what to count.
+  const tenderCounts = (deposit.lines ?? []).reduce(
+    (acc, line) => {
+      for (const entry of line.methods ?? []) {
+        if (entry.method === "CASH") acc.cash += 1;
+        else if (entry.method === "CHEQUE") acc.cheque += 1;
+      }
+      return acc;
+    },
+    { cash: 0, cheque: 0 },
+  );
+  const tenderParts = [
+    tenderCounts.cash ? `${tenderCounts.cash} cash` : null,
+    tenderCounts.cheque ? `${tenderCounts.cheque} cheque` : null,
+  ].filter(Boolean);
+  // Falls back to the stored type when the lines carry no methods — an older
+  // deposit, or one whose receipts were removed.
+  const depositTypeLabel = tenderParts.length
+    ? tenderParts.join(" · ")
+    : deposit.deposit_type;
 
   return (
     <View style={styles.screen}>
@@ -321,7 +393,9 @@ export default function DepositDetailsScreen() {
           <Field
             icon="wallet-outline"
             label="Deposit Type"
-            value={deposit.deposit_type}
+            // "MIXED" alone tells an approver nothing about what they are
+            // signing for. The split says what is physically in the bag.
+            value={depositTypeLabel}
             tone="badge"
           />
         </View>
@@ -422,6 +496,13 @@ export default function DepositDetailsScreen() {
         ) : null}
       </View>
 
+      {/* ── SAP outcome ──
+          Only after a posting has been attempted; the card returns null
+          otherwise. Placed here, above the receipts, because "did it reach
+          SAP?" is the first question after approving — the answer used to
+          require opening View Progress. */}
+      <SapInfoCard doc={deposit} kind="deposit" style={styles.sapCard} />
+
       {/* ── Receipts banked — the deposit's answer to Payment Information ── */}
       {deposit.lines?.length ? (
         <View style={styles.card}>
@@ -434,31 +515,142 @@ export default function DepositDetailsScreen() {
             </Text>
           </View>
 
-          {deposit.lines.map((line, i) => (
-            <View
-              key={line.id}
-              style={[styles.lineRow, i > 0 && styles.lineRowBordered]}
-            >
-              <View style={styles.lineIcon}>
-                <Ionicons
-                  name="receipt-outline"
-                  size={ms(16)}
-                  color={COLORS.primary}
-                />
+          {deposit.lines.map((line, i) => {
+            const open = expandedLines.has(line.id);
+            const methods = line.methods ?? [];
+            // The tender badge on the collapsed row: an approver scanning the
+            // list needs to know which of these is the cheque before opening
+            // anything.
+            const tenders = Array.from(new Set(methods.map((m) => m.method)));
+            return (
+              <View key={line.id}>
+                <TouchableOpacity
+                  style={[styles.lineRow, i > 0 && styles.lineRowBordered]}
+                  activeOpacity={0.7}
+                  onPress={() =>
+                    setExpandedLines((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(line.id)) next.delete(line.id);
+                      else next.add(line.id);
+                      return next;
+                    })
+                  }
+                  accessibilityRole="button"
+                  accessibilityState={{ expanded: open }}
+                  accessibilityLabel={`${line.receipt_no}, ${
+                    line.card_name || "unknown party"
+                  }, ${money(line.amount)}. ${open ? "Collapse" : "Expand"} details.`}
+                >
+                  <View style={styles.lineIcon}>
+                    <Ionicons
+                      name="receipt-outline"
+                      size={ms(16)}
+                      color={COLORS.primary}
+                    />
+                  </View>
+                  <View style={styles.lineText}>
+                    <Text style={styles.lineNo} numberOfLines={1}>
+                      {line.receipt_no}
+                    </Text>
+                    <Text style={styles.lineParty} numberOfLines={1}>
+                      {line.card_name || "—"}
+                    </Text>
+                    {tenders.length ? (
+                      <View style={styles.tenderRow}>
+                        {tenders.map((t) => (
+                          <View key={t} style={styles.tenderChip}>
+                            <Text style={styles.tenderChipText}>{t}</Text>
+                          </View>
+                        ))}
+                      </View>
+                    ) : null}
+                  </View>
+                  <View style={styles.lineRight}>
+                    <Text style={styles.lineAmount} numberOfLines={1}>
+                      {money(line.amount)}
+                    </Text>
+                    <Ionicons
+                      name={open ? "chevron-up" : "chevron-down"}
+                      size={ms(15)}
+                      color={COLORS.textMuted}
+                    />
+                  </View>
+                </TouchableOpacity>
+
+                {open ? (
+                  <View style={styles.lineDetail}>
+                    <DetailRow label="Party code" value={line.card_code} />
+                    <DetailRow
+                      label="Received on"
+                      value={line.payment_date}
+                    />
+                    <DetailRow
+                      label="Collected by"
+                      value={line.collected_by}
+                    />
+                    <DetailRow
+                      label="Receipt total"
+                      value={
+                        line.receipt_total ? money(line.receipt_total) : ""
+                      }
+                    />
+                    <DetailRow
+                      label="Receipt status"
+                      value={STATUS_LABEL[line.receipt_status] ?? line.receipt_status}
+                    />
+                    <DetailRow label="Remarks" value={line.receipt_remarks} />
+
+                    {/* One block per tender. A cheque carries the number, the
+                        payer's bank and its date — what the approver checks
+                        against the paper in front of them. */}
+                    {methods.map((m) => (
+                      <View key={m.id} style={styles.methodBlock}>
+                        <View style={styles.methodHead}>
+                          <Ionicons
+                            name={
+                              m.method === "CASH"
+                                ? "cash-outline"
+                                : m.method === "CHEQUE"
+                                  ? "document-text-outline"
+                                  : "phone-portrait-outline"
+                            }
+                            size={ms(13)}
+                            color={COLORS.primary}
+                          />
+                          <Text style={styles.methodName}>{m.method}</Text>
+                          <Text style={styles.methodAmount}>
+                            {money(m.amount)}
+                          </Text>
+                        </View>
+                        {m.method === "CHEQUE" ? (
+                          <>
+                            <DetailRow
+                              label="Cheque no."
+                              value={m.cheque_number}
+                            />
+                            <DetailRow
+                              label="Cheque bank"
+                              value={m.bank_name}
+                            />
+                            <DetailRow
+                              label="Cheque date"
+                              value={m.cheque_date ?? ""}
+                            />
+                          </>
+                        ) : null}
+                        {m.method === "UPI" ? (
+                          <DetailRow
+                            label="Reference"
+                            value={m.upi_reference}
+                          />
+                        ) : null}
+                      </View>
+                    ))}
+                  </View>
+                ) : null}
               </View>
-              <View style={styles.lineText}>
-                <Text style={styles.lineNo} numberOfLines={1}>
-                  {line.receipt_no}
-                </Text>
-                <Text style={styles.lineParty} numberOfLines={1}>
-                  {line.card_name || "—"}
-                </Text>
-              </View>
-              <Text style={styles.lineAmount} numberOfLines={1}>
-                {money(line.amount)}
-              </Text>
-            </View>
-          ))}
+            );
+          })}
         </View>
       ) : null}
       </ScrollView>
@@ -527,6 +719,26 @@ export default function DepositDetailsScreen() {
 }
 
 /** One icon + label + value cell. `full` spans both columns. */
+/**
+ * One label/value line inside an expanded receipt.
+ *
+ * Renders nothing when the value is empty rather than showing "—": an expanded
+ * receipt already has many rows, and a column of dashes reads as missing data
+ * when it usually just means "not applicable to this tender".
+ */
+function DetailRow({ label, value }: { label: string; value?: string | null }) {
+  const text = (value ?? "").toString().trim();
+  if (!text) return null;
+  return (
+    <View style={styles.detailRow}>
+      <Text style={styles.detailLabel}>{label}</Text>
+      <Text style={styles.detailValue} numberOfLines={3}>
+        {text}
+      </Text>
+    </View>
+  );
+}
+
 function Field({
   icon,
   label,
@@ -629,6 +841,8 @@ const styles = StyleSheet.create({
   },
   bankGl: { color: "#DBEAFE", fontSize: fs(12), fontWeight: "600" },
 
+  // Same gutter as `card` — SapInfoCard brings no outer margin of its own.
+  sapCard: { marginHorizontal: sp(14) },
   card: {
     backgroundColor: COLORS.surface,
     borderRadius: sp(16),
@@ -787,4 +1001,58 @@ const styles = StyleSheet.create({
     color: COLORS.text,
     flexShrink: 0,
   },
+
+  // ── Expandable receipt detail ──────────────────────────────────────────
+  lineRight: { flexDirection: "row", alignItems: "center", gap: sp(6), flexShrink: 0 },
+  tenderRow: { flexDirection: "row", gap: sp(4), marginTop: sp(4) },
+  tenderChip: {
+    paddingHorizontal: sp(6),
+    paddingVertical: sp(1),
+    borderRadius: sp(4),
+    backgroundColor: COLORS.primary + "14",
+  },
+  tenderChipText: {
+    fontSize: fs(9),
+    fontWeight: "800",
+    color: COLORS.primary,
+    letterSpacing: 0.3,
+  },
+  // Indented and tinted so an open receipt reads as belonging to the row above
+  // it rather than as another row in the list.
+  lineDetail: {
+    marginLeft: sp(30),
+    marginBottom: sp(8),
+    paddingHorizontal: sp(10),
+    paddingVertical: sp(8),
+    borderRadius: sp(8),
+    backgroundColor: COLORS.background,
+  },
+  detailRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    gap: sp(10),
+    paddingVertical: sp(3),
+  },
+  detailLabel: { fontSize: fs(11), color: COLORS.textMuted, flexShrink: 0 },
+  detailValue: {
+    fontSize: fs(11.5),
+    color: COLORS.text,
+    fontWeight: "600",
+    flex: 1,
+    textAlign: "right",
+  },
+  methodBlock: {
+    marginTop: sp(8),
+    paddingTop: sp(8),
+    borderTopWidth: 1,
+    borderTopColor: COLORS.borderLight,
+  },
+  methodHead: { flexDirection: "row", alignItems: "center", gap: sp(6) },
+  methodName: {
+    fontSize: fs(11),
+    fontWeight: "800",
+    color: COLORS.primary,
+    flex: 1,
+  },
+  methodAmount: { fontSize: fs(11.5), fontWeight: "800", color: COLORS.text },
 });

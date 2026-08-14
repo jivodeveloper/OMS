@@ -17,12 +17,21 @@ import { router, useFocusEffect } from "expo-router";
 import { Swipeable } from "react-native-gesture-handler";
 import { useAuth } from "@/src/context/AuthContext";
 import { OrderNotification, orderService } from "@/src/services/order.service";
+import {
+  FrameworkNotification,
+  frameworkNotificationService,
+} from "@/src/services/frameworkNotification.service";
+import { resolveNotificationRoute } from "@/src/utils/notificationRouting";
 import { storage } from "@/src/utils/storage";
 import { COLORS, GRADIENTS, RADIUS, SHADOWS, SPACING } from "@/src/constants/theme";
 import { refreshNotifications } from "@/src/cache";
 
 type NotificationFilter = "all" | "unread" | "read";
 type DateGroup = "Today" | "Yesterday" | "Older";
+// Which backend a card came from — drives read/mark-read + navigation routing.
+type NotificationSource = "orders" | "framework";
+// Coarse module for the optional module filter.
+type NotificationModule = "orders" | "payments" | "deposits" | "other";
 
 type NotificationMeta = {
   title: string;
@@ -32,7 +41,11 @@ type NotificationMeta = {
 };
 
 type NotificationCard = {
+  // Unique across both feeds (ids can collide between the two tables).
+  key: string;
   id: number;
+  source: NotificationSource;
+  module: NotificationModule;
   message: string;
   title: string;
   icon: keyof typeof Ionicons.glyphMap;
@@ -40,8 +53,13 @@ type NotificationCard = {
   iconBg: string;
   timeLabel: string;
   dateGroup: DateGroup;
+  createdAt: string;
   read: boolean;
+  // Orders navigation.
   orderId: number | null;
+  // Generic framework navigation.
+  entityType: string | null;
+  entityId: number | null;
 };
 
 const normalizeText = (value: string | null | undefined) =>
@@ -112,7 +130,10 @@ const formatNotificationTime = (value: string): string => {
 const toNotificationCard = (item: OrderNotification): NotificationCard => {
   const meta = getNotificationMeta(item.message);
   return {
+    key: `orders:${item.id}`,
     id: item.id,
+    source: "orders",
+    module: "orders",
     message: item.message,
     title: meta.title,
     icon: meta.icon,
@@ -120,10 +141,58 @@ const toNotificationCard = (item: OrderNotification): NotificationCard => {
     iconBg: meta.iconBg,
     timeLabel: formatNotificationTime(item.created_at),
     dateGroup: getDateGroup(item.created_at),
+    createdAt: item.created_at,
     read: item.is_read,
     orderId: item.order_id || null,
+    entityType: null,
+    entityId: null,
   };
 };
+
+// Title/icon/colour for a framework (Payment/Deposit) notification. The backend
+// already sends a business `title`, so prefer it; fall back to message parsing.
+const getFrameworkMeta = (item: FrameworkNotification): NotificationMeta => {
+  const e = normalizeText(item.event_type);
+  if (e.includes("reject"))
+    return { title: item.title || "Rejected", icon: "close-circle", color: "#EF4444", iconBg: "#FEECEC" };
+  if (e.includes("approved"))
+    return { title: item.title || "Approved", icon: "checkmark-circle", color: "#16A34A", iconBg: "#E7F8ED" };
+  if (item.module === "deposits")
+    return { title: item.title || "Deposit update", icon: "wallet-outline", color: "#0EA5E9", iconBg: "#E0F2FE" };
+  return { title: item.title || "Payment update", icon: "cash-outline", color: "#7C3AED", iconBg: "#F1E9FF" };
+};
+
+const toFrameworkCard = (item: FrameworkNotification): NotificationCard => {
+  const meta = getFrameworkMeta(item);
+  const mod: NotificationModule =
+    item.module === "payments" || item.module === "deposits" ? item.module : "other";
+  return {
+    key: `framework:${item.id}`,
+    id: item.id,
+    source: "framework",
+    module: mod,
+    message: item.message,
+    title: meta.title,
+    icon: meta.icon,
+    color: meta.color,
+    iconBg: meta.iconBg,
+    timeLabel: formatNotificationTime(item.created_at),
+    dateGroup: getDateGroup(item.created_at),
+    createdAt: item.created_at,
+    read: item.is_read,
+    orderId: null,
+    entityType: item.entity_type,
+    entityId: item.entity_id,
+  };
+};
+
+// The module filter row is shown ONLY when the user's inbox spans >1 module.
+const MODULE_FILTERS: { key: NotificationModule | "all"; label: string }[] = [
+  { key: "all", label: "All modules" },
+  { key: "orders", label: "Orders" },
+  { key: "payments", label: "Payments" },
+  { key: "deposits", label: "Deposits" },
+];
 
 const GROUP_ORDER: DateGroup[] = ["Today", "Yesterday", "Older"];
 
@@ -149,9 +218,10 @@ export default function NotificationsScreen() {
   }, []);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [activeNotificationId, setActiveNotificationId] = useState<number | null>(null);
+  const [activeNotificationKey, setActiveNotificationKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notifications, setNotifications] = useState<NotificationCard[]>([]);
+  const [moduleFilter, setModuleFilter] = useState<NotificationModule | "all">("all");
 
   const loadNotifications = useCallback(
     async (mode: "initial" | "refresh" | "silent" = "initial") => {
@@ -160,11 +230,32 @@ export default function NotificationsScreen() {
         else if (mode === "initial") setLoading(true);
 
         setError(null);
-        const response = await orderService.getNotifications();
-        const hidden = new Set(await storage.getHiddenNotificationIds());
-        setNotifications(
-          response.filter((item) => !hidden.has(item.id)).map(toNotificationCard),
-        );
+        // Both feeds are user-scoped server-side. Either can fail independently
+        // (e.g. a role with no framework access) — a failed feed must not blank
+        // the other, so settle both and keep whatever succeeded.
+        const [ordersRes, frameworkRes] = await Promise.allSettled([
+          orderService.getNotifications(),
+          frameworkNotificationService.getNotifications(),
+        ]);
+
+        const cards: NotificationCard[] = [];
+        if (ordersRes.status === "fulfilled") {
+          cards.push(...ordersRes.value.map(toNotificationCard));
+        }
+        if (frameworkRes.status === "fulfilled") {
+          cards.push(...frameworkRes.value.map(toFrameworkCard));
+        }
+        if (ordersRes.status === "rejected" && frameworkRes.status === "rejected") {
+          throw ordersRes.reason instanceof Error
+            ? ordersRes.reason
+            : new Error("Failed to load notifications.");
+        }
+
+        const hidden = new Set(await storage.getHiddenNotificationKeys());
+        const merged = cards
+          .filter((c) => !hidden.has(c.key))
+          .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1)); // newest first
+        setNotifications(merged);
       } catch (loadError) {
         console.log("Error loading notifications:", loadError);
         setError(
@@ -207,11 +298,33 @@ export default function NotificationsScreen() {
     [notifications],
   );
 
+  // Which modules this user's inbox actually spans. The module filter is shown
+  // ONLY when there is more than one — a single-module user needs no filter.
+  const availableModules = useMemo(() => {
+    const set = new Set<NotificationModule>();
+    notifications.forEach((n) => set.add(n.module));
+    return set;
+  }, [notifications]);
+  const showModuleFilter = availableModules.size > 1;
+
+  // If the active module filter no longer applies (e.g. its rows were cleared),
+  // fall back to "all" so the list can never look empty for the wrong reason.
+  useEffect(() => {
+    if (
+      moduleFilter !== "all" &&
+      !availableModules.has(moduleFilter as NotificationModule)
+    ) {
+      setModuleFilter("all");
+    }
+  }, [availableModules, moduleFilter]);
+
   const visibleNotifications = useMemo(() => {
-    if (filter === "unread") return notifications.filter((n) => !n.read);
-    if (filter === "read") return notifications.filter((n) => n.read);
-    return notifications;
-  }, [filter, notifications]);
+    let list = notifications;
+    if (moduleFilter !== "all") list = list.filter((n) => n.module === moduleFilter);
+    if (filter === "unread") return list.filter((n) => !n.read);
+    if (filter === "read") return list.filter((n) => n.read);
+    return list;
+  }, [filter, moduleFilter, notifications]);
 
   const sections = useMemo(() => {
     const groups: Record<DateGroup, NotificationCard[]> = {
@@ -231,10 +344,10 @@ export default function NotificationsScreen() {
     if (userRole === "admin") router.replace("/dashboard" as never);
   }, [userRole]);
 
-  const dismissNotification = useCallback(async (id: number) => {
+  const dismissNotification = useCallback(async (card: NotificationCard) => {
     try {
-      await storage.addHiddenNotificationIds([id]);
-      setNotifications((cur) => cur.filter((n) => n.id !== id));
+      await storage.addHiddenNotificationKeys([card.key]);
+      setNotifications((cur) => cur.filter((n) => n.key !== card.key));
     } catch (e) {
       console.log("Error hiding notification:", e);
     }
@@ -242,7 +355,7 @@ export default function NotificationsScreen() {
 
   const clearAllNotifications = useCallback(async () => {
     try {
-      await storage.addHiddenNotificationIds(notifications.map((n) => n.id));
+      await storage.addHiddenNotificationKeys(notifications.map((n) => n.key));
       setNotifications([]);
     } catch (e) {
       console.log("Error clearing notifications:", e);
@@ -252,14 +365,17 @@ export default function NotificationsScreen() {
   const markAllRead = useCallback(async () => {
     const unread = notifications.filter((n) => !n.read);
     if (unread.length === 0) return;
+    const hasOrders = unread.some((n) => n.source === "orders");
+    const hasFramework = unread.some((n) => n.source === "framework");
     // Optimistic: flip everything to read, then persist in the background.
     setNotifications((cur) => cur.map((n) => ({ ...n, read: true })));
     try {
-      // One request instead of one PATCH per unread row. The endpoint marks
-      // every unread notification for the caller server-side, so it is also
-      // more correct than the old fan-out: that only covered the rows this
-      // screen had loaded, leaving anything older still unread.
-      await orderService.markAllNotificationsRead();
+      // One request per feed that actually has unread rows. Each endpoint marks
+      // every unread notification for the caller server-side.
+      await Promise.all([
+        hasOrders ? orderService.markAllNotificationsRead() : Promise.resolve(),
+        hasFramework ? frameworkNotificationService.markAllRead() : Promise.resolve(),
+      ]);
     } catch (e) {
       console.log("Error marking all read:", e);
       // Re-sync from the server so the optimistic flip cannot leave the UI
@@ -273,23 +389,34 @@ export default function NotificationsScreen() {
     try {
       setError(null);
       if (!item.read) {
-        setActiveNotificationId(item.id);
-        await orderService.markNotificationRead(item.id);
+        setActiveNotificationKey(item.key);
+        // Mark read on the feed the card belongs to.
+        if (item.source === "orders") {
+          await orderService.markNotificationRead(item.id);
+        } else {
+          await frameworkNotificationService.markRead(item.id);
+        }
         setNotifications((cur) =>
-          cur.map((n) => (n.id === item.id ? { ...n, read: true } : n)),
+          cur.map((n) => (n.key === item.key ? { ...n, read: true } : n)),
         );
       }
-      if (item.orderId) {
-        router.push({
-          pathname: "/orders/orderdetails",
-          params: { orderId: String(item.orderId), from: "notifications" },
-        });
-      }
+      // Route through the SAME generic resolver the push deep-link uses, so a
+      // tapped Order opens the order, and a Payment/Deposit opens its detail
+      // screen via (entity_type, entity_id).
+      const route = resolveNotificationRoute(
+        {
+          order_id: item.orderId,
+          entity_type: item.entityType,
+          entity_id: item.entityId,
+        },
+        "notifications",
+      );
+      if (route) router.push(route);
     } catch (e) {
       console.log("Error opening notification:", e);
       setError(e instanceof Error ? e.message : "Failed to update notification.");
     } finally {
-      setActiveNotificationId(null);
+      setActiveNotificationKey(null);
     }
   }, []);
 
@@ -397,6 +524,34 @@ export default function NotificationsScreen() {
         </View>
       </View>
 
+      {/* Module filter — shown ONLY when the inbox spans more than one module
+          (e.g. a user with Orders + Payments + Deposits notifications). A
+          single-module user never sees it. */}
+      {showModuleFilter ? (
+        <View style={styles.moduleRow}>
+          {MODULE_FILTERS.filter(
+            (m) => m.key === "all" || availableModules.has(m.key as NotificationModule),
+          ).map((m) => {
+            const active = moduleFilter === m.key;
+            return (
+              <TouchableOpacity
+                key={m.key}
+                activeOpacity={0.85}
+                onPress={() => setModuleFilter(m.key)}
+                style={[styles.moduleChip, active && styles.moduleChipActive]}
+              >
+                <Text
+                  style={[styles.moduleChipText, active && styles.moduleChipTextActive]}
+                  numberOfLines={1}
+                >
+                  {m.label}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      ) : null}
+
       {/* Error banner (dismissible) */}
       {error ? (
         <View style={styles.errorBanner}>
@@ -414,14 +569,14 @@ export default function NotificationsScreen() {
   );
 
   const renderCard = (item: NotificationCard) => {
-    const isUpdating = activeNotificationId === item.id;
+    const isUpdating = activeNotificationKey === item.key;
     return (
       <Swipeable
         overshootRight={false}
         rightThreshold={40}
         renderRightActions={() => (
           <TouchableOpacity
-            onPress={() => dismissNotification(item.id)}
+            onPress={() => dismissNotification(item)}
             activeOpacity={0.85}
             style={styles.deleteAction}
           >
@@ -476,7 +631,7 @@ export default function NotificationsScreen() {
     <View style={styles.container}>
       <SectionList
         sections={sections}
-        keyExtractor={(item) => String(item.id)}
+        keyExtractor={(item) => item.key}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.contentContainer}
         stickySectionHeadersEnabled={false}
@@ -648,6 +803,26 @@ const styles = StyleSheet.create({
     gap: 8,
     zIndex: 20,
   },
+  // Module filter chips (only rendered when the inbox spans >1 module).
+  moduleRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  moduleChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: RADIUS.full,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.surface,
+  },
+  moduleChipActive: {
+    backgroundColor: COLORS.primary,
+    borderColor: COLORS.primary,
+  },
+  moduleChipText: { fontSize: 12.5, fontWeight: "700", color: COLORS.textSecondary },
+  moduleChipTextActive: { color: "#fff" },
   // Filter dropdown (All / Unread / Read) — fixed size so it never resizes.
   filterDropdownWrap: { width: 120, position: "relative", zIndex: 20 },
   filterTrigger: {

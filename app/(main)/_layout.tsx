@@ -16,6 +16,7 @@ import { useAuth } from "@/src/context/AuthContext";
 import { COLORS, RADIUS } from "@/src/constants/theme";
 import { orderService } from "@/src/services/order.service";
 import { notificationService } from "@/src/services/notification.service";
+import { frameworkNotificationService } from "@/src/services/frameworkNotification.service";
 import { storage } from "@/src/utils/storage";
 import {
   canAccessScreen,
@@ -58,14 +59,28 @@ export default function MainLayout() {
     }
 
     try {
-      const notifications = await orderService.getNotifications();
-      const hiddenNotificationIds = await storage.getHiddenNotificationIds();
-      const hiddenNotificationIdSet = new Set(hiddenNotificationIds);
-      setUnreadNotificationCount(
-        notifications.filter(
-          (item) => !item.is_read && !hiddenNotificationIdSet.has(item.id),
-        ).length,
-      );
+      // Count unread across BOTH feeds (Orders + framework). Either can fail
+      // independently without zeroing the badge. The inbox dismisses cards by
+      // key, so honour both the legacy id set and the key set here.
+      const [ordersRes, frameworkRes, hiddenIds, hiddenKeys] =
+        await Promise.all([
+          orderService.getNotifications().catch(() => []),
+          frameworkNotificationService.getNotifications().catch(() => []),
+          storage.getHiddenNotificationIds(),
+          storage.getHiddenNotificationKeys(),
+        ]);
+      const hiddenIdSet = new Set(hiddenIds);
+      const hiddenKeySet = new Set(hiddenKeys);
+      const ordersUnread = ordersRes.filter(
+        (item) =>
+          !item.is_read &&
+          !hiddenIdSet.has(item.id) &&
+          !hiddenKeySet.has(`orders:${item.id}`),
+      ).length;
+      const frameworkUnread = frameworkRes.filter(
+        (item) => !item.is_read && !hiddenKeySet.has(`framework:${item.id}`),
+      ).length;
+      setUnreadNotificationCount(ordersUnread + frameworkUnread);
     } catch (error) {
       console.log("Error loading unread notification count:", error);
     }
@@ -351,7 +366,6 @@ export default function MainLayout() {
             route.name === "payments/tracking-details" ||
             route.name === "payments/deposit-details" ||
             route.name === "payments/tracking-progress" ||
-            route.name === "approval/payment-requests" ||
             route.name === "approval/approval-details";
           // Approval Details carries an Edit action next to the bell.
           const isApprovalDetails = route.name === "approval/approval-details";
@@ -616,17 +630,12 @@ export default function MainLayout() {
               : hiddenStyle,
           }}
         />
-        {/* Payment Requests is retired: Payment Tracking now serves approvers
-            and creators from one screen, deciding scope and the "View Details"
-            destination from the caller's action permissions. The route file is
-            kept so an old deep link still resolves, but it is never listed. */}
-        <Drawer.Screen
-          name="approval/payment-requests"
-          options={{
-            title: "Payment Requests",
-            drawerItemStyle: hiddenStyle,
-          }}
-        />
+        {/* Payment Requests has been REMOVED. The tracking screens serve
+            approvers and creators alike, scoping themselves from the caller's
+            action permissions — and keeping the retired route registered was
+            actively harmful: resolveWorkQueueRoute sent deposit approvers
+            there instead of to Deposit Tracking, so they had no way to reach
+            their deposits at all. */}
         <Drawer.Screen
           name="approval/approval-details"
           options={{

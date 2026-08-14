@@ -11,7 +11,7 @@ import {
   View,
 } from "react-native";
 import { Button, Surface, TextInput } from "react-native-paper";
-import { router } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import DateTimePicker from "@react-native-community/datetimepicker";
@@ -54,6 +54,22 @@ if (
 
 /** Permission gate — the screen only mounts for users who may open it. */
 export default function BankDepositRoute() {
+  const { depositId } = useLocalSearchParams<{ depositId?: string }>();
+
+  /**
+   * CREATING is gated by the page grant; EDITING is not — the same split the
+   * payment form makes.
+   *
+   * They are different rights. An approver may correct a deposit sitting in
+   * their queue (that is how a SAP rejection gets fixed) but must not be able
+   * to raise a new one. Guarding both with the one key would lock approvers
+   * out of the very correction they are there to make.
+   *
+   * Editing is authorised per-document by the server (`permissions.can_edit`),
+   * and PATCH re-checks it, so there is a real boundary here rather than none.
+   */
+  if (depositId) return <BankDepositScreen />;
+
   return (
     <ScreenGuard screen="payments/bank-deposit">
       <BankDepositScreen />
@@ -62,6 +78,23 @@ export default function BankDepositRoute() {
 }
 
 function BankDepositScreen() {
+  /**
+   * One screen, two jobs. With `depositId` it loads that deposit, prefills
+   * every field and saves with PATCH; without it, it creates. Sharing the
+   * screen means the edit form can never drift from the create form.
+   */
+  const params = useLocalSearchParams<{ depositId?: string }>();
+  const editingId = Number(params.depositId) || null;
+  const isEdit = editingId != null;
+  const [loadingExisting, setLoadingExisting] = useState(isEdit);
+  /**
+   * Whether this editor may put the deposit back into the chain.
+   *
+   * Server-decided (`permissions.can_resubmit`): only the creator resubmits,
+   * and only when no approval chain is open.
+   */
+  const [canResubmit, setCanResubmit] = useState(false);
+
   const [company, setCompany] = useState<string | null>(null);
   // Today, not a baked-in date — a hardcoded one silently backdates every
   // deposit made after it.
@@ -109,6 +142,45 @@ function BankDepositScreen() {
     note?: string;
   } | null>(null);
 
+  /**
+   * Prefill from the deposit being edited.
+   *
+   * Runs once per id. The receipt picker is left COLLAPSED afterwards: the
+   * banked receipts are already chosen, and opening the list would invite an
+   * accidental change to a selection the editor did not come to touch.
+   */
+  useEffect(() => {
+    if (!editingId) return;
+    let alive = true;
+    (async () => {
+      try {
+        const d = await paymentsService.getDeposit(editingId);
+        if (!alive) return;
+        setCompany(d.company);
+        setDepositDate(d.deposit_date);
+        setDepositedBy(d.deposited_by != null ? String(d.deposited_by) : null);
+        setBankAccount(d.bank_key || null);
+        setDepositType((d.deposit_type || "").toLowerCase() || null);
+        setRemarks(d.remarks || "");
+        setDepositAmount(String(d.deposit_amount ?? ""));
+        // The figure was typed once already; treat it as authored so the
+        // auto-fill from the selection does not overwrite it.
+        setDepositTouched(true);
+        setShortfallReason(d.shortfall_reason || "");
+        setSelectedIds((d.lines ?? []).map((l) => String(l.receipt)));
+        setCanResubmit(!!d.permissions?.can_resubmit);
+        setListExpanded(false);
+      } catch {
+        appAlert("Could not load", "This deposit could not be opened for editing.");
+      } finally {
+        if (alive) setLoadingExisting(false);
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [editingId]);
+
   // ── Live master data ──────────────────────────────────────────────────
   const companies = useCompanies();
   const selectedCompany = (company as Company | null) ?? null;
@@ -135,7 +207,9 @@ function BankDepositScreen() {
     let active = true;
     setPaymentsLoading(true);
     paymentsService
-      .getDepositableReceipts(selectedCompany)
+      // On an edit, ask for this deposit's own receipts too — they are banked
+      // HERE, so the plain list leaves them out and the selection vanishes.
+      .getDepositableReceipts(selectedCompany, editingId)
       .then((rows) => {
         if (!active) return;
         setPayments(rows);
@@ -152,7 +226,7 @@ function BankDepositScreen() {
     return () => {
       active = false;
     };
-  }, [selectedCompany, receiptsRefreshKey]);
+  }, [selectedCompany, receiptsRefreshKey, editingId]);
 
   // Party filter options are derived from what actually loaded, so the list can
   // never offer a party with no depositable payments.
@@ -197,6 +271,33 @@ function BankDepositScreen() {
     selectedIds.includes(String(payment.id)),
   );
 
+  /**
+   * "CHQ 1470 · ICICI · 13-08-2026" for a receipt's cheque lines, or undefined
+   * when it has none.
+   *
+   * The employee is holding the physical cheque while they tick this row, so
+   * the number and bank are what let them confirm they have the right one.
+   * Several cheques on one receipt are joined, since all of them are being
+   * handed over together.
+   */
+  const chequeDetailFor = (
+    receipt: DepositableReceipt,
+  ): string | undefined => {
+    const parts = (receipt.methods ?? [])
+      .filter((m) => m.method === "CHEQUE")
+      .map((m) =>
+        [
+          m.cheque_number ? `CHQ ${m.cheque_number}` : null,
+          m.bank_name || null,
+          m.cheque_date || null,
+        ]
+          .filter(Boolean)
+          .join(" · "),
+      )
+      .filter((text) => text.length > 0);
+    return parts.length ? parts.join("  |  ") : undefined;
+  };
+
   /** Sum one payment method across a receipt's lines — a receipt can mix them. */
   const sumMethod = (receipt: DepositableReceipt, kind: "CASH" | "CHEQUE") =>
     (receipt.methods ?? [])
@@ -229,6 +330,7 @@ function BankDepositScreen() {
       // figure disagree on a mixed-method receipt.
       amount: cash + cheque,
       status: "pending",
+      chequeDetail: chequeDetailFor(receipt),
     };
   };
 
@@ -375,7 +477,7 @@ function BankDepositScreen() {
     if (submitBlocked) return;
     setSaving(true);
     try {
-      const deposit = await paymentsService.createDeposit({
+      const payload = {
         company: selectedCompany as Company,
         deposit_date: depositDate,
         deposited_by: depositedBy ? Number(depositedBy) : null,
@@ -389,7 +491,13 @@ function BankDepositScreen() {
         shortfall_reason: isShort ? shortfallReason.trim() : "",
         remarks,
         receipt_ids: selectedIds.map((id) => Number(id)),
-      });
+      };
+      // PATCH keeps the deposit number and its place in the chain; POST mints
+      // a new one. Correcting a SAP failure must never create a second
+      // document for the same physical hand-over.
+      const deposit = isEdit
+        ? await paymentsService.updateDeposit(editingId as number, payload)
+        : await paymentsService.createDeposit(payload);
 
       // Upload BEFORE submitting. Once the deposit enters the approval chain
       // an approver may open it immediately, and proof that arrives after they
@@ -412,14 +520,25 @@ function BankDepositScreen() {
         }
       }
 
-      try {
-        await paymentsService.submitDeposit(deposit.id);
-      } catch (err) {
-        appAlert(
-          "Saved as draft",
-          `${deposit.deposit_no ?? "The deposit"} was created but could not be submitted: ${messageFrom(err)}. Submit it again from the deposits list.`,
-        );
-        return;
+      /**
+       * Only the CREATOR resubmits, and only when no chain is open.
+       *
+       * An approver editing a deposit parked at their rung is correcting it in
+       * place — it is already in the chain, with them — so submitting again
+       * would restart a ladder they are standing on. `can_resubmit` is decided
+       * by the server for exactly this reason.
+       */
+      const needsSubmit = !isEdit || canResubmit;
+      if (needsSubmit) {
+        try {
+          await paymentsService.submitDeposit(deposit.id);
+        } catch (err) {
+          appAlert(
+            "Saved as draft",
+            `${deposit.deposit_no ?? "The deposit"} was saved but could not be submitted: ${messageFrom(err)}. Submit it again from the deposits list.`,
+          );
+          return;
+        }
       }
 
       const now = new Date();
@@ -523,9 +642,13 @@ function BankDepositScreen() {
           automaticallyAdjustKeyboardInsets
         >
           <View style={styles.intro}>
-            <Text style={styles.introTitle}>Bank Deposit</Text>
+            <Text style={styles.introTitle}>
+              {isEdit ? "Update Bank Deposit" : "Bank Deposit"}
+            </Text>
             <Text style={styles.introSubtitle}>
-              Deposit collected payments into a company bank account.
+              {isEdit
+                ? "Correct this deposit and send it for approval again."
+                : "Deposit collected payments into a company bank account."}
             </Text>
           </View>
 
@@ -1143,7 +1266,13 @@ function BankDepositScreen() {
             textColor={COLORS.textLight}
             icon="bank-transfer-in"
           >
-            {saving ? "Depositing..." : "Deposit to Bank"}
+            {isEdit
+              ? saving
+                ? "Updating..."
+                : "Update"
+              : saving
+                ? "Depositing..."
+                : "Deposit to Bank"}
           </Button>
         </View>
       </KeyboardAvoidingView>

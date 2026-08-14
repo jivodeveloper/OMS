@@ -13,7 +13,6 @@ import type {
 } from "../types";
 
 /** How long the success dialog stays up before it closes itself. */
-const SUCCESS_DWELL_MS = 1400;
 
 interface UseApprovalDetailsResult {
   /** True when the last decision completed the chain and went to SAP. */
@@ -216,6 +215,17 @@ function toApprovalDetail(receipt: PaymentReceipt): ApprovalDetail {
     paymentType: paymentTypeLabel(receipt.methods),
     amount: money(receipt.total_amount),
     remarks: receipt.remarks || "",
+    // Carried through verbatim for the SAP Information card. Note this uses
+    // the RECEIPT's status, not the approval's: a receipt can be fully
+    // approved and still have failed to post, and the card reports the posting.
+    sap: {
+      status: receipt.status,
+      sap_doc_entry: receipt.sap_doc_entry ?? null,
+      sap_doc_num: receipt.sap_doc_num ?? null,
+      sap_trans_id: receipt.sap_trans_id ?? null,
+      sap_posted_at: receipt.sap_posted_at ?? null,
+      sap_response: receipt.sap_response || "",
+    },
     payments,
     attachments,
     canDecide: receipt.permissions?.can_decide ?? false,
@@ -259,8 +269,9 @@ export function useApprovalDetails(
   requestNo?: string,
   /** PaymentReceipt id. Without it the screen cannot load anything. */
   documentId?: string | number,
-  /** Called once a decision has landed, so the screen can navigate away. */
-  onDecided?: () => void,
+  // NOTE: the former `onDecided` callback was removed with the auto-dismiss
+  // timer. Nothing navigates on its own any more — the success dialog waits
+  // for Done, and the screen's own handler does the leaving.
 ): UseApprovalDetailsResult {
   const [detail, setDetail] = useState<ApprovalDetail | null>(null);
   const [approvalId, setApprovalId] = useState<number | null>(null);
@@ -272,7 +283,6 @@ export function useApprovalDetails(
   const [isFinal, setIsFinal] = useState(false);
   const [decision, setDecision] = useState<ApprovalDecision>("approve");
 
-  const decisionTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const alive = useRef(true);
 
   const load = useCallback(
@@ -323,14 +333,6 @@ export function useApprovalDetails(
       alive.current = false;
     };
   }, [load]);
-
-  // A pending decision timer must not fire after the screen goes away.
-  useEffect(
-    () => () => {
-      if (decisionTimer.current) clearTimeout(decisionTimer.current);
-    },
-    [],
-  );
 
   const onRefresh = useCallback(() => void load("refresh"), [load]);
   const clearError = useCallback(() => setError(null), []);
@@ -418,14 +420,11 @@ export function useApprovalDetails(
 
           setIsFinal(finished);
           setStage("success");
-          // Then leave on its own. The decision is made and there is nothing
-          // further to do here, so holding the screen open just makes the user
-          // find the back button; the list they return to refetches on focus.
-          decisionTimer.current = setTimeout(() => {
-            if (!alive.current) return;
-            setStage("none");
-            onDecided?.();
-          }, SUCCESS_DWELL_MS);
+          // The dialog STAYS until the approver taps Done. It reports the
+          // outcome of a real SAP posting — the document number, and whether
+          // the money reached SAP — and a timer that navigates on its own can
+          // whisk that away before it has been read. Leaving is the user's
+          // decision; `handleDone` performs it.
         })
         .catch((err) => {
           if (!alive.current) return;
@@ -435,7 +434,7 @@ export function useApprovalDetails(
           setError(messageFrom(err));
         });
     },
-    [approvalId, documentId, load, onDecided],
+    [approvalId, documentId, load],
   );
 
   return {

@@ -510,10 +510,20 @@ export default function PaymentTrackingScreen({ kind, mine }: Props) {
       // A DEPOSIT has its own detail screen. approval-details renders a
       // payment — party, invoice, tender lines — none of which a deposit has,
       // so it showed an empty shell with blank fields.
+      // `from` names the screen Back should return to. Pushing between two
+      // DRAWER screens builds no navigator stack, so without it Back falls
+      // through to the router's own history and — when that is empty — resets
+      // to the dashboard. The header reads this param first (see
+      // app/(main)/_layout.tsx headerLeft), which is what the orders screens
+      // have always done.
+      const from = isPayment
+        ? "payments/payment-tracking"
+        : "payments/deposit-tracking";
+
       if (!isPayment) {
         router.push({
           pathname: "/(main)/payments/deposit-details",
-          params: { id: String(row.id) },
+          params: { id: String(row.id), from },
         } as never);
         return;
       }
@@ -523,6 +533,7 @@ export default function PaymentTrackingScreen({ kind, mine }: Props) {
           documentId: String(row.id),
           id: row.approvalId != null ? String(row.approvalId) : "",
           requestNo: row.docNo,
+          from,
         },
       } as never);
     },
@@ -533,10 +544,17 @@ export default function PaymentTrackingScreen({ kind, mine }: Props) {
     (row: TrackRow) => {
       router.push({
         pathname: "/(main)/payments/tracking-progress",
-        params: { id: String(row.id), kind },
+        params: {
+          id: String(row.id),
+          kind,
+          // Back returns to the list this was opened from — see openDetails.
+          from: isPayment
+            ? "payments/payment-tracking"
+            : "payments/deposit-tracking",
+        },
       } as never);
     },
-    [kind],
+    [kind, isPayment],
   );
 
   const renderItem = useCallback(

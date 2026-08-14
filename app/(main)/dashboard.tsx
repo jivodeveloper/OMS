@@ -19,6 +19,7 @@ import { Dropdown } from "react-native-element-dropdown";
 import { useAuth } from "@/src/context/AuthContext";
 import { COLORS, SPACING, RADIUS } from "@/src/constants/theme";
 import { api } from "@/src/services/api";
+import { frameworkNotificationService } from "@/src/services/frameworkNotification.service";
 import { storage } from "@/src/utils/storage";
 import { DashboardChartsData, TopPartyEntry } from "@/src/types/dashboard";
 import CompactMonthPicker from "@/src/components/dashboard/CompactMonthPicker";
@@ -166,6 +167,37 @@ function SalesDashboard() {
   const insets = useSafeAreaInsets();
   const { width: screenWidth } = useWindowDimensions();
   const isNarrow = screenWidth < 400;
+  const [unreadCount, setUnreadCount] = useState(0);
+
+  // Unread badge on the Home bell. Counts BOTH feeds (Orders + framework),
+  // honouring locally-dismissed cards. Refreshed whenever Home regains focus.
+  const loadUnread = useCallback(async () => {
+    try {
+      const [orders, framework, hiddenIds, hiddenKeys] = await Promise.all([
+        orderService.getNotifications().catch(() => []),
+        frameworkNotificationService.getNotifications().catch(() => []),
+        storage.getHiddenNotificationIds(),
+        storage.getHiddenNotificationKeys(),
+      ]);
+      const hiddenIdSet = new Set(hiddenIds);
+      const hiddenKeySet = new Set(hiddenKeys);
+      const oUnread = orders.filter(
+        (i) => !i.is_read && !hiddenIdSet.has(i.id) && !hiddenKeySet.has(`orders:${i.id}`),
+      ).length;
+      const fUnread = framework.filter(
+        (i) => !i.is_read && !hiddenKeySet.has(`framework:${i.id}`),
+      ).length;
+      setUnreadCount(oUnread + fUnread);
+    } catch {
+      // Non-fatal: the badge simply keeps its last value.
+    }
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadUnread();
+    }, [loadUnread]),
+  );
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [chartData, setChartData] = useState<DashboardChartsData | null>(null);
@@ -1633,6 +1665,23 @@ function SalesDashboard() {
                 )}
               </View>
             </View>
+            <TouchableOpacity
+              activeOpacity={0.8}
+              onPress={() => router.push("/notifications" as never)}
+              style={bStyles.heroBellBtn}
+              accessibilityRole="button"
+              accessibilityLabel={`Notifications${unreadCount ? `, ${unreadCount} unread` : ""}`}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Ionicons name="notifications-outline" size={ms(22)} color="#fff" />
+              {unreadCount > 0 && (
+                <View style={bStyles.heroBellBadge}>
+                  <Text style={bStyles.heroBellBadgeText}>
+                    {unreadCount > 99 ? "99+" : unreadCount}
+                  </Text>
+                </View>
+              )}
+            </TouchableOpacity>
             <View style={bStyles.heroLogoWrap}>
               <Image
                 source={require("../../assets/images/jivo-official-logo.png")}
@@ -3217,6 +3266,32 @@ const bStyles = StyleSheet.create({
     width: 96,
     height: 76,
   },
+  // Notification bell in the hero top row (left of the logo).
+  heroBellBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "rgba(255,255,255,0.16)",
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: sp(8),
+    marginTop: 2,
+  },
+  heroBellBadge: {
+    position: "absolute",
+    top: -3,
+    right: -3,
+    minWidth: 18,
+    height: 18,
+    paddingHorizontal: 4,
+    borderRadius: 9,
+    backgroundColor: "#22C55E",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1.5,
+    borderColor: "#1E3A8A",
+  },
+  heroBellBadgeText: { color: "#fff", fontSize: 10, fontWeight: "800" },
   heroStatsRow: {
     flexDirection: "row",
     alignItems: "center",

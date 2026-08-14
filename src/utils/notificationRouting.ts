@@ -17,6 +17,12 @@ export type OMSNotificationData = {
   title?: string | null;
   message?: string | null;
   timestamp?: string | null;
+  // Generic entity reference sent by the reusable notification framework
+  // (see OMS Backend/notifications/services/payloads.py). Present on
+  // Payment/Deposit (and future module) notifications, which carry NO order_id.
+  // entity_type is the Django model name, e.g. "paymentreceipt" / "bankdeposit".
+  entity_type?: string | null;
+  entity_id?: number | string | null;
 };
 
 /**
@@ -26,6 +32,22 @@ export type OMSNotificationData = {
  */
 export const ORDER_DETAILS_ROUTE = "/orders/orderdetails" as const;
 export const NOTIFICATIONS_ROUTE = "/notifications" as const;
+// The unified Payment/Deposit detail screen. It loads a receipt OR a deposit
+// purely from { id, kind } (see OMS-app-real/src/features/payments/
+// TrackingDetailsScreen.tsx), so it is the natural deep-link target for the
+// generic framework's (entity_type, entity_id) — no approvalId needed.
+export const PAYMENT_DETAILS_ROUTE = "/(main)/payments/tracking-details" as const;
+
+/**
+ * Map a backend `entity_type` (Django model name) to the mobile detail screen +
+ * the `kind` that screen expects. Extend this table for future modules; the
+ * generic router below needs no other change. Values are the EXACT model names
+ * the backend emits in the canonical payload (content_type.model).
+ */
+const ENTITY_ROUTES: Record<string, { pathname: string; kind: string }> = {
+  paymentreceipt: { pathname: PAYMENT_DETAILS_ROUTE, kind: "PAYMENT" },
+  bankdeposit: { pathname: PAYMENT_DETAILS_ROUTE, kind: "DEPOSIT" },
+};
 
 /**
  * Maps a user's role to the list screen they "belong to", so that pressing Back
@@ -54,11 +76,16 @@ export const originScreenForRole = (
   return ORIGIN_SCREEN_BY_ROLE[normalized] ?? null;
 };
 
-const toOrderId = (value: OMSNotificationData["order_id"]): string | null => {
+const toPositiveId = (
+  value: OMSNotificationData["order_id"],
+): string | null => {
   if (value === null || value === undefined || value === "") return null;
   const numeric = Number(value);
   return Number.isFinite(numeric) && numeric > 0 ? String(numeric) : null;
 };
+
+// Back-compat alias (kept so any existing importer keeps working).
+const toOrderId = toPositiveId;
 
 /**
  * Resolve the destination for a tapped notification.
@@ -67,7 +94,11 @@ const toOrderId = (value: OMSNotificationData["order_id"]): string | null => {
  *   1. If the payload carries an order_id -> open that Sales Order directly.
  *      This is the desired WhatsApp-style behaviour and works even for old
  *      payloads (order_id has always been present).
- *   2. Otherwise fall back to the notification list so the tap is never a
+ *   2. If the payload carries a generic (entity_type, entity_id) the framework
+ *      emits for Payment/Deposit (and future modules) -> open that entity's
+ *      detail screen. Order notifications never reach here because they carry
+ *      order_id and short-circuit above, so Order routing is unchanged.
+ *   3. Otherwise fall back to the notification list so the tap is never a
  *      no-op.
  *
  * Returns `null` only when there is genuinely nothing actionable, so callers
@@ -90,6 +121,25 @@ export const resolveNotificationRoute = (
     }
     return {
       pathname: ORDER_DETAILS_ROUTE,
+      params,
+    } as Href;
+  }
+
+  // Generic entity deep-link (Payment / Deposit / future modules). Driven by the
+  // exact model name the backend sends; unknown types fall through to the inbox.
+  const entityType = String(data.entity_type || "").toLowerCase();
+  const entityId = toPositiveId(data.entity_id);
+  const entityRoute = ENTITY_ROUTES[entityType];
+  if (entityRoute && entityId) {
+    const params: Record<string, string> = {
+      id: entityId,
+      kind: entityRoute.kind,
+    };
+    if (originScreen) {
+      params.from = originScreen;
+    }
+    return {
+      pathname: entityRoute.pathname,
       params,
     } as Href;
   }

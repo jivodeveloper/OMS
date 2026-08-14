@@ -154,11 +154,17 @@ export interface PaymentReceipt {
   /**
    * The permanent OMS<->SAP link, written only on a successful post.
    * `sap_doc_entry` is SAP's internal key (used for every later API call);
-   * `sap_doc_num` is the number an accountant reads in SAP. All three are null
-   * until the document posts, and stay null if posting fails.
+   * `sap_doc_num` is the number an accountant reads in SAP;
+   * `sap_trans_id` is the journal-entry key that finds the posting in JDT1.
+   * All are null until the document posts, and stay null if posting fails.
+   *
+   * `sap_trans_id` is additionally null on anything posted before it was
+   * captured — the Service Layer never returns it, so the backend reads it
+   * back from SAP. Always null-check it separately from the other two.
    */
   sap_doc_entry: number | null;
   sap_doc_num: number | null;
+  sap_trans_id: number | null;
   sap_branch_id: number | null;
   sap_branch_name: string;
   /** The branch this WILL post to, and where it came from. */
@@ -264,7 +270,19 @@ export interface DepositableReceipt {
   total_amount: string;
   company: Company;
   status: string;
-  methods: { id: number; method: PaymentMethodKind; amount: string }[];
+  /**
+   * The cheque fields are present on CHEQUE lines only (the serializer always
+   * sends them; they are empty strings for cash). The deposit picker shows
+   * them so an employee can match a row to the cheque in their hand.
+   */
+  methods: {
+    id: number;
+    method: PaymentMethodKind;
+    amount: string;
+    cheque_number?: string;
+    bank_name?: string;
+    cheque_date?: string | null;
+  }[];
 }
 
 export interface CreateDepositPayload {
@@ -306,16 +324,37 @@ export interface BankDeposit {
   /** Permanent OMS<->SAP link — see PaymentReceipt. */
   sap_doc_entry: number | null;
   sap_doc_num: number | null;
+  sap_trans_id: number | null;
   sap_posted_at: string | null;
   /** SAP's own words — see PaymentReceipt. */
   sap_response: string;
   created_by_name: string;
   created_at: string;
+  /**
+   * The banked receipts, each carrying enough of its receipt for an approver
+   * to verify the physical money without opening it separately — which tender
+   * it was, and for a cheque its number, the payer's bank and its date.
+   */
   lines: {
     id: number;
     receipt: number;
     receipt_no: string;
     card_name: string;
+    card_code: string;
+    payment_date: string;
+    receipt_status: string;
+    receipt_total: string;
+    receipt_remarks: string;
+    collected_by: string;
+    methods: {
+      id: number;
+      method: PaymentMethodKind;
+      amount: string;
+      upi_reference?: string;
+      cheque_number?: string;
+      bank_name?: string;
+      cheque_date?: string | null;
+    }[];
     amount: string;
   }[];
   approval: {
@@ -502,9 +541,16 @@ export const paymentsService = {
   // ---- Deposits --------------------------------------------------------
   getDepositableReceipts: async (
     company: Company,
+    /**
+     * The deposit being EDITED, if any. Its own receipts are banked, so the
+     * plain list excludes them — pass this and they come back, otherwise the
+     * edit form loads with an empty picker and loses the selection.
+     */
+    depositId?: number | null,
   ): Promise<DepositableReceipt[]> => {
+    const scope = depositId ? `&deposit=${depositId}` : "";
     const res = await api.get(
-      `/payments/depositable-receipts/?company=${company}`,
+      `/payments/depositable-receipts/?company=${company}${scope}`,
       undefined,
       { cache: 'no-store' },
     );
@@ -513,6 +559,21 @@ export const paymentsService = {
 
   createDeposit: async (payload: CreateDepositPayload): Promise<any> => {
     const res = await api.post("/payments/deposits/", payload);
+    return unwrap<any>(res);
+  },
+
+  /**
+   * Edit a deposit in place — used to correct one SAP refused.
+   *
+   * PATCH, not POST: the deposit NUMBER and its identity are kept, so
+   * whatever already references it still resolves. The server re-checks
+   * `can_edit` and answers 403 if the document has since posted.
+   */
+  updateDeposit: async (
+    id: number,
+    payload: Partial<CreateDepositPayload>,
+  ): Promise<any> => {
+    const res = await api.patch(`/payments/deposits/${id}/`, payload);
     return unwrap<any>(res);
   },
 

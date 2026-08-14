@@ -397,9 +397,6 @@ function ReceivePaymentScreen() {
     (entry) => (Number(entry.amount) || 0) > 0,
   );
 
-  // Can't add a method while one is unbalanced, or before the details are set.
-  const addDisabled = !!blockingEntry || !headerComplete;
-
   // Submit is gated on EVERY card, not just the open one — a collapsed card can
   // still hold an unbalanced breakdown.
   const submitBlocked =
@@ -584,23 +581,8 @@ function ReceivePaymentScreen() {
     }));
   };
 
-  const addMethod = () => {
-    if (blockingEntry) return;
-    const entry = createMethod();
-    animate();
-    setForm((prev) => ({ ...prev, methods: [...prev.methods, entry] }));
-    // Open the new card so the user lands straight in it.
-    setExpandedId(entry.id);
-  };
-
-  const removeMethod = (id: string) => {
-    animate();
-    setForm((prev) => ({
-      ...prev,
-      methods: prev.methods.filter((entry) => entry.id !== id),
-    }));
-    setExpandedId((prev) => (prev === id ? null : prev));
-  };
+  // addMethod / removeMethod were removed with the multi-method UI: a receipt
+  // now carries exactly one method, so there is nothing to add or remove.
 
   if (loadingExisting) {
     return (
@@ -893,7 +875,7 @@ function ReceivePaymentScreen() {
           {/* ── Payment method accordions ─────────────────────────────── */}
           <View style={styles.methodsHeader}>
             <View style={styles.sectionIndicator} />
-            <Text style={styles.sectionTitle}>PAYMENT METHODS</Text>
+            <Text style={styles.sectionTitle}>PAYMENT METHOD</Text>
           </View>
 
           {/* Locked until the details above are set — entering amounts against
@@ -907,46 +889,29 @@ function ReceivePaymentScreen() {
               />
               <Text style={styles.lockedNoticeText}>
                 Select Company, Received From, Party and Invoice (or mark it as an
-                advance) to add payment methods.
+                advance) to enter the payment method.
               </Text>
             </View>
           ) : null}
 
-          {headerComplete && form.methods.map((entry, index) => (
+          {/* ONE method per receipt. A customer paying part cash and part
+              cheque becomes two receipts, mirroring Finance: they raise a
+              separate SAP Incoming Payment per tender. It is also the only way
+              the amounts can post correctly — SAP carries one
+              TransferAccount per document, so a mixed receipt had to merge
+              them and sent ₹12,00,000 of cheque money to the UPI bank G/L.
+              The "Add Payment Method" button was removed with that merge. */}
+          {headerComplete && form.methods.length > 0 ? (
             <PaymentMethodCard
-              key={entry.id}
-              entry={entry}
-              index={index}
-              expanded={expandedId === entry.id}
-              canRemove={form.methods.length > 1}
-              onToggle={() => toggleMethod(entry.id)}
-              onChange={(patch) => updateMethod(entry.id, patch)}
-              onRemove={() => removeMethod(entry.id)}
+              entry={form.methods[0]}
+              index={0}
+              expanded
+              canRemove={false}
+              onToggle={() => toggleMethod(form.methods[0].id)}
+              onChange={(patch) => updateMethod(form.methods[0].id, patch)}
+              onRemove={() => undefined}
             />
-          ))}
-
-          {/* Always below the last card, so adding another never means
-              scrolling back up. */}
-          <TouchableOpacity
-            style={[styles.addMethodBtn, addDisabled && styles.addMethodDisabled]}
-            activeOpacity={0.8}
-            disabled={addDisabled}
-            onPress={addMethod}
-          >
-            <Ionicons
-              name="add-circle-outline"
-              size={20}
-              color={addDisabled ? COLORS.textMuted : COLORS.primary}
-            />
-            <Text
-              style={[
-                styles.addMethodLabel,
-                addDisabled && styles.addMethodLabelDisabled,
-              ]}
-            >
-              Add Payment Method
-            </Text>
-          </TouchableOpacity>
+          ) : null}
 
           {/* ── Remarks ───────────────────────────────────────────────── */}
           <Surface style={[styles.section, styles.remarksSection]}>
@@ -1177,31 +1142,8 @@ const styles = StyleSheet.create({
     color: COLORS.textMuted,
     marginTop: 2,
   },
-  addMethodBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: SPACING.sm,
-    backgroundColor: COLORS.primaryLighter,
-    borderRadius: RADIUS.lg,
-    borderWidth: 1.5,
-    borderStyle: "dashed",
-    borderColor: COLORS.borderDashed,
-    paddingVertical: SPACING.md,
-    marginTop: SPACING.xs,
-  },
-  addMethodLabel: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: COLORS.primary,
-  },
-  addMethodDisabled: {
-    backgroundColor: COLORS.inputBackground,
-    borderColor: COLORS.border,
-  },
-  addMethodLabelDisabled: {
-    color: COLORS.textMuted,
-  },
+  // addMethodBtn / addMethodLabel and their disabled variants were removed
+  // with the "Add Payment Method" button — one method per receipt.
   // ── Locked-section notice ──
   lockedNotice: {
     flexDirection: "row",

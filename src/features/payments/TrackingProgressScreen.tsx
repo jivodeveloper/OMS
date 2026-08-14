@@ -596,6 +596,13 @@ function buildStages(
   if (sapEntry != null) {
     info.push({ label: "SAP DocEntry", value: String(sapEntry) });
     info.push({ label: "SAP DocNum", value: String(doc.sap_doc_num ?? "—") });
+    // The journal-entry key. DocEntry finds the payment in SAP; TransId is
+    // what finance needs to find its accounting. Shown only when present —
+    // documents posted before it was captured have none, and a row reading
+    // "—" would suggest something failed.
+    if (doc.sap_trans_id != null) {
+      info.push({ label: "SAP TransId", value: String(doc.sap_trans_id) });
+    }
     info.push({ label: "Posted At", value: formatDateTime(doc.sap_posted_at) });
   }
   if (doc.sap_response) {

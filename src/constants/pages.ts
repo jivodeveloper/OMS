@@ -58,20 +58,11 @@ export const ASSIGNABLE_PAGES: AppPage[] = [
       "payments/dashboard-person",
     ],
   },
-  {
-    key: "Payment_Requests",
-    label: "Payment Requests",
-    // One grant opens the list and the detail screen it navigates to; granting
-    // the list alone would dead-end every "View Details" tap.
-    screens: [
-      "approval/approval-details",
-      // Payment Requests was replaced by Payment Tracking, which now serves
-      // approvers too — so this grant has to open it.
-      "payments/payment-tracking",
-      "payments/tracking-details",
-      "payments/tracking-progress",
-    ],
-  },
+  // "Payment_Requests" was REMOVED as a grantable page. The screen it named no
+  // longer exists, and the grant had decayed into a bundle of tracking screens
+  // under a label that promised a page an admin could no longer find — the
+  // same screens Receive_Payment already opens. Approvers reach their work
+  // through the tracking screens, gated by their action permissions.
 ];
 
 /**
@@ -165,52 +156,28 @@ export const SCREEN_ROLES: Record<string, string[]> = {
   "orders/foc": ["manager", "billing"],
   "orders/orderlist": ["billing"],
   "reports/daily-report": ["admin", "billing"],
-  // CREATE screens go to creators ONLY. An approver reviews documents, they do
-  // not raise them, so listing an approver-only role here showed them a form
-  // they could fill in but never submit — the server rejects the create.
-  "payments/receive-payment": ["admin", "payments_and_deposit", "payments_deposit_creator"],
-  "payments/bank-deposit": ["admin", "payments_and_deposit", "payments_deposit_creator"],
-
-  // Tracking serves BOTH audiences from one screen: a creator sees their own
-  // entries, an approver sees everything they can act on (the screen decides
-  // the scope from the action permissions). Payment Requests was removed in
-  // favour of this, so the approver roles must be listed here or an approver
-  // would have no queue at all.
-  "payments/payment-tracking": ["admin", "payments_and_deposit", "payments_deposit_creator", "payments_deposit_approver"],
-  "payments/deposit-tracking": ["admin", "payments_and_deposit", "payments_deposit_creator", "payments_deposit_approver"],
-  "payments/deposit-details": ["admin", "payments_and_deposit", "payments_deposit_creator", "payments_deposit_approver"],
-  // Shared detail screen, reachable from either tracking list.
-  "payments/tracking-details": [
-    "admin",
-    "payments_and_deposit",
-    "payments_deposit_creator",
-    "payments_deposit_approver",
-  ],
-  // Progress is READ-ONLY — it shows where an entry has reached and what SAP
-  // said. Anyone involved in the payments module may open it, creator or
-  // approver, which is why every payments role is listed.
-  "payments/tracking-progress": [
-    "admin",
-    "payments_and_deposit",
-    "payments_deposit_creator",
-    "payments_deposit_approver",
-  ],
-
-  // Request queues go to the matching APPROVERS only. Split per document type
-  // so a payment approver is not shown deposits they cannot act on.
-  "approval/payment-requests": ["admin", "approver", "payments_and_deposit", "payments_deposit_approver"],
-  // Detail screen is reachable by deep link, so it needs its own entry rather
-  // than inheriting from whichever list opened it.
-  // Both audiences land here now — it is the single payment detail screen.
-  // A creator sees the same page without the decide/edit actions, so leaving
-  // them out would block them from their own document.
-  "approval/approval-details": [
-    "admin",
-    "approver",
-    "payments_and_deposit",
-    "payments_deposit_creator",
-    "payments_deposit_approver",
-  ],
+  // ── PAYMENTS SCREENS ARE NOT LISTED HERE, DELIBERATELY ─────────────────
+  //
+  // Every payments/deposit screen is gated by PAYMENT_ACTION_SCREENS below —
+  // the action permissions an admin ticks — and canAccessScreen checks that
+  // map FIRST, so any role entry here would be dead code that merely looks
+  // authoritative.
+  //
+  // The role is identity only ("this account works in payments"); it confers
+  // nothing. One dummy payments role therefore serves every payments user,
+  // and access follows two things:
+  //
+  //   1. the page/action permissions granted to that user, and
+  //   2. their assignment as an approver on a workflow level.
+  //
+  // This mirrors the backend, where payments/permissions.py has no
+  // role -> permission map and granted_keys() reads only `extra_pages`.
+  //
+  // Adding a payments screen? Add it to PAYMENT_ACTION_SCREENS, not here.
+  //
+  // `approver` stays below for approval/* because the ORDERS approval flow
+  // still uses that role; the payments roles do not appear.
+  "approval/approval-details": ["admin", "approver"],
   "admin/order-flow": ["admin"],
   "admin/sales-quotation": ["admin"],
   "users/create": ["admin"],
@@ -261,7 +228,8 @@ const PAYMENT_ACTION_SCREENS: Record<string, PaymentAction[]> = {
   "payments/tracking-details": ALL_PAYMENT_ACTIONS,
   "payments/tracking-progress": ALL_PAYMENT_ACTIONS,
   "approval/approval-details": ALL_PAYMENT_ACTIONS,
-  "approval/payment-requests": [PAYMENT_ACTIONS.PAYMENTS_APPROVE],
+  // approval/payment-requests was REMOVED. Approvers work from the tracking
+  // screens, which scope themselves from these same action permissions.
 };
 
 export const canAccessScreen = (
@@ -466,12 +434,6 @@ export const resolveWorkQueueRoute = (
     {
       screen: "payments/payment-tracking",
       route: "/(main)/payments/payment-tracking",
-      label: "Payments",
-      icon: "cash-outline",
-    },
-    {
-      screen: "approval/payment-requests",
-      route: "/(main)/approval/payment-requests",
       label: "Payments",
       icon: "cash-outline",
     },

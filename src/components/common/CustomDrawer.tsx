@@ -18,6 +18,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router } from "expo-router";
 import { useAuth } from "@/src/context/AuthContext";
+import { resolveWorkQueueRoute } from "@/src/constants/pages";
 import { COLORS } from "@/src/constants/theme";
 import { orderService } from "@/src/services/order.service";
 import { storage } from "@/src/utils/storage";
@@ -61,16 +62,17 @@ const BOTTOM_BAR_ROUTES = new Set<string>([
   "reports/daily-report", // Reports
   "profile", // Profile
 
-  // The second tab is not always Orders: for a payments user it resolves to
-  // their payments or deposits queue (resolveWorkQueueRoute), and the Create
-  // FAB opens the two payment forms. Those screens are therefore already one
-  // tap away from the footer, so listing them in the sidebar as well shows the
-  // same destination twice.
-  "payments/payment-tracking", // Payments tab
-  "payments/deposit-tracking", // Deposits tab
+  // The Create FAB opens both payment forms, and the Reports tab opens the
+  // dashboard, so those are always one tap away from the footer.
   "payments/receive-payment", // Create -> Receive Payment
   "payments/bank-deposit", // Create -> Bank Deposit
   "payments/dashboard", // Reports tab (analytics)
+  // NOTE: the two TRACKING screens are deliberately NOT listed here. The
+  // second tab resolves to only ONE of them (resolveWorkQueueRoute), so a user
+  // holding both payments and deposits could reach exactly one and the other
+  // was unreachable — hidden from the drawer as "already in the footer" while
+  // no footer tab actually went there. They are excluded dynamically below,
+  // by the screen the footer really resolves to for THIS user.
 ]);
 
 /** Routes grouped after the primary block get a divider before them. */
@@ -147,6 +149,16 @@ export default function CustomDrawer(props: DrawerContentComponentProps) {
   const focusedRouteName =
     props.state.routes[props.state.index]?.name ?? "";
 
+  // The ONE tracking screen the second footer tab reaches for this user. The
+  // other must stay in the drawer: a user who can create both payments and
+  // deposits has two tracking lists but only one tab, so hiding both left the
+  // second one with no entry point anywhere.
+  const footerTrackingScreen = resolveWorkQueueRoute(
+    user?.role,
+    user?.extra_pages ?? [],
+    user?.roles,
+  ).screen;
+
   // Only render routes that are visible for this role (the navigator hides the
   // rest via `drawerItemStyle: { display: 'none' }`) and that expose an icon.
   const visibleItems = props.state.routes
@@ -159,6 +171,8 @@ export default function CustomDrawer(props: DrawerContentComponentProps) {
         // Pages that already live in the bottom bar are hidden here so the same
         // page isn't offered in two places.
         !BOTTOM_BAR_ROUTES.has(route.name) &&
+        // ...and the one tracking screen the footer's second tab reaches.
+        route.name !== footerTrackingScreen &&
         (options.drawerItemStyle as any)?.display !== "none" &&
         !!options.drawerIcon,
     );

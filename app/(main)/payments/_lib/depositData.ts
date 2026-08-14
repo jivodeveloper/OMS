@@ -13,6 +13,12 @@ export interface DepositablePayment {
   method: DepositPaymentMethod;
   amount: number;
   status: DepositStatus;
+  /**
+   * "CHQ 1470 · ICICI · 13-08-2026" — shown only on cheque receipts, so the
+   * employee can check the row against the physical cheque in their hand
+   * before banking it. Absent for cash.
+   */
+  chequeDetail?: string;
 }
 
 export const DEPOSIT_TYPE_OPTIONS = [

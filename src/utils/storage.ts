@@ -7,6 +7,7 @@ const KEYS = {
   UI_LABELS: 'ui_labels',
   UI_FIELDS: 'ui_fields',
   HIDDEN_NOTIFICATION_IDS: 'hidden_notification_ids',
+  HIDDEN_NOTIFICATION_KEYS: 'hidden_notification_keys',
   NOTIFICATION_PERMISSION: 'notification_permission_state',
   // Stable per-install device identifier. Created once, then persisted for the
   // life of the install — deliberately NOT cleared on logout (see clear()).
@@ -117,6 +118,29 @@ export const storage = {
     );
     await AsyncStorage.setItem(
       KEYS.HIDDEN_NOTIFICATION_IDS,
+      JSON.stringify(merged),
+    );
+  },
+
+  // Key-based hidden set. The inbox now merges TWO feeds (Orders + framework)
+  // whose numeric ids can collide, so cards are dismissed by a namespaced key
+  // ("orders:5" / "framework:3"). Stored separately from the legacy id list.
+  getHiddenNotificationKeys: async (): Promise<string[]> => {
+    const value = await AsyncStorage.getItem(KEYS.HIDDEN_NOTIFICATION_KEYS);
+    if (!value) return [];
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed.map((item) => String(item)) : [];
+    } catch {
+      return [];
+    }
+  },
+
+  addHiddenNotificationKeys: async (keys: string[]) => {
+    const existing = await storage.getHiddenNotificationKeys();
+    const merged = Array.from(new Set([...existing, ...keys].map((k) => String(k))));
+    await AsyncStorage.setItem(
+      KEYS.HIDDEN_NOTIFICATION_KEYS,
       JSON.stringify(merged),
     );
   },
