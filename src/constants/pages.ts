@@ -248,6 +248,17 @@ export const canAccessScreen = (
   if (viaAction) {
     return viaAction.some((action) => extraPages.includes(action));
   }
+  // Notifications is shared across modules: a payments/deposit user now receives
+  // Payment/Deposit notifications, so anyone holding ANY payment action reaches
+  // the inbox too — in ADDITION to the roles in SCREEN_ROLES.notifications
+  // below. (This is additive, so the four notification roles keep their access
+  // even with no payment permission.)
+  if (
+    screen === "notifications" &&
+    ALL_PAYMENT_ACTIONS.some((action) => extraPages.includes(action))
+  ) {
+    return true;
+  }
   const allowed = SCREEN_ROLES[screen];
   if (!allowed) return false;
   // Match on EVERY role held (primary + extra_roles), not just the primary.

@@ -32,21 +32,34 @@ export type OMSNotificationData = {
  */
 export const ORDER_DETAILS_ROUTE = "/orders/orderdetails" as const;
 export const NOTIFICATIONS_ROUTE = "/notifications" as const;
-// The unified Payment/Deposit detail screen. It loads a receipt OR a deposit
-// purely from { id, kind } (see OMS-app-real/src/features/payments/
-// TrackingDetailsScreen.tsx), so it is the natural deep-link target for the
-// generic framework's (entity_type, entity_id) — no approvalId needed.
+// Payment detail: the read-only receipt/deposit viewer, keyed by { id, kind }.
 export const PAYMENT_DETAILS_ROUTE = "/(main)/payments/tracking-details" as const;
+// Deposit detail: the SAME rich screen the deposit-tracking cards open on
+// "View Details" (see PaymentTrackingScreen.openDetails / PaymentHomeScreen.
+// openDetail). Deposits are deliberately NOT sent to the payment detail screen
+// above — that one renders a payment (party/invoice/tender lines) and shows an
+// empty shell for a deposit. Keyed by { id, from }.
+export const DEPOSIT_DETAILS_ROUTE = "/(main)/payments/deposit-details" as const;
 
 /**
- * Map a backend `entity_type` (Django model name) to the mobile detail screen +
- * the `kind` that screen expects. Extend this table for future modules; the
- * generic router below needs no other change. Values are the EXACT model names
- * the backend emits in the canonical payload (content_type.model).
+ * Map a backend `entity_type` (Django model name) to the exact mobile detail
+ * screen + the params that screen expects. Each entity builds its own params so
+ * a notification opens the SAME page the in-app list opens. Extend this table
+ * for future modules; the generic router below needs no other change. Keys are
+ * the EXACT model names the backend emits (content_type.model).
  */
-const ENTITY_ROUTES: Record<string, { pathname: string; kind: string }> = {
-  paymentreceipt: { pathname: PAYMENT_DETAILS_ROUTE, kind: "PAYMENT" },
-  bankdeposit: { pathname: PAYMENT_DETAILS_ROUTE, kind: "DEPOSIT" },
+const ENTITY_ROUTES: Record<
+  string,
+  { pathname: string; params: (id: string, from?: string) => Record<string, string> }
+> = {
+  paymentreceipt: {
+    pathname: PAYMENT_DETAILS_ROUTE,
+    params: (id, from) => ({ id, kind: "PAYMENT", ...(from ? { from } : {}) }),
+  },
+  bankdeposit: {
+    pathname: DEPOSIT_DETAILS_ROUTE,
+    params: (id, from) => ({ id, ...(from ? { from } : {}) }),
+  },
 };
 
 /**
@@ -131,16 +144,9 @@ export const resolveNotificationRoute = (
   const entityId = toPositiveId(data.entity_id);
   const entityRoute = ENTITY_ROUTES[entityType];
   if (entityRoute && entityId) {
-    const params: Record<string, string> = {
-      id: entityId,
-      kind: entityRoute.kind,
-    };
-    if (originScreen) {
-      params.from = originScreen;
-    }
     return {
       pathname: entityRoute.pathname,
-      params,
+      params: entityRoute.params(entityId, originScreen || undefined),
     } as Href;
   }
 
