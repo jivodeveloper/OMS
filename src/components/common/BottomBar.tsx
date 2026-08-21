@@ -84,6 +84,11 @@ export default function BottomBar({
     return "home";
   }, [active, pathname]);
 
+  // Guard: when the work-queue tab is absent (no orders/payments/deposits),
+  // never leave "orders" selected — nothing would appear highlighted.
+  const resolvedActiveTab: TabKey =
+    activeTab === "orders" && !workQueue ? "home" : activeTab;
+
   // Hide the footer while the sidebar is open (the drawer covers the screen),
   // then show it again on close. All hooks above run unconditionally.
   if (drawerOpen) return null;
@@ -125,19 +130,27 @@ export default function BottomBar({
       icon: "home",
       // Always return to the dashboard from any screen.
       onPress: () => {
-        if (activeTab !== "home") router.navigate("/(main)/dashboard" as never);
+        if (resolvedActiveTab !== "home")
+          router.navigate("/(main)/dashboard" as never);
       },
     },
-    {
-      key: "orders",
-      label: workQueue.label,
-      icon: workQueue.icon as keyof typeof Ionicons.glyphMap,
-      badge: ordersBadge,
-      onPress: () =>
-        guarded(workQueue.screen, workQueue.label, () =>
-          router.push(workQueue.route as never),
-        ),
-    },
+    // Orders / Payments / Deposits, in that priority order. Omitted entirely
+    // when the user holds none of them: this tab used to fall back to the
+    // dashboard, which rendered a second "Home" beside the real one.
+    ...(workQueue
+      ? [
+          {
+            key: "orders" as TabKey,
+            label: workQueue.label,
+            icon: workQueue.icon as keyof typeof Ionicons.glyphMap,
+            badge: ordersBadge,
+            onPress: () =>
+              guarded(workQueue.screen, workQueue.label, () =>
+                router.push(workQueue.route as never),
+              ),
+          },
+        ]
+      : []),
     {
       key: "create",
       label: "Create",
@@ -185,7 +198,7 @@ export default function BottomBar({
   return (
     <View style={[styles.bottomBar, { paddingBottom: insets.bottom + 8 }]}>
       {tabs.map((tab) => {
-        const isActive = activeTab === tab.key;
+        const isActive = resolvedActiveTab === tab.key;
         return (
           <TouchableOpacity
             key={tab.key}

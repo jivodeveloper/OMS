@@ -240,6 +240,12 @@ export const canAccessScreen = (
 ): boolean => {
   // Home (dashboard) and the user's own Profile are always reachable.
   if (screen === "dashboard" || screen === "profile") return true;
+  // Admin holds every screen implicitly, payments and deposits included. This
+  // mirrors the backend, where payments/permissions.py granted_keys() returns
+  // the full ACTION_PERMISSION_KEYS set for an admin. Without this the app hid
+  // payments pages the API would have served, because the
+  // PAYMENT_ACTION_SCREENS branch below returns before SCREEN_ROLES is read.
+  if (rolesOf(role, roles).includes("admin")) return true;
   if (screensFromExtraPages(extraPages).has(screen)) return true;
   // Payments screens follow the ACTION permissions an admin ticked, not the
   // role. A manager ticked for Payments_Create must reach the payment form;
@@ -416,8 +422,20 @@ export const resolveWorkQueueRoute = (
   role: string | null | undefined,
   extraPages: string[] = [],
   roles?: string[] | null,
-): AppRoute & { label: string; icon: string } => {
+): (AppRoute & { label: string; icon: string }) | null => {
   const normalizedRole = (role || "").toLowerCase();
+  // Admin holds every screen, so the generic resolution below would pick
+  // whichever orders screen matched first. Pin them to order tracking: a
+  // four-tab footer left an unbalanced gap beside the centre FAB, and the
+  // admin's natural work queue is the full order list.
+  if (rolesOf(role, roles).includes("admin")) {
+    return {
+      screen: "orders/ordertracking",
+      route: "/orders/ordertracking",
+      label: "Orders",
+      icon: "receipt-outline",
+    };
+  }
   const can = (screen: string) =>
     canAccessScreen(screen, normalizedRole, extraPages, roles);
 
@@ -459,12 +477,10 @@ export const resolveWorkQueueRoute = (
     if (can(candidate.screen)) return candidate;
   }
 
-  return {
-    screen: "dashboard",
-    route: "/(main)/dashboard",
-    label: "Home",
-    icon: "home-outline",
-  };
+  // No orders, payments or deposits queue for this user (an admin, typically).
+  // Returning a dashboard route here rendered a SECOND "Home" tab beside the
+  // real one; null tells the footer to drop the tab instead.
+  return null;
 };
 
 /**

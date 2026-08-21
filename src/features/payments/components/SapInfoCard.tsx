@@ -1,7 +1,8 @@
-import React from "react";
+import React, { useState } from "react";
 import {
   StyleSheet,
   Text,
+  TouchableOpacity,
   View,
   type StyleProp,
   type ViewStyle,
@@ -10,6 +11,7 @@ import { Ionicons } from "@expo/vector-icons";
 
 import { COLORS } from "@/src/constants/theme";
 import { fs, ms, sp } from "@/src/utils/responsive";
+import ReceiptViewerModal from "./ReceiptViewerModal";
 
 /**
  * What SAP did with this document — DocEntry, DocNum, TransId and SAP's own
@@ -57,10 +59,17 @@ export default function SapInfoCard({
   doc,
   kind,
   style,
+  receiptId,
 }: {
   doc: SapInfoDocument;
   /** Only used for the wording of the outcome line. */
   kind: "payment" | "deposit";
+  /**
+   * OMS receipt id. When supplied for a POSTED payment, a "View Payment
+   * Receipt" button downloads the OMS-generated SAP-style PDF and opens it in
+   * the device viewer. Omit for deposits or where the receipt id is unknown.
+   */
+  receiptId?: number | null;
   /**
    * Outer spacing, supplied by the host screen. The two detail screens gutter
    * their cards differently (one via marginHorizontal, one via the scroll
@@ -114,6 +123,11 @@ export default function SapInfoCard({
     if (at) rows.push({ label: "Posted At", value: at });
   }
 
+  // "View Payment Receipt" — only for a POSTED payment whose id we know.
+  const canViewReceipt =
+    kind === "payment" && posted && doc.sap_doc_entry != null && receiptId != null;
+  const [receiptOpen, setReceiptOpen] = useState(false);
+
   return (
     <View style={[styles.card, style]}>
       <View style={styles.header}>
@@ -144,6 +158,26 @@ export default function SapInfoCard({
           <Text style={styles.responseLabel}>SAP Response</Text>
           <Text style={styles.responseText}>{doc.sap_response}</Text>
         </View>
+      ) : null}
+
+      {canViewReceipt ? (
+        <>
+          <TouchableOpacity
+            activeOpacity={0.85}
+            onPress={() => setReceiptOpen(true)}
+            style={styles.receiptBtn}
+            accessibilityRole="button"
+            accessibilityLabel="View payment receipt"
+          >
+            <Ionicons name="document-text-outline" size={ms(16)} color="#fff" />
+            <Text style={styles.receiptBtnText}>View Payment Receipt</Text>
+          </TouchableOpacity>
+          <ReceiptViewerModal
+            visible={receiptOpen}
+            receiptId={receiptId ?? null}
+            onClose={() => setReceiptOpen(false)}
+          />
+        </>
       ) : null}
     </View>
   );
@@ -214,4 +248,16 @@ const styles = StyleSheet.create({
     marginBottom: sp(3),
   },
   responseText: { fontSize: fs(11.5), lineHeight: fs(17), color: COLORS.text },
+  receiptBtn: {
+    marginTop: sp(12),
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: sp(8),
+    backgroundColor: COLORS.primary,
+    borderRadius: sp(10),
+    paddingVertical: sp(11),
+    paddingHorizontal: sp(14),
+  },
+  receiptBtnText: { color: "#fff", fontSize: fs(13), fontWeight: "700" },
 });

@@ -255,7 +255,13 @@ export default function ApprovalDetailsScreen() {
               nothing until a posting has been attempted, so a receipt still in
               approval shows no empty SAP box. Only the outcome — the approval
               ladder stays on View Progress. */}
-          <SapInfoCard doc={detail.sap} kind="payment" />
+          <SapInfoCard
+            doc={detail.sap}
+            kind="payment"
+            receiptId={
+              detail.documentId != null ? Number(detail.documentId) : undefined
+            }
+          />
 
           {/* Same card as the create form, so the figures an approver checks
               are the ones the creator saw. Hidden for an advance, and for older

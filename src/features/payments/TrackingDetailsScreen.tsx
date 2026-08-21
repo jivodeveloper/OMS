@@ -4,6 +4,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TouchableOpacity,
   View,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
@@ -16,6 +17,7 @@ import paymentsService, {
   type BankDeposit,
   type PaymentReceipt,
 } from "@/src/services/payments.service";
+import ReceiptViewerModal from "./components/ReceiptViewerModal";
 import type { TrackingKind } from "./PaymentTrackingScreen";
 
 /**
@@ -96,6 +98,9 @@ export default function TrackingDetailsScreen() {
   const [deposit, setDeposit] = useState<BankDeposit | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  // OMS-generated SAP-style receipt — shown IN-APP as an image via
+  // ReceiptViewerModal (with its own Download button). Only for a POSTED payment.
+  const [receiptOpen, setReceiptOpen] = useState(false);
 
   const load = useCallback(async () => {
     if (!Number.isFinite(id)) {
@@ -304,6 +309,29 @@ export default function TrackingDetailsScreen() {
         <Text style={styles.totalBannerValue}>{formatMoney(total ?? 0)}</Text>
       </LinearGradient>
 
+      {/* OMS-generated SAP-style receipt — a POSTED payment only. */}
+      {isPayment && receipt && receipt.status === "POSTED" &&
+      receipt.sap_doc_entry != null ? (
+        <TouchableOpacity
+          activeOpacity={0.85}
+          onPress={() => setReceiptOpen(true)}
+          style={styles.receiptBtn}
+          accessibilityRole="button"
+          accessibilityLabel="View payment receipt"
+        >
+          <Ionicons name="document-text-outline" size={18} color="#fff" />
+          <Text style={styles.receiptBtnText}>View Payment Receipt</Text>
+        </TouchableOpacity>
+      ) : null}
+
+      {isPayment && receipt ? (
+        <ReceiptViewerModal
+          visible={receiptOpen}
+          receiptId={receipt.id}
+          receiptNo={receipt.receipt_no}
+          onClose={() => setReceiptOpen(false)}
+        />
+      ) : null}
     </ScrollView>
   );
 }
@@ -311,6 +339,17 @@ export default function TrackingDetailsScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.background },
   content: { padding: sp(16), paddingBottom: sp(40) },
+  receiptBtn: {
+    marginTop: sp(14),
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: sp(8),
+    backgroundColor: COLORS.primary,
+    borderRadius: sp(12),
+    paddingVertical: sp(13),
+  },
+  receiptBtnText: { color: "#fff", fontSize: fs(14), fontWeight: "700" },
   centered: {
     flex: 1,
     alignItems: "center",

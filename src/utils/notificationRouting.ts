@@ -32,19 +32,19 @@ export type OMSNotificationData = {
  */
 export const ORDER_DETAILS_ROUTE = "/orders/orderdetails" as const;
 export const NOTIFICATIONS_ROUTE = "/notifications" as const;
-// Payment detail: the read-only receipt/deposit viewer, keyed by { id, kind }.
-export const PAYMENT_DETAILS_ROUTE = "/(main)/payments/tracking-details" as const;
+// Payment detail: the SAME screen the payment-tracking cards open on "View
+// Details" (PaymentTrackingScreen.openDetails → approval-details). It loads
+// from documentId (the receipt id) alone — approvalId is optional.
+export const PAYMENT_DETAILS_ROUTE = "/(main)/approval/approval-details" as const;
 // Deposit detail: the SAME rich screen the deposit-tracking cards open on
-// "View Details" (see PaymentTrackingScreen.openDetails / PaymentHomeScreen.
-// openDetail). Deposits are deliberately NOT sent to the payment detail screen
-// above — that one renders a payment (party/invoice/tender lines) and shows an
-// empty shell for a deposit. Keyed by { id, from }.
+// "View Details" (PaymentTrackingScreen.openDetails / PaymentHomeScreen.
+// openDetail). Keyed by { id, from }.
 export const DEPOSIT_DETAILS_ROUTE = "/(main)/payments/deposit-details" as const;
 
 /**
  * Map a backend `entity_type` (Django model name) to the exact mobile detail
- * screen + the params that screen expects. Each entity builds its own params so
- * a notification opens the SAME page the in-app list opens. Extend this table
+ * screen + the params that screen expects — so tapping a notification opens the
+ * SAME page as the "View Details" button on the tracking list. Extend this table
  * for future modules; the generic router below needs no other change. Keys are
  * the EXACT model names the backend emits (content_type.model).
  */
@@ -53,8 +53,11 @@ const ENTITY_ROUTES: Record<
   { pathname: string; params: (id: string, from?: string) => Record<string, string> }
 > = {
   paymentreceipt: {
+    // Matches PaymentTrackingScreen.openDetails for a payment: approval-details
+    // keyed by documentId (the receipt id). requestNo/approvalId are optional —
+    // the screen fetches the receipt + its approval from documentId alone.
     pathname: PAYMENT_DETAILS_ROUTE,
-    params: (id, from) => ({ id, kind: "PAYMENT", ...(from ? { from } : {}) }),
+    params: (id, from) => ({ documentId: id, ...(from ? { from } : {}) }),
   },
   bankdeposit: {
     pathname: DEPOSIT_DETAILS_ROUTE,

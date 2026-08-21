@@ -1,4 +1,5 @@
-import { api } from "./api";
+import { api, API_BASE_URL } from "./api";
+import { storage } from "@/src/utils/storage";
 
 /**
  * Payments + deposits API.
@@ -526,6 +527,108 @@ export const paymentsService = {
   submitReceipt: async (id: number): Promise<PaymentReceipt> => {
     const res = await api.post(`/payments/receipts/${id}/submit/`, {});
     return unwrap<PaymentReceipt>(res);
+  },
+
+  /**
+   * Fetch the receipt as a PNG **data URI** so it can be shown inline with
+   * <Image> (no device PDF viewer needed). Authenticated; posted-only +
+   * access-controlled on the backend. Throws a readable message on 403/409.
+   */
+  getReceiptImage: async (id: number): Promise<string> => {
+    const token = await storage.getAccessToken();
+    const url = `${API_BASE_URL}/payments/receipts/${id}/sap-report/?as=png`;
+    const res = await fetch(url, {
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    });
+    if (res.status === 409) {
+      throw new Error(
+        "SAP receipt is not available because this payment has not been posted successfully.",
+      );
+    }
+    if (res.status === 403) throw new Error("You do not have access to this receipt.");
+    if (!res.ok) throw new Error(`Could not load the receipt (status ${res.status}).`);
+    const blob = await res.blob();
+    return await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onerror = () => reject(new Error("The receipt image could not be read."));
+      reader.onloadend = () => resolve(reader.result as string);
+      reader.readAsDataURL(blob);
+    });
+  },
+
+  /**
+   * Download the receipt PDF to a persistent local file and hand it to the OS
+   * (share sheet / open) so the user can save it or send it to the party.
+   *
+   * Uses ONLY expo-file-system (no native module beyond what the app already
+   * bundles): the file is written to the document directory, then opened via an
+   * Android content:// URI (or the file:// URI on iOS). Returns the file URI.
+   * Throws a readable message on 403 / 409 / network error.
+   */
+  saveReceiptToDevice: async (id: number, receiptNo?: string): Promise<string> => {
+    const FileSystem = await import("expo-file-system/legacy");
+    const { Platform } = await import("react-native");
+    const token = await storage.getAccessToken();
+
+    const url = `${API_BASE_URL}/payments/receipts/${id}/sap-report/`;
+    const name = `Receipt-${receiptNo || id}.pdf`;
+    // documentDirectory persists (unlike cacheDirectory, which the OS may purge).
+    const dir = FileSystem.documentDirectory || FileSystem.cacheDirectory;
+    const target = `${dir}${name}`;
+    const result = await FileSystem.downloadAsync(url, target, {
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    });
+    if (result.status === 409) {
+      throw new Error(
+        "SAP receipt is not available because this payment has not been posted successfully.",
+      );
+    }
+    if (result.status === 403) throw new Error("You do not have access to this receipt.");
+    if (result.status !== 200) {
+      throw new Error(`Could not download the receipt (status ${result.status}).`);
+    }
+    if (Platform.OS === "android") {
+      return await FileSystem.getContentUriAsync(result.uri);
+    }
+    return result.uri;
+  },
+
+  /**
+   * Download the OMS-generated, SAP-style receipt PDF for a POSTED receipt and
+   * return a URI the OS can open. The backend enforces posted-only + access
+   * control; this only streams the bytes to a local file (authenticated) and,
+   * on Android, exposes it as a grantable content:// URI (a raw file:// URI is
+   * blocked by FileProvider). No SAP credentials are involved. Throws with a
+   * readable message on 403 / 409 / network error.
+   */
+  downloadReceiptPdf: async (id: number): Promise<string> => {
+    // Legacy FS API (downloadAsync/cacheDirectory/getContentUriAsync) — stable
+    // in expo-file-system v19, which otherwise pushes the new File API.
+    const FileSystem = await import("expo-file-system/legacy");
+    const { Platform } = await import("react-native");
+    const token = await storage.getAccessToken();
+    const url = `${API_BASE_URL}/payments/receipts/${id}/sap-report/`;
+    const target = `${FileSystem.cacheDirectory}Receipt-${id}.pdf`;
+    const result = await FileSystem.downloadAsync(url, target, {
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    });
+    if (result.status === 409) {
+      throw new Error(
+        "SAP receipt is not available because this payment has not been posted successfully.",
+      );
+    }
+    if (result.status === 403) {
+      throw new Error("You do not have access to this receipt.");
+    }
+    if (result.status !== 200) {
+      throw new Error(`Could not download the receipt (status ${result.status}).`);
+    }
+    if (Platform.OS === "android") {
+      // Android blocks opening a file:// URI from another app; hand out a
+      // content:// URI the PDF viewer is granted read access to.
+      return await FileSystem.getContentUriAsync(result.uri);
+    }
+    return result.uri;
   },
 
   listReceipts: async (params: Record<string, string> = {}): Promise<PaymentReceipt[]> => {

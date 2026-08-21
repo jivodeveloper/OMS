@@ -153,11 +153,13 @@ export default function CustomDrawer(props: DrawerContentComponentProps) {
   // other must stay in the drawer: a user who can create both payments and
   // deposits has two tracking lists but only one tab, so hiding both left the
   // second one with no entry point anywhere.
+  // Null when the footer has no work-queue tab at all (an admin with no
+  // orders/payments/deposits access), in which case nothing needs hiding here.
   const footerTrackingScreen = resolveWorkQueueRoute(
     user?.role,
     user?.extra_pages ?? [],
     user?.roles,
-  ).screen;
+  )?.screen;
 
   // Only render routes that are visible for this role (the navigator hides the
   // rest via `drawerItemStyle: { display: 'none' }`) and that expose an icon.
