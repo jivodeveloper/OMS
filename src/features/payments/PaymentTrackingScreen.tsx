@@ -156,6 +156,8 @@ const STATUS_TONE: Record<string, { bg: string; fg: string }> = {
   APPROVED: { bg: "#EEF2FF", fg: "#4338CA" },
   POSTING_TO_SAP: { bg: "#EEF2FF", fg: "#4338CA" },
   SAP_UNKNOWN: { bg: "#FFF7E6", fg: "#B45309" },
+  // Amber, not red: the posting succeeded and was reversed in SAP later.
+  CANCELLED_IN_SAP: { bg: "#FFFBEB", fg: "#B45309" },
   POSTED: { bg: "#ECFDF5", fg: "#047857" },
   REJECTED: { bg: "#FEF2F2", fg: "#B91C1C" },
   CANCELLED: { bg: "#F3F4F6", fg: "#6B7280" },
@@ -174,6 +176,7 @@ const STATUS_LABEL: Record<string, string> = {
   APPROVED: "In Progress",
   POSTING_TO_SAP: "Posting to SAP",
   SAP_UNKNOWN: "Awaiting SAP check",
+  CANCELLED_IN_SAP: "Cancelled in SAP",
   POSTED: "Completed",
   REJECTED: "Rejected",
   CANCELLED: "Cancelled",

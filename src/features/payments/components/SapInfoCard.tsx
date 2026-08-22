@@ -27,12 +27,16 @@ import ReceiptViewerModal from "./ReceiptViewerModal";
  * a draft would imply something is in flight when nothing has been sent.
  */
 
-type Tone = "ok" | "fail" | "pending";
+type Tone = "ok" | "fail" | "pending" | "cancelled";
 
 const TONE: Record<Tone, { bg: string; fg: string; icon: keyof typeof Ionicons.glyphMap }> = {
   ok: { bg: "#ECFDF5", fg: "#047857", icon: "checkmark-circle" },
   fail: { bg: "#FEF2F2", fg: "#B91C1C", icon: "alert-circle" },
   pending: { bg: "#EEF2FF", fg: "#4338CA", icon: "time-outline" },
+  // Amber, not red: the posting SUCCEEDED and was cancelled afterwards in
+  // SAP. Showing it in the failure palette would say the money never reached
+  // SAP, which is the opposite of what happened.
+  cancelled: { bg: "#FFFBEB", fg: "#B45309", icon: "warning" },
 };
 
 export interface SapInfoDocument {
@@ -42,6 +46,9 @@ export interface SapInfoDocument {
   sap_trans_id?: number | null;
   sap_posted_at?: string | null;
   sap_response?: string | null;
+  /** Set only once reconciliation has read Canceled='Y' back from SAP ORCT. */
+  sap_cancelled_at?: string | null;
+  sap_cancellation_response?: string | null;
 }
 
 const formatDateTime = (iso?: string | null) => {
@@ -80,33 +87,47 @@ export default function SapInfoCard({
 }) {
   const status = doc.status;
   const posted = status === "POSTED";
+  // Posted successfully, then cancelled by a person working in SAP. Kept
+  // apart from `failed`: the document DID reach SAP and its identifiers are
+  // still the way to find the cancelled original.
+  const cancelledInSap = status === "CANCELLED_IN_SAP";
   const failed = status === "PENDING_ERROR" || status === "SAP_UNKNOWN";
   const inFlight = status === "POSTING_TO_SAP";
 
   // Nothing has been sent to SAP yet — a draft, awaiting approval, or
   // rejected. There is no SAP outcome to report, so the card stays away.
-  if (!posted && !failed && !inFlight) return null;
+  if (!posted && !cancelledInSap && !failed && !inFlight) return null;
 
-  const tone: Tone = posted ? "ok" : failed ? "fail" : "pending";
+  const tone: Tone = posted
+    ? "ok"
+    : cancelledInSap
+      ? "cancelled"
+      : failed
+        ? "fail"
+        : "pending";
   const palette = TONE[tone];
 
   const badge = posted
     ? "Posted"
-    : status === "PENDING_ERROR"
-      ? "Failed"
-      : status === "SAP_UNKNOWN"
-        ? "Unconfirmed"
-        : "Posting";
+    : cancelledInSap
+      ? "Cancelled in SAP"
+      : status === "PENDING_ERROR"
+        ? "Failed"
+        : status === "SAP_UNKNOWN"
+          ? "Unconfirmed"
+          : "Posting";
 
   const headline = posted
     ? kind === "payment"
       ? "Payment created in SAP"
       : "Deposit created in SAP"
-    : status === "PENDING_ERROR"
-      ? "SAP rejected the document"
-      : status === "SAP_UNKNOWN"
-        ? "SAP did not respond — verification needed"
-        : "Posting to SAP…";
+    : cancelledInSap
+      ? "Cancelled in SAP"
+      : status === "PENDING_ERROR"
+        ? "SAP rejected the document"
+        : status === "SAP_UNKNOWN"
+          ? "SAP did not respond — verification needed"
+          : "Posting to SAP…";
 
   // Same fields, same order, as the SAP card on View Progress.
   const rows: { label: string; value: string }[] = [];
@@ -121,9 +142,16 @@ export default function SapInfoCard({
     }
     const at = formatDateTime(doc.sap_posted_at);
     if (at) rows.push({ label: "Posted At", value: at });
+    // ORCT.CancelDate, when SAP recorded the cancellation.
+    const cancelledAt = formatDateTime(doc.sap_cancelled_at);
+    if (cancelledInSap && cancelledAt) {
+      rows.push({ label: "Cancelled At", value: cancelledAt });
+    }
   }
 
   // "View Payment Receipt" — only for a POSTED payment whose id we know.
+  // Deliberately NOT offered for CANCELLED_IN_SAP: handing out a receipt for
+  // a payment SAP has reversed would misrepresent it as still valid.
   const canViewReceipt =
     kind === "payment" && posted && doc.sap_doc_entry != null && receiptId != null;
   const [receiptOpen, setReceiptOpen] = useState(false);
@@ -153,9 +181,31 @@ export default function SapInfoCard({
 
       {/* SAP's exact words. On a failure this is the only thing that says WHY,
           so it is shown in full rather than truncated to a tidy line. */}
+      {/* The cancellation, shown ABOVE the posting response so the current
+          state is read first. They are separate on purpose: the response below
+          is what SAP said when the document POSTED, which remains true. */}
+      {cancelledInSap ? (
+        <View style={[styles.response, { backgroundColor: TONE.cancelled.bg }]}>
+          <Text style={[styles.responseLabel, { color: TONE.cancelled.fg }]}>
+            Cancelled in SAP
+          </Text>
+          <Text style={styles.responseText}>
+            {doc.sap_cancellation_response ||
+              "This payment was posted successfully but was later cancelled in SAP."}
+          </Text>
+        </View>
+      ) : null}
+
       {doc.sap_response ? (
-        <View style={[styles.response, { backgroundColor: palette.bg }]}>
-          <Text style={styles.responseLabel}>SAP Response</Text>
+        <View
+          style={[
+            styles.response,
+            { backgroundColor: cancelledInSap ? "#F8FAFC" : palette.bg },
+          ]}
+        >
+          <Text style={styles.responseLabel}>
+            {cancelledInSap ? "Original SAP Response" : "SAP Response"}
+          </Text>
           <Text style={styles.responseText}>{doc.sap_response}</Text>
         </View>
       ) : null}

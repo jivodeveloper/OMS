@@ -39,6 +39,7 @@ const STATUS_LABEL: Record<string, string> = {
   POSTED: "Completed",
   PENDING_ERROR: "Failed",
   SAP_UNKNOWN: "Unconfirmed",
+  CANCELLED_IN_SAP: "Cancelled in SAP",
   CANCELLED: "Cancelled",
 };
 
@@ -51,6 +52,7 @@ const STATUS_COLOR: Record<string, string> = {
   REJECTED: COLORS.error,
   PENDING_ERROR: COLORS.error,
   SAP_UNKNOWN: COLORS.warning,
+  CANCELLED_IN_SAP: COLORS.warning,
   POSTING_TO_SAP: COLORS.primary,
   CANCELLED: COLORS.textSecondary,
 };

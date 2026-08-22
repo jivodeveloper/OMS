@@ -79,6 +79,9 @@ const BUCKET_OF: Record<string, Bucket> = {
   REJECTED: "rejected",
   PENDING_ERROR: "rejected",
   SAP_UNKNOWN: "rejected",
+  // Posted, then reversed in SAP. Not "approved" — the money is no longer
+  // recorded there and somebody has to decide what happens next.
+  CANCELLED_IN_SAP: "rejected",
 };
 
 const money = (value: number) =>
