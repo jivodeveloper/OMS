@@ -2,7 +2,7 @@
   "expo": {
     "name": "OMSAPP",
     "slug": "OMSAPP",
-    "version": "1.0.7",
+    "version": "1.0.8",
     "orientation": "portrait",
     "icon": "./assets/images/logo.png",
     "scheme": "omsapp",
@@ -16,7 +16,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.jivo.oms",
-      "buildNumber": "7",
+      "buildNumber": "8",
       "entitlements": {
         "aps-environment": "development"
       },
@@ -34,7 +34,7 @@
       "googleServicesFile": "./google-services.json",
       "usesCleartextTraffic": true,
       "softwareKeyboardLayoutMode": "resize",
-      "versionCode": 7,
+      "versionCode": 8,
       "permissions": [
         "INTERNET", "POST_NOTIFICATIONS", "CAMERA",
         "READ_MEDIA_IMAGES", "READ_EXTERNAL_STORAGE"
