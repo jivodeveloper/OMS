@@ -75,8 +75,12 @@ const money = (value: string | number | null | undefined) =>
  * has no equivalent of.
  */
 export default function DepositDetailsScreen() {
-  const params = useLocalSearchParams<{ id?: string }>();
+  const params = useLocalSearchParams<{ id?: string; refreshAt?: string }>();
   const id = Number(params.id);
+  // Bumped by the edit form when it navigates back here. Without it the screen
+  // can already be mounted for this same id, so nothing would refetch and the
+  // approver would be looking at the figures from BEFORE the correction.
+  const refreshAt = params.refreshAt;
 
   const [deposit, setDeposit] = useState<BankDeposit | null>(null);
   // Receipt rows the reader has opened. Collapsed by default: a deposit can
@@ -138,7 +142,7 @@ export default function DepositDetailsScreen() {
 
   useEffect(() => {
     void load();
-  }, [load]);
+  }, [load, refreshAt]);
 
   /** Post the decision, then leave for the tracking list with fresh data. */
   const act = useCallback(

@@ -23,7 +23,9 @@ import FormField from "./_components/FormField";
 import DepositPaymentRow from "./_components/DepositPaymentRow";
 import AttachmentPicker from "./_components/AttachmentPicker";
 import type { PickedFile } from "./_lib/pickAttachment";
-import PaymentSuccessDialog from "@/src/features/payments/components/PaymentSuccessDialog";
+import PaymentSuccessDialog, {
+  type PaymentSuccessKind,
+} from "@/src/features/payments/components/PaymentSuccessDialog";
 import { formatAmount } from "./_lib/constants";
 import {
   messageFrom,
@@ -136,6 +138,9 @@ function BankDepositScreen() {
   const [receiptFiles, setReceiptFiles] = useState<PickedFile[]>([]);
   const [saving, setSaving] = useState(false);
   const [success, setSuccess] = useState<{
+    kind: PaymentSuccessKind;
+    /** Where to land after an edit — the deposit that was just changed. */
+    depositId: number;
     depositNo: string;
     date: string;
     time: string;
@@ -434,9 +439,11 @@ function BankDepositScreen() {
     isOver ||
     reasonMissing ||
     saving ||
-    // The server rejects a create without this grant; disabling the button
-    // tells the user before they fill the form, not after.
-    !permissions.canCreateDeposit;
+    // Creating needs the grant; EDITING does not — the server has already
+    // decided the caller may edit THIS deposit (an approver holding a
+    // SAP-rejected one always may), and re-testing a create permission here
+    // would block the very correction the approver is there to make.
+    (!isEdit && !permissions.canCreateDeposit);
 
   /**
    * Create the deposit and send it into the approval chain.
@@ -543,6 +550,11 @@ function BankDepositScreen() {
 
       const now = new Date();
       setSuccess({
+        // An approver correcting a deposit parked at their own rung has not
+        // sent it anywhere — it is still with them — so it must not claim to
+        // have been created or resubmitted.
+        kind: needsSubmit ? (isEdit ? "resubmitted" : "created") : "updated",
+        depositId: deposit.id,
         depositNo: deposit.deposit_no ?? "The deposit",
         date: now.toLocaleDateString("en-IN", {
           day: "2-digit",
@@ -1248,7 +1260,7 @@ function BankDepositScreen() {
           {/* No inline warning for an incomplete form — the disabled button is
               the signal. A MISSING PERMISSION is different: nothing the user
               does here would fix it, so it has to be stated. */}
-          {!permissions.loading && !permissions.canCreateDeposit ? (
+          {!isEdit && !permissions.loading && !permissions.canCreateDeposit ? (
             <Text style={styles.permissionNote}>
               You do not have permission to record deposits. Ask an
               administrator for the “Deposit — Create” permission.
@@ -1280,16 +1292,39 @@ function BankDepositScreen() {
       {success ? (
         <PaymentSuccessDialog
           visible
-          kind="created"
-          title="Deposit Created!"
+          kind={success.kind}
+          title={
+            success.kind === "created"
+              ? "Deposit Created!"
+              : success.kind === "resubmitted"
+                ? "Deposit Resubmitted!"
+                : "Changes Saved!"
+          }
           numberLabel="Deposit No"
           receiptNo={success.depositNo}
           date={success.date}
           time={success.time}
           note={success.note}
           onDone={() => {
+            const { kind, depositId } = success;
             setSuccess(null);
-            resetForm();
+            // Only a CREATE clears the form. An edit navigates away from a
+            // record that still exists, and blanking it would confuse a user
+            // who comes straight back.
+            if (!isEdit) resetForm();
+            if (isEdit && depositId) {
+              // Straight to the deposit that was just changed, so the approver
+              // sees the corrected figures and can approve without hunting for
+              // it in the list. refreshAt forces a refetch past the cache.
+              router.replace({
+                pathname: "/(main)/payments/deposit-details",
+                params: {
+                  id: String(depositId),
+                  refreshAt: String(Date.now()),
+                },
+              } as never);
+              return;
+            }
             // Deposits land on their own tracking list, not the payments one.
             router.replace({
               pathname: "/(main)/payments/deposit-tracking",

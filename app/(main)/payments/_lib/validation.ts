@@ -16,9 +16,14 @@ export interface CashBreakdownError {
 /**
  * A cash payment's denominations must add up to exactly the amount entered.
  *
- * Returns null when there is nothing to complain about yet — no amount typed,
- * or no denominations recorded at all — so the user isn't shown an error before
- * they've had a chance to fill the section in.
+ * The breakdown is MANDATORY once an amount is typed: it is the count of the
+ * physical notes handed over, and a cash receipt without it cannot be checked
+ * against what the collector actually carries. Leaving it empty used to pass
+ * silently, so a receipt could be raised for cash nobody had counted.
+ *
+ * Returns null only when there is genuinely nothing to complain about yet —
+ * a non-cash method, or no amount typed — so the user is not shown an error
+ * before they have had a chance to fill anything in.
  */
 export const validateCashBreakdown = (
   entry: PaymentMethodEntry,
@@ -27,9 +32,20 @@ export const validateCashBreakdown = (
 
   const amount = Number(entry.amount) || 0;
   if (amount <= 0) return null;
-  if (entry.noteRows.length === 0) return null;
 
   const breakdown = noteRowsTotal(entry.noteRows);
+
+  // No rows at all, or rows that are still blank. Both mean nothing has been
+  // counted yet, and the whole amount is outstanding.
+  if (entry.noteRows.length === 0 || breakdown === 0) {
+    return {
+      difference: -amount,
+      message:
+        `Add the cash denominations for ₹${amount.toLocaleString("en-IN")}. ` +
+        `The note breakdown is required for a cash payment.`,
+    };
+  }
+
   if (breakdown === amount) return null;
 
   const difference = breakdown - amount;
