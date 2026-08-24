@@ -147,6 +147,16 @@ const CREATOR_STATUS_OPTIONS: StatusOption[] = [
   },
   { label: "Completed", value: "POSTED", query: "status=POSTED" },
   { label: "Rejected", value: "REJECTED", query: "status=REJECTED" },
+  {
+    // The SAP outcomes. Without this they were reachable only under "All":
+    // PENDING_ERROR is not "Rejected" (no approver refused it) and not
+    // "Pending" (nothing is in flight), so the entries needing the most
+    // attention were the hardest to find. CANCELLED_IN_SAP belongs here too —
+    // it posted, then somebody reversed it in SAP.
+    label: "Failed",
+    value: "FAILED",
+    query: "status=PENDING_ERROR,SAP_UNKNOWN,CANCELLED_IN_SAP",
+  },
 ];
 
 /** Status -> pill colour. Anything unmapped falls back to neutral grey. */
