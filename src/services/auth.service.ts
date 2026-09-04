@@ -33,7 +33,21 @@ export interface User {
   date_joined?: string | null;
   created_at: string;
   // Admin-granted page keys giving access beyond the user's role (see ASSIGNABLE_PAGES).
+  // Still the WRITE surface (the Page Permissions screen edits this) and the
+  // degraded-path fallback, but no longer the primary source — see `permissions`.
   extra_pages?: string[];
+  // The server's own answer to "what may this user do": the union of every held
+  // role's permission bundle and `extra_pages`, intersected with the backend
+  // registry, with administrators pre-expanded to every key. This is the
+  // AUTHORITATIVE permission source — read it through
+  // `src/constants/permissions.ts`, never directly.
+  //
+  // Optional because it is absent on older backends and on a database where the
+  // RolePermissions migrations have not run; `permissionKeysOf()` documents how
+  // that degrades. Deliberately left `undefined` rather than defaulted to `[]`,
+  // so "the server said nothing" stays distinguishable from "the server said
+  // nothing is granted".
+  permissions?: string[];
   // Additional roles held alongside the primary `role` (e.g. payment_approver).
   extra_roles?: { id: number; name: string; display_name: string }[];
   // Every role name the user holds — primary + extras. Prefer this over `role`

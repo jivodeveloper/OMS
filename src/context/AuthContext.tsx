@@ -63,6 +63,15 @@ const normalizeUser = (user: User): User => {
     ...user,
     state: user.state || states[0] || null,
     states,
+    // Shape-normalize only. `permissions` is the server's authoritative answer
+    // and is never synthesized here — deriving it on the client is exactly the
+    // second source of authority this migration removes. `undefined` is
+    // preserved (not coerced to `[]`) so "the field was absent" stays
+    // distinguishable from "the server granted nothing"; both degrade the same
+    // way today, via permissionKeysOf().
+    permissions: Array.isArray(user.permissions)
+      ? user.permissions.filter(Boolean)
+      : undefined,
   };
 };
 
@@ -278,9 +287,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     }
   };
 
-  // Pull the latest user (incl. extra_pages page grants) from the backend so
-  // permission changes made elsewhere — e.g. from the web admin — take effect
-  // without requiring the user to log out and back in.
+  // Pull the latest user from the backend so permission changes made elsewhere
+  // — e.g. a role bundle edited on the web Role Permissions matrix — take
+  // effect without requiring the user to log out and back in.
+  //
+  // The whole user object is REPLACED, so the freshly-issued `permissions`
+  // always supersede the previous ones; no authorization decision is cached
+  // anywhere beyond this object. Called on every navigation and on app
+  // foreground, which is why no separate permission poller is needed.
   const refreshUser = async () => {
     try {
       const token = await storage.getAccessToken();

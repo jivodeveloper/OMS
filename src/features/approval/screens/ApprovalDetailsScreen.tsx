@@ -29,6 +29,11 @@ import PaymentAccordion from "../components/PaymentAccordion";
 import AttachmentList from "../components/AttachmentList";
 import AttachmentViewer from "../components/AttachmentViewer";
 import ApprovalBottomBar from "../components/ApprovalBottomBar";
+import VerifyBottomBar from "@/src/features/payments/components/VerifyBottomBar";
+import VerifyDialog from "@/src/features/payments/components/VerifyDialog";
+import { useAuth } from "@/src/context/AuthContext";
+import { can, PERMISSION_KEYS } from "@/src/constants/permissions";
+import paymentsService from "@/src/services/payments.service";
 import ApprovalDetailsSkeleton from "../components/ApprovalDetailsSkeleton";
 import EmptyApprovalState from "../components/EmptyApprovalState";
 import ApproveDialog from "../components/dialogs/ApproveDialog";
@@ -51,28 +56,42 @@ export default function ApprovalDetailsScreen() {
     requestNo?: string;
     documentId?: string;
     id?: string;
+    /**
+     * The screen to return to after acting. Purely navigational — it does NOT
+     * decide which actions are offered; see `verifying` below.
+     */
+    from?: string;
   }>();
 
   /**
-   * Where a decided payment sends the approver.
+   * Where a decided payment sends the user.
    *
-   * Payment Tracking with a refetch signal, so the entry appears in its NEW
-   * status instead of the stale row they tapped. This screen also serves the
-   * generic approval list, though — `documentId` is sent only by the payments
-   * tracking screen, so it discriminates, and everything else backs out the way
-   * it came. Defined here because BOTH exits use it: the Done button and the
-   * success dialog's own dismiss timer.
+   * Back to the list they came from, with a refetch signal, so the entry
+   * appears in its NEW state instead of the stale row they tapped. This
+   * screen also serves the generic approval list — `documentId` is sent only
+   * by the payments screens, so it discriminates, and everything else backs
+   * out the way it came. Defined here because BOTH exits use it: the Done
+   * button and the success dialog's own dismiss timer.
    */
   const leaveAfterDecision = useCallback(() => {
     if (params.documentId) {
+      // `from` names the actual origin, so a verifier who opened this from
+      // the home page returns to the home page rather than being dropped on
+      // a queue they never visited.
+      const back =
+        params.from === "payments/verification"
+          ? "/(main)/payments/verification"
+          : params.from === "dashboard"
+            ? "/(main)/dashboard"
+            : "/(main)/payments/payment-tracking";
       router.replace({
-        pathname: "/(main)/payments/payment-tracking",
+        pathname: back,
         params: { refreshAt: String(Date.now()) },
       } as never);
       return;
     }
     router.back();
-  }, [params.documentId]);
+  }, [params.documentId, params.from]);
 
   const {
     detail,
@@ -90,6 +109,64 @@ export default function ApprovalDetailsScreen() {
     closeDialog,
     submitDecision,
   } = useApprovalDetails(params.requestNo, params.documentId);
+
+  /**
+   * ── Which action bar this user gets ───────────────────────────────────
+   *
+   * Decided from WHO THEY ARE and WHAT STATE THE RECEIPT IS IN — never from
+   * the screen they arrived by. The same payment opened from the home page,
+   * the tracking list or the verification queue must offer the same actions,
+   * because the user's rights do not change with the route they took.
+   *
+   *   holds Payments_Verify + receipt awaiting verification -> Edit / Verify
+   *   the approver holding it right now                     -> Reject / Approve
+   *   anyone else (a creator, a bystander)                  -> no bar
+   *
+   * Verification is checked FIRST because it comes first in the lifecycle: a
+   * receipt awaiting its handover check is not yet with an approver, so the
+   * two can never both be true for the same document.
+   */
+  const { user } = useAuth();
+  const [verifyOpen, setVerifyOpen] = useState(false);
+  const [verifySubmitting, setVerifySubmitting] = useState(false);
+
+  const awaitingVerification = detail?.verificationStatus === "PENDING";
+  const holdsVerifyKey = can(user, PERMISSION_KEYS.PAYMENTS_VERIFY);
+  const verifying = awaitingVerification && holdsVerifyKey;
+
+  // The backend forbids verifying a payment you raised. Surfaced here so the
+  // button explains itself rather than failing after a tap; the server stays
+  // the enforcement point.
+  const ownReceipt =
+    detail?.createdById != null && detail.createdById === user?.id;
+
+  const handleVerify = useCallback(
+    async (remarks: string) => {
+      if (!detail) return;
+      setVerifyOpen(false);
+      setVerifySubmitting(true);
+      try {
+        await paymentsService.verifyReceipt(detail.documentId, remarks);
+        // Only after the server confirms — the verification state is its
+        // answer, never a local guess.
+        showToast("Payment verified and sent for approval.", "success");
+        leaveAfterDecision();
+      } catch (err) {
+        // Every refusal lands here — no permission, already verified by
+        // someone else, own receipt, already in SAP. The server's wording
+        // names the actual reason, so it is shown as-is and the page reloads
+        // to reflect whatever is now true.
+        showToast(
+          (err as Error)?.message || "Could not verify this payment.",
+          "error",
+        );
+        onRefresh();
+      } finally {
+        setVerifySubmitting(false);
+      }
+    },
+    [detail, leaveAfterDecision, onRefresh],
+  );
   // The dialog no longer dismisses itself, so there is no auto-leave callback:
   // navigation happens only when the approver taps Done (see handleDone).
 
@@ -97,6 +174,25 @@ export default function ApprovalDetailsScreen() {
   const [expandedPaymentId, setExpandedPaymentId] = useState<string | null>(null);
   const [viewing, setViewing] = useState<ApprovalAttachment | null>(null);
   const isFocused = useIsFocused();
+
+  /**
+   * Refetch whenever this screen comes back into view.
+   *
+   * The edit form returns here after a save, and this screen stays MOUNTED
+   * underneath it the whole time — so without this the user came back to the
+   * figures they had just changed, showing their old values. Skipped on the
+   * first focus, since the hook's own mount fetch has already run.
+   */
+  const hasFocusedOnce = useRef(false);
+  useFocusEffect(
+    useCallback(() => {
+      if (!hasFocusedOnce.current) {
+        hasFocusedOnce.current = true;
+        return;
+      }
+      onRefresh();
+    }, [onRefresh]),
+  );
 
   const togglePayment = useCallback((id: string) => {
     LayoutAnimation.configureNext(
@@ -129,9 +225,13 @@ export default function ApprovalDetailsScreen() {
         // whatever the drawer last had — the same `from` contract the
         // tracking list uses when it opens this page.
         from: "approval/approval-details",
+        // ...and the list behind THIS screen, so that when the form sends the
+        // user back here, this page's own Back still reaches the queue they
+        // started in rather than falling through to the dashboard.
+        origin: params.from ?? "",
       },
     } as never);
-  }, [detail]);
+  }, [detail, params.from]);
 
 
   /** Open one attachment in the in-app viewer. */
@@ -158,8 +258,25 @@ export default function ApprovalDetailsScreen() {
     // including whether SAP accepted the posting — so a banner repeating it
     // over the next screen adds nothing and covers the row they came to see.
     closeDialog();
+
+    // The FINAL approval posts to SAP, so this page now carries something the
+    // approver could not see before they acted: the DocEntry, the DocNum and
+    // SAP's own words. Leaving would throw that away and make them find the
+    // row again to read it, so we stay and refetch instead.
+    //
+    // Only for an APPROVAL. `isFinal` is also true of a rejection — that ends
+    // the chain too — but a rejected document never reaches SAP, so there is
+    // no posting result to read and staying would just strand the approver on
+    // a document they have finished with.
+    //
+    // An intermediate approval has no outcome to show either: the document has
+    // simply moved to the next rung, which is another queue's business.
+    if (isFinal && decision === "approve") {
+      onRefresh();
+      return;
+    }
     leaveAfterDecision();
-  }, [closeDialog, leaveAfterDecision]);
+  }, [closeDialog, isFinal, decision, onRefresh, leaveAfterDecision]);
 
   /**
    * Publish Edit into the navbar while THIS screen is focused, and withdraw it
@@ -308,8 +425,18 @@ export default function ApprovalDetailsScreen() {
 
       {/* Only for someone who can act on it RIGHT NOW. A creator never sees
           it, and nobody sees it once the document is decided — an Approve
-          button that cannot approve is worse than no button. */}
-      {detail.canDecide ? (
+          button that cannot approve is worse than no button.
+
+          In verification mode the same slot carries Edit + Verify: same page,
+          same layout, the actions of the job the user came to do. */}
+      {verifying ? (
+        <VerifyBottomBar
+          onEdit={handleEdit}
+          onVerify={() => setVerifyOpen(true)}
+          canVerify={!ownReceipt}
+          disabled={verifySubmitting}
+        />
+      ) : detail.canDecide ? (
         <ApprovalBottomBar onReject={openReject} onApprove={openApprove} />
       ) : null}
 
@@ -324,6 +451,20 @@ export default function ApprovalDetailsScreen() {
         onClose={closeDialog}
         onConfirm={(remarks) => submitDecision("reject", remarks)}
       />
+      {/* Verification confirmation. Its Done handler returns to the queue,
+          so the verified entry is gone from the list rather than lingering. */}
+      <VerifyDialog
+        visible={verifyOpen}
+        receiptNo={detail.requestNo}
+        // `ApprovalDetail.amount` is typed `number` but the mapper assigns the
+        // already-formatted string from `money()`. Coerced rather than
+        // "corrected": the type is wrong repo-wide and every consumer renders
+        // it as text, so changing it here would be a wide unrelated edit.
+        amount={String(detail.amount)}
+        onClose={() => setVerifyOpen(false)}
+        onConfirm={handleVerify}
+      />
+
       <AttachmentViewer attachment={viewing} onClose={() => setViewing(null)} />
 
 
@@ -337,14 +478,15 @@ export default function ApprovalDetailsScreen() {
           clearError();
           handleEdit();
         }}
-        // Closing leaves for the tracking list, the same as Done on the
-        // success dialog. The approval DID land — only the SAP posting failed —
-        // so the entry has moved on and the stale detail page behind this
-        // dialog no longer reflects it. Editing is the one exception: that
-        // stays here and opens the form.
+        // Closing STAYS on this page and refetches, the same as Done on the
+        // success dialog. The approval landed and only the posting failed, so
+        // this is now the one screen carrying SAP's own words about why —
+        // exactly what the approver needs to read before deciding whether to
+        // edit and retry. Leaving would make them find the row again to see
+        // the reason they were just shown a summary of.
         onClose={() => {
           clearError();
-          leaveAfterDecision();
+          onRefresh();
         }}
       />
 

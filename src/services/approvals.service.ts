@@ -26,6 +26,8 @@ export interface ApiApprovalAction {
   action_display: string;
   remarks: string;
   approver: number | null;
+  /** Display name, falling back to the username snapshot server-side. */
+  approver_name: string;
   approver_username: string;
   approver_role: string;
   acted_at: string;
@@ -60,12 +62,27 @@ export interface ApiApprovalRequest {
  * as `sequence`: the PAYMENTS workflow numbers its rungs 2 and 3, so matching
  * on `sequence` would resolve the wrong approver.
  */
+/**
+ * Someone who may act at a rung — who to chase when an entry sits too long.
+ *
+ * Name AND username: the name is who to ask for, the username is how to find
+ * them in the system, and a display name alone is ambiguous when two people
+ * share one. Resolved live from the ladder on every fetch, so adding or
+ * removing an approver shows up without an app release.
+ */
+export interface ApiApprovalAssignee {
+  username: string;
+  /** Display name; falls back to the username server-side when unset. */
+  name: string;
+  phone: string;
+}
+
 export interface ApiApprovalLevel {
   position: number;
   sequence: number;
   name: string;
   role: string;
-  approvers: string[];
+  approvers: ApiApprovalAssignee[];
 }
 
 export interface ApiApprovalDetail extends ApiApprovalRequest {

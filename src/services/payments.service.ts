@@ -137,6 +137,13 @@ export interface CreateReceiptPayload {
   allocations?: AllocationPayload[];
 }
 
+/**
+ * The verification (handover) axis. Deliberately separate from the payment
+ * `status` enum — the backend keeps two independent fields, and collapsing
+ * them here would reintroduce exactly the coupling it avoided.
+ */
+export type VerificationStatus = "PENDING" | "VERIFIED";
+
 export interface PaymentReceipt {
   id: number;
   receipt_no: string;
@@ -150,8 +157,36 @@ export interface PaymentReceipt {
   status: string;
   status_display: string;
   remarks: string;
+  /**
+   * The creator's user id. Sent by the API since day one but never declared
+   * here, so no screen could compare it against the signed-in user. The
+   * verification screen needs it: the backend forbids verifying a payment you
+   * created, and the UI should say so rather than let the request fail.
+   */
+  created_by: number | null;
   created_by_name: string;
   created_at: string;
+  /**
+   * The handover gate, ORTHOGONAL to `status` above — a receipt carries both.
+   * Never infer one from the other.
+   *
+   * Optional because a list response is not guaranteed to carry every detail
+   * field; treat a missing value as "unknown", never as PENDING.
+   */
+  verification_status?: VerificationStatus;
+  verification_status_display?: string;
+  verified_by?: number | null;
+  verified_by_name?: string;
+  verified_by_username?: string;
+  verified_at?: string | null;
+  verification_remarks?: string;
+  /**
+   * Who could verify this receipt right now — so a creator whose payment is
+   * stuck knows exactly whom to chase. Server-resolved on every read from the
+   * live permission grants (creator excluded, since they may not verify their
+   * own), so it is never stale. Empty once verified.
+   */
+  eligible_verifiers?: { username: string; name: string; phone: string }[];
   /**
    * The permanent OMS<->SAP link, written only on a successful post.
    * `sap_doc_entry` is SAP's internal key (used for every later API call);
@@ -377,13 +412,31 @@ export interface BankDeposit {
   };
 }
 
-/** One row of a document's status timeline. */
+/**
+ * One row of a document's BUSINESS timeline — who did what, at which stage.
+ *
+ * The technical columns the server still stores (`from_status`, `to_status`,
+ * `actor_kind`, `ip_address`, `sap_doc_entry`, `level_label`) are deliberately
+ * NOT part of this response: they are forensic detail, read through the Django
+ * admin. The SAP DocEntry lives on the receipt, which is its one authoritative
+ * home.
+ */
 export interface StatusHistoryRow {
   id: number;
-  from_status: string;
-  to_status: string;
+  /** CREATED | UPDATED | VERIFIED | APPROVED | REJECTED | SAP_POSTED | ... */
+  action: string;
+  /** Ready to display, e.g. "Verified". */
+  action_display: string;
+  /** The permission key for the stage, e.g. "Payments_Verify". Null for a
+   *  row whose action maps to no stage. */
+  stage: string | null;
+  /** e.g. "Payments — Verify". */
+  stage_display: string | null;
+  /** Approval rung for APPROVED/REJECTED rows; null otherwise. */
+  level: number | null;
+  /** The username, or "System" for anything the server did on its own. */
+  performed_by: string;
   reason: string;
-  actor_kind: string;
   changed_by_username: string;
   created_at: string;
 }
@@ -526,6 +579,28 @@ export const paymentsService = {
 
   submitReceipt: async (id: number): Promise<PaymentReceipt> => {
     const res = await api.post(`/payments/receipts/${id}/submit/`, {});
+    return unwrap<PaymentReceipt>(res);
+  },
+
+  /**
+   * Verify a receipt — the handover check against the physical money.
+   *
+   * ONE call. The backend marks it verified, writes the audit row and hands it
+   * to the EXISTING submit/approval path in the same transaction, so the app
+   * must never follow this with `submitReceipt`: that would be a second
+   * submission of a document already in the chain.
+   *
+   * Rejected by the server when the caller created the receipt, when it is
+   * already verified, or when it has reached SAP. Those arrive as a normal
+   * failed response and are shown to the user verbatim.
+   */
+  verifyReceipt: async (
+    id: number,
+    verificationRemarks = "",
+  ): Promise<PaymentReceipt> => {
+    const res = await api.post(`/payments/receipts/${id}/verify/`, {
+      verification_remarks: verificationRemarks,
+    });
     return unwrap<PaymentReceipt>(res);
   },
 

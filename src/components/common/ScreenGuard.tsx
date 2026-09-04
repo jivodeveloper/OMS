@@ -7,7 +7,8 @@ import { useAuth } from "@/src/context/AuthContext";
 import { canAccessScreen } from "@/src/constants/pages";
 
 interface ScreenGuardProps {
-  /** SCREEN_ROLES key for this route, e.g. "payments/receive-payment". */
+  /** Screen name for this route, e.g. "payments/receive-payment" — the key used
+   *  by SCREEN_KEYS (and, for unmigrated screens, SCREEN_ROLES). */
   screen: string;
   children: React.ReactNode;
 }
@@ -39,12 +40,7 @@ export default function ScreenGuard({ screen, children }: ScreenGuardProps) {
     );
   }
 
-  const allowed = canAccessScreen(
-    screen,
-    user?.role,
-    user?.extra_pages || [],
-    user?.roles,
-  );
+  const allowed = canAccessScreen(screen, user);
 
   if (allowed) return <>{children}</>;
 

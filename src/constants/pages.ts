@@ -1,3 +1,12 @@
+import type { User } from "@/src/services/auth.service";
+import {
+  can,
+  canAny,
+  isAdmin,
+  permissionKeysOf,
+  rolesOf,
+} from "@/src/constants/permissions";
+
 // Canonical page-access keys shared with the WEB app. The `key` is what gets
 // stored in User.extra_pages by the backend and must be identical across web
 // and mobile, otherwise a grant made in one app won't be recognised by the other.
@@ -87,52 +96,28 @@ const ALL_PAYMENT_ACTIONS = Object.values(PAYMENT_ACTIONS);
 export type PaymentAction =
   (typeof PAYMENT_ACTIONS)[keyof typeof PAYMENT_ACTIONS];
 
-/**
- * Every role name a user holds, lower-cased.
- *
- * The backend returns a `roles` array (primary role + extra_roles) alongside the
- * single `role` string. Reading only `role` would miss a user whose payment
- * function was granted via extra_roles — they would hold the payments role and
- * still be shown nothing.
- */
-export const rolesOf = (
-  role: string | null | undefined,
-  roles?: string[] | null,
-): string[] => {
-  const all = new Set<string>();
-  const add = (value: string) => {
-    const name = String(value).trim().toLowerCase();
-    if (name) all.add(name);
-  };
-  if (role) add(role);
-  (roles || []).forEach((r) => {
-    if (r) add(r);
-  });
-  return [...all];
-};
+// `rolesOf` and the permission primitives now live in one place, so authority
+// has a single implementation. Re-exported here because this module's public
+// surface already included `rolesOf` and several screens import it from here.
+export { rolesOf, isAdmin } from "@/src/constants/permissions";
 
 /**
- * Whether a user holds an action permission.
+ * Whether a user holds a payments ACTION permission.
  *
- * Admins hold all of them implicitly, and the four function roles confer their
- * matching key — the same rule the server applies in
- * payments/permissions.py:granted_keys, so a button the user sees matches what
- * the API will actually accept.
+ * Now a thin wrapper over the central `can()`, so it reads the server's
+ * authoritative `permissions` when present and falls back to `extra_pages` only
+ * on the degraded path. Previously it consulted `extra_pages` alone, which
+ * silently ignored any key granted through a ROLE BUNDLE on the backend's
+ * Role Permissions matrix — the exact bug this migration exists to fix.
  */
 export const hasPaymentAction = (
   action: PaymentAction,
-  role?: string | null,
-  extraPages: string[] = [],
-  roles?: string[] | null,
-): boolean => {
-  // The ticked boxes are the ONLY source, matching granted_keys() on the
-  // server. A role is identity — "this account works on payments" — not
-  // authority, so it must not add permissions the admin did not tick.
-  if (rolesOf(role, roles).includes("admin")) return true;
-  return extraPages.includes(action);
-};
+  user: User | null | undefined,
+): boolean => can(user, action);
 
 // Expand a user's granted keys into the set of mobile screen names to unlock.
+// Fed from `permissionKeysOf(user)` — the server's `permissions` when present,
+// `extra_pages` on the degraded path — never from `extra_pages` directly.
 export const screensFromExtraPages = (keys: string[] = []): Set<string> => {
   const unlocked = new Set<string>();
   for (const page of ASSIGNABLE_PAGES) {
@@ -143,9 +128,72 @@ export const screensFromExtraPages = (keys: string[] = []): Set<string> => {
   return unlocked;
 };
 
-// Which roles may reach each mobile screen by default. Single source of truth
-// shared by the Drawer (visibility) and the bottom bar (tap gating). extra_pages
-// grants add access on top of this.
+/**
+ * Screen -> the permission KEY(s) that open it. Holding ANY listed key admits.
+ *
+ * This is the migrated, key-based half of screen authorization, and the shape
+ * every future screen should use. A screen appears here only when the backend
+ * registry actually defines a key for it — inventing a key the server does not
+ * issue would gate the screen on something nobody can ever hold.
+ *
+ * The payments entries below are the ones this task migrates; they were already
+ * key-based via PAYMENT_ACTION_SCREENS, and are folded in here so there is ONE
+ * map rather than two consulted in a subtle order.
+ */
+export const SCREEN_KEYS: Record<string, string[]> = {
+  // Admin pages — legacy flat keys, registered verbatim in the backend registry.
+  "users/allUsers": ["App_User"],
+  "users/create": ["App_User"],
+  "users/addScheme": ["Add_Scheme"],
+  "sap/sap-sync": ["Sap_Sync"],
+  "sap/party-assignment": ["Party_Assignment"],
+  "sap/party-product-assignment": ["Party_Product_Assignment"],
+  "admin/order-flow": ["Order_Flow_Settings"],
+  "reports/daily-report": ["Reports"],
+
+  // Payments — the five action keys from payments/permissions.py.
+  "payments/receive-payment": ["Payments_Create"],
+  "payments/bank-deposit": ["Deposit_Create"],
+  "payments/payment-tracking": ["Payments_Create", "Payments_Approve"],
+  "payments/deposit-tracking": ["Deposit_Create", "Deposit_Approve"],
+  "payments/deposit-details": ["Deposit_Create", "Deposit_Approve"],
+  "payments/dashboard": ["Payments_Dashboard"],
+  "payments/dashboard-person": ["Payments_Dashboard"],
+  // Verification (handover). Its own key — a creator or an approver holds no
+  // access here unless an admin grants it, which is the separation of duties
+  // the whole feature exists for.
+  //
+  // No separate detail entry: verification reuses `approval/approval-details`,
+  // which any payments participant may already open. The Verify ACTION there
+  // is what the key gates, and the server refuses it regardless.
+  "payments/verification": ["Payments_Verify"],
+  // Shared screens: any payments involvement opens them.
+  "payments/tracking-details": ALL_PAYMENT_ACTIONS,
+  "payments/tracking-progress": ALL_PAYMENT_ACTIONS,
+  "approval/approval-details": ALL_PAYMENT_ACTIONS,
+};
+
+/**
+ * TRANSITIONAL — role-based screen access, for screens with NO permission key.
+ *
+ * Two distinct groups live here and both are deliberate:
+ *
+ *  1. Screens the backend registry has no key for at all (every `orders/*`
+ *     screen, `approver/pending_approval`, `admin/sales-quotation`,
+ *     `notifications`). The registry defines `orders.sales.*` keys, but they
+ *     gate the order API ENDPOINTS; no key names these mobile screens, and
+ *     inventing a mapping would be a guess at intent, not a migration.
+ *
+ *  2. `users/pagePermissions`, which grants authority to others. `App_User`
+ *     covers user records, not the right to hand out permissions — gating it
+ *     on that key would let a user-admin escalate themselves.
+ *
+ * These are NOT a fallback for migrated screens: a screen listed in SCREEN_KEYS
+ * is decided there and never reaches this map. That separation is what stops
+ * the old role architecture quietly becoming the primary mechanism again.
+ *
+ * Each entry is removed as the backend defines a key for it.
+ */
 export const SCREEN_ROLES: Record<string, string[]> = {
   dashboard: ["admin", "manager", "approver"],
   // Admin has no order-level notifications to act on, so the bell is hidden for
@@ -155,120 +203,58 @@ export const SCREEN_ROLES: Record<string, string[]> = {
   "orders/drafts": ["manager", "billing"],
   "orders/foc": ["manager", "billing"],
   "orders/orderlist": ["billing"],
-  "reports/daily-report": ["admin", "billing"],
-  // ── PAYMENTS SCREENS ARE NOT LISTED HERE, DELIBERATELY ─────────────────
-  //
-  // Every payments/deposit screen is gated by PAYMENT_ACTION_SCREENS below —
-  // the action permissions an admin ticks — and canAccessScreen checks that
-  // map FIRST, so any role entry here would be dead code that merely looks
-  // authoritative.
-  //
-  // The role is identity only ("this account works in payments"); it confers
-  // nothing. One dummy payments role therefore serves every payments user,
-  // and access follows two things:
-  //
-  //   1. the page/action permissions granted to that user, and
-  //   2. their assignment as an approver on a workflow level.
-  //
-  // This mirrors the backend, where payments/permissions.py has no
-  // role -> permission map and granted_keys() reads only `extra_pages`.
-  //
-  // Adding a payments screen? Add it to PAYMENT_ACTION_SCREENS, not here.
-  //
-  // `approver` stays below for approval/* because the ORDERS approval flow
-  // still uses that role; the payments roles do not appear.
-  "approval/approval-details": ["admin", "approver"],
-  "admin/order-flow": ["admin"],
   "admin/sales-quotation": ["admin"],
-  "users/create": ["admin"],
-  "users/allUsers": ["admin"],
+  // Grants authority to OTHER users, so it stays admin-only rather than moving
+  // to `App_User`: that key covers user records, and gating this screen on it
+  // would let a user-admin grant themselves anything.
   "users/pagePermissions": ["admin"],
-  "users/addScheme": ["admin"],
-  "sap/sap-sync": ["admin"],
-  "sap/party-assignment": ["admin"],
-  "sap/party-product-assignment": ["admin"],
   "approver/pending_approval": ["approver"],
   "orders/ordertracking": ["manager", "billing"],
   "orders/auditorapproval": ["auditor"],
 };
 
 /**
- * Whether a user (by role + extra_pages) may access a mobile screen. The Home
- * dashboard is always reachable (it's the landing screen); everything else is
- * granted by role (SCREEN_ROLES) or by an explicit extra_pages grant.
- */
-/**
- * Payments screens, and which ACTION permissions open them.
+ * Whether a user may access a mobile screen.
  *
- * These screens are governed by the four Payment Permissions checkboxes rather
- * than by role, so any role — manager, billing, anything — can be given
- * payments work simply by ticking a box, and a payments role with nothing
- * ticked gets nothing.
+ * The order of decision matters and is deliberate:
  *
- * CREATE screens list only the create actions: an approver reviews documents,
- * they do not raise them, so showing them a form the server would reject is
- * worse than not showing it.
+ *   1. Home and Profile are always reachable.
+ *   2. Administrators hold everything — matching the server, which pre-expands
+ *      an admin to every key in `effective_keys` and `granted_keys`.
+ *   3. SCREEN_KEYS — the migrated, permission-key path. A screen listed there
+ *      is decided there and STOPS; it never falls through to the role map, so
+ *      a role can no longer grant a screen the keys deny.
+ *   4. SCREEN_ROLES — only for screens the backend has no key for (see the map).
+ *
+ * Takes the whole `User` rather than loose role/extraPages arguments. Those
+ * four parameters were easy to pass incompletely — one existing call site
+ * omitted `roles` entirely, silently misresolving users whose role came from
+ * `extra_roles` — and this makes that unrepresentable.
  */
-const PAYMENT_ACTION_SCREENS: Record<string, PaymentAction[]> = {
-  "payments/receive-payment": [PAYMENT_ACTIONS.PAYMENTS_CREATE],
-  "payments/bank-deposit": [PAYMENT_ACTIONS.DEPOSIT_CREATE],
-  "payments/payment-tracking": [
-    PAYMENT_ACTIONS.PAYMENTS_CREATE,
-    PAYMENT_ACTIONS.PAYMENTS_APPROVE,
-  ],
-  "payments/deposit-tracking": [
-    PAYMENT_ACTIONS.DEPOSIT_CREATE,
-    PAYMENT_ACTIONS.DEPOSIT_APPROVE,
-  ],
-  "payments/deposit-details": [
-    PAYMENT_ACTIONS.DEPOSIT_CREATE,
-    PAYMENT_ACTIONS.DEPOSIT_APPROVE,
-  ],
-  // Shared screens: any payments involvement opens them.
-  "payments/tracking-details": ALL_PAYMENT_ACTIONS,
-  "payments/tracking-progress": ALL_PAYMENT_ACTIONS,
-  "approval/approval-details": ALL_PAYMENT_ACTIONS,
-  // approval/payment-requests was REMOVED. Approvers work from the tracking
-  // screens, which scope themselves from these same action permissions.
-};
-
 export const canAccessScreen = (
   screen: string,
-  role: string | null | undefined,
-  extraPages: string[] = [],
-  roles?: string[] | null,
+  user: User | null | undefined,
 ): boolean => {
-  // Home (dashboard) and the user's own Profile are always reachable.
   if (screen === "dashboard" || screen === "profile") return true;
-  // Admin holds every screen implicitly, payments and deposits included. This
-  // mirrors the backend, where payments/permissions.py granted_keys() returns
-  // the full ACTION_PERMISSION_KEYS set for an admin. Without this the app hid
-  // payments pages the API would have served, because the
-  // PAYMENT_ACTION_SCREENS branch below returns before SCREEN_ROLES is read.
-  if (rolesOf(role, roles).includes("admin")) return true;
-  if (screensFromExtraPages(extraPages).has(screen)) return true;
-  // Payments screens follow the ACTION permissions an admin ticked, not the
-  // role. A manager ticked for Payments_Create must reach the payment form;
-  // a payments-role user who was ticked for nothing must not.
-  const viaAction = PAYMENT_ACTION_SCREENS[screen];
-  if (viaAction) {
-    return viaAction.some((action) => extraPages.includes(action));
-  }
-  // Notifications is shared across modules: a payments/deposit user now receives
-  // Payment/Deposit notifications, so anyone holding ANY payment action reaches
-  // the inbox too — in ADDITION to the roles in SCREEN_ROLES.notifications
-  // below. (This is additive, so the four notification roles keep their access
-  // even with no payment permission.)
-  if (
-    screen === "notifications" &&
-    ALL_PAYMENT_ACTIONS.some((action) => extraPages.includes(action))
-  ) {
+  if (isAdmin(user)) return true;
+
+  // Migrated screens: the key decides, full stop.
+  const required = SCREEN_KEYS[screen];
+  if (required) return canAny(user, required);
+
+  // An explicit per-user page grant still opens its screens.
+  if (screensFromExtraPages(permissionKeysOf(user)).has(screen)) return true;
+
+  // Notifications is shared across modules: anyone holding a payment action
+  // reaches the inbox, in ADDITION to the roles listed in SCREEN_ROLES.
+  if (screen === "notifications" && canAny(user, ALL_PAYMENT_ACTIONS)) {
     return true;
   }
+
+  // Unmigrated screens only: no registry key names them yet.
   const allowed = SCREEN_ROLES[screen];
   if (!allowed) return false;
-  // Match on EVERY role held (primary + extra_roles), not just the primary.
-  const held = rolesOf(role, roles);
+  const held = rolesOf(user?.role, user?.roles);
   return allowed.some((r) => held.includes(r));
 };
 
@@ -305,19 +291,17 @@ const ORDERS_FALLBACKS: string[] = [
  * dashboard (always reachable). Never returns a screen the user can't open.
  */
 export const resolveOrdersRoute = (
-  role: string | null | undefined,
-  extraPages: string[] = [],
-  roles?: string[] | null,
+  user: User | null | undefined,
 ): AppRoute => {
-  const normalizedRole = (role || "").toLowerCase();
+  const normalizedRole = (user?.role || "").toLowerCase();
 
   const own = ORDERS_BY_ROLE[normalizedRole];
-  if (own && canAccessScreen(own.screen, normalizedRole, extraPages, roles)) {
+  if (own && canAccessScreen(own.screen, user)) {
     return own;
   }
 
   for (const screen of ORDERS_FALLBACKS) {
-    if (canAccessScreen(screen, normalizedRole, extraPages, roles)) {
+    if (canAccessScreen(screen, user)) {
       return { screen, route: `/${screen}` };
     }
   }
@@ -374,13 +358,9 @@ const CREATE_TARGETS: CreateTarget[] = [
  * one means show the chooser sheet.
  */
 export const createTargetsFor = (
-  role: string | null | undefined,
-  extraPages: string[] = [],
-  roles?: string[] | null,
+  user: User | null | undefined,
 ): CreateTarget[] =>
-  CREATE_TARGETS.filter((t) =>
-    canAccessScreen(t.screen, role, extraPages, roles),
-  );
+  CREATE_TARGETS.filter((t) => canAccessScreen(t.screen, user));
 
 /**
  * The second bottom-bar tab: the user's own work queue.
@@ -400,51 +380,63 @@ export const createTargetsFor = (
  * downgrade.
  */
 export const isPaymentsOnlyUser = (
-  role: string | null | undefined,
-  extraPages: string[] = [],
-  roles?: string[] | null,
+  user: User | null | undefined,
 ): boolean => {
-  const normalizedRole = (role || "").toLowerCase();
-  const can = (screen: string) =>
-    canAccessScreen(screen, normalizedRole, extraPages, roles);
+  const normalizedRole = (user?.role || "").toLowerCase();
+  const reach = (screen: string) => canAccessScreen(screen, user);
 
   const own = ORDERS_BY_ROLE[normalizedRole];
-  if (own && can(own.screen)) return false;
-  if (ORDERS_FALLBACKS.some(can)) return false;
+  if (own && reach(own.screen)) return false;
+  if (ORDERS_FALLBACKS.some(reach)) return false;
 
   // No orders anywhere. Payments only counts if they actually hold one.
+  // Verification belongs here too: a verifier works payments all day and has
+  // no sales orders at all, so without this they landed on the sales
+  // dashboard — a page of empty order charts they cannot open a single one of.
   return (
-    can("payments/payment-tracking") || can("payments/deposit-tracking")
+    reach("payments/payment-tracking") ||
+    reach("payments/verification") ||
+    reach("payments/deposit-tracking")
   );
 };
 
+/**
+ * The second bottom-bar tab, in priority order:
+ *
+ *   Orders -> Payments -> Deposits -> Payment Verify
+ *
+ * ALWAYS returns a destination, never null. The footer keeps five icons for
+ * everyone, so it does not reflow between users — a bar that changes shape
+ * with permissions makes the app look broken and moves the other tabs under
+ * the user's thumb. A user who holds none of the four still gets the Orders
+ * tab, and tapping it raises the existing "no permission" dialog rather than
+ * navigating: `guarded()` in BottomBar re-checks access on every tap, so a
+ * visible tab is never a reachable screen.
+ */
 export const resolveWorkQueueRoute = (
-  role: string | null | undefined,
-  extraPages: string[] = [],
-  roles?: string[] | null,
-): (AppRoute & { label: string; icon: string }) | null => {
-  const normalizedRole = (role || "").toLowerCase();
+  user: User | null | undefined,
+): AppRoute & { label: string; icon: string } => {
+  const normalizedRole = (user?.role || "").toLowerCase();
+  const ordersTab = {
+    screen: "orders/ordertracking",
+    route: "/orders/ordertracking",
+    label: "Orders",
+    icon: "receipt-outline",
+  };
+
   // Admin holds every screen, so the generic resolution below would pick
-  // whichever orders screen matched first. Pin them to order tracking: a
-  // four-tab footer left an unbalanced gap beside the centre FAB, and the
+  // whichever orders screen matched first. Pin them to order tracking: the
   // admin's natural work queue is the full order list.
-  if (rolesOf(role, roles).includes("admin")) {
-    return {
-      screen: "orders/ordertracking",
-      route: "/orders/ordertracking",
-      label: "Orders",
-      icon: "receipt-outline",
-    };
-  }
-  const can = (screen: string) =>
-    canAccessScreen(screen, normalizedRole, extraPages, roles);
+  if (isAdmin(user)) return ordersTab;
+
+  const reach = (screen: string) => canAccessScreen(screen, user);
 
   const own = ORDERS_BY_ROLE[normalizedRole];
-  if (own && can(own.screen)) {
+  if (own && reach(own.screen)) {
     return { ...own, label: "Orders", icon: "receipt-outline" };
   }
   for (const screen of ORDERS_FALLBACKS) {
-    if (can(screen)) {
+    if (reach(screen)) {
       return {
         screen,
         route: `/${screen}`,
@@ -454,8 +446,14 @@ export const resolveWorkQueueRoute = (
     }
   }
 
-  // No orders access — fall back to whichever payments queue they hold.
-  // Approvers get their request queue; creators get their tracking list.
+  // No orders access — fall back to the payments work they hold, in priority
+  // order: Payments, then Verify, then Deposits.
+  //
+  // Payments and Verify sit together because they are the same surface: both
+  // are payment work, and a user holding either gets the payments home as
+  // their dashboard (see isPaymentsOnlyUser). Payments comes first because a
+  // user who does both records more often than they verify. Deposits is last
+  // — it is the separate banking step.
   const candidates: (AppRoute & { label: string; icon: string })[] = [
     // Straight to the tracking list. The SUMMARY now lives on the dashboard
     // (a payments-only user's home page is the payments home), so sending the
@@ -467,6 +465,12 @@ export const resolveWorkQueueRoute = (
       icon: "cash-outline",
     },
     {
+      screen: "payments/verification",
+      route: "/(main)/payments/verification",
+      label: "Verify",
+      icon: "shield-checkmark-outline",
+    },
+    {
       screen: "payments/deposit-tracking",
       route: "/(main)/payments/deposit-tracking",
       label: "Deposits",
@@ -474,13 +478,12 @@ export const resolveWorkQueueRoute = (
     },
   ];
   for (const candidate of candidates) {
-    if (can(candidate.screen)) return candidate;
+    if (reach(candidate.screen)) return candidate;
   }
 
-  // No orders, payments or deposits queue for this user (an admin, typically).
-  // Returning a dashboard route here rendered a SECOND "Home" tab beside the
-  // real one; null tells the footer to drop the tab instead.
-  return null;
+  // Holds none of the four. Keep the tab — the footer must not lose an icon —
+  // and let the tap explain why it cannot be opened.
+  return ordersTab;
 };
 
 /**
@@ -499,21 +502,18 @@ export const resolveWorkQueueRoute = (
  * than sending them to a screen that would refuse them.
  */
 export const resolveReportsRoute = (
-  role: string | null | undefined,
-  extraPages: string[] = [],
-  roles?: string[] | null,
+  user: User | null | undefined,
 ): (AppRoute & { label: string }) | null => {
-  const can = (screen: string) =>
-    canAccessScreen(screen, (role || "").toLowerCase(), extraPages, roles);
+  const reach = (screen: string) => canAccessScreen(screen, user);
 
-  if (can("reports/daily-report")) {
+  if (reach("reports/daily-report")) {
     return {
       screen: "reports/daily-report",
       route: "/reports/daily-report",
       label: "Reports",
     };
   }
-  if (can("payments/dashboard")) {
+  if (reach("payments/dashboard")) {
     return {
       screen: "payments/dashboard",
       route: "/(main)/payments/dashboard",

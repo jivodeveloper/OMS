@@ -297,30 +297,19 @@ export default function MainLayout() {
 
   // Single source of truth for the header bell and the drawer's Notifications
   // item, so the two can never disagree.
-  const canSeeNotifications = canAccessScreen(
-    "notifications",
-    userRole,
-    user?.extra_pages || [],
-    user?.roles,
-  );
+  const canSeeNotifications = canAccessScreen("notifications", user);
 
   // Mirrors what dashboard.tsx renders, so the header and the page agree.
-  const paymentsOnlyHome = isPaymentsOnlyUser(
-    user?.role,
-    user?.extra_pages || [],
-    user?.roles,
-  );
+  const paymentsOnlyHome = isPaymentsOnlyUser(user);
   // Same choice dashboard.tsx makes: anyone holding payments sees the payments
   // home, everyone else on this branch is a deposits user. The header has to
   // follow, or a deposits user reads "Payments Dashboard" above deposit data.
+  // Must match dashboard.tsx exactly, or a verifier reads "Deposits" above
+  // payments data. Verification counts as payment work on both sides.
   const homeIsDeposits =
     paymentsOnlyHome &&
-    !canAccessScreen(
-      "payments/payment-tracking",
-      (user?.role || "").toLowerCase(),
-      user?.extra_pages || [],
-      user?.roles,
-    );
+    !canAccessScreen("payments/payment-tracking", user) &&
+    !canAccessScreen("payments/verification", user);
 
   /**
    * Whether a screen appears in the sidebar.
@@ -332,12 +321,7 @@ export default function MainLayout() {
    */
   const isVisible = (screen: string) => {
     if (!userRole && screen === "dashboard") return true;
-    return canAccessScreen(
-      screen,
-      userRole,
-      user?.extra_pages || [],
-      user?.roles,
-    );
+    return canAccessScreen(screen, user);
   };
 
   return (
@@ -690,6 +674,20 @@ export default function MainLayout() {
               <Ionicons name="trail-sign-outline" size={22} color={color} />
             ),
             drawerItemStyle: isVisible("payments/payment-tracking")
+              ? visibleStyle
+              : hiddenStyle,
+          }}
+        />
+        <Drawer.Screen
+          name="payments/verification"
+          options={{
+            drawerLabel: ({ color }) =>
+              renderDrawerLabel("Verify Payments", color),
+            title: "Verify Payments",
+            drawerIcon: ({ color }) => (
+              <Ionicons name="shield-checkmark-outline" size={22} color={color} />
+            ),
+            drawerItemStyle: isVisible("payments/verification")
               ? visibleStyle
               : hiddenStyle,
           }}

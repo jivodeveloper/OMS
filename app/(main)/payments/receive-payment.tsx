@@ -123,9 +123,45 @@ function ReceivePaymentScreen() {
    * One screen rather than two means the edit form can never drift from the
    * create form — same validation, same cash breakdown, same cascade.
    */
-  const params = useLocalSearchParams<{ receiptId?: string }>();
+  const params = useLocalSearchParams<{
+    receiptId?: string;
+    /** The screen that opened this form, so Save can return to it. */
+    from?: string;
+    /** What lay behind THAT screen, so its own Back still works. */
+    origin?: string;
+  }>();
   const editingId = Number(params.receiptId) || null;
   const isEdit = editingId != null;
+
+  /**
+   * Where Save lands.
+   *
+   * An edit opened from a details screen goes BACK to that receipt's details,
+   * so the user sees the figures they just changed. Anything else — a create,
+   * or an edit opened straight from a list — goes to the tracking list.
+   *
+   * Returning to the details page is what makes an edit feel finished: the
+   * previous behaviour replaced to the tracking list unconditionally, which
+   * dropped a verifier onto a screen they had not come from and left them to
+   * find the row again to confirm their own change had landed.
+   */
+  const returnTo = React.useMemo(() => {
+    if (isEdit && params.from === "approval/approval-details") {
+      return {
+        pathname: "/(main)/approval/approval-details",
+        params: {
+          documentId: String(editingId),
+          // Carried through so the details screen's own Back still knows the
+          // list behind it — otherwise Back there would fall to the dashboard.
+          from: params.origin || "payments/payment-tracking",
+        },
+      };
+    }
+    return {
+      pathname: "/(main)/payments/payment-tracking",
+      params: {} as Record<string, string>,
+    };
+  }, [isEdit, params.from, params.origin, editingId]);
   const [loadingExisting, setLoadingExisting] = useState(isEdit);
   /**
    * Whether this editor may put the entry back into the chain.
@@ -520,11 +556,25 @@ function ReceivePaymentScreen() {
         }
       }
 
+      // Who moves this receipt onward?
+      //
+      // A receipt now passes through a HANDOVER CHECK before it may enter the
+      // approval chain: a second person counts the physical cash or cheque
+      // against the entry, and THEIR verification submits it (the server does
+      // both in one transaction). So the app must not submit on the creator's
+      // behalf — `submit_receipt` refuses an unverified receipt, which left
+      // every new payment stranded as a DRAFT in no queue at all.
+      //
+      // `awaitsVerification` is read from the SERVER's response, not assumed:
+      // on a backend without the verification columns the field is absent, and
+      // the old submit-on-create behaviour is exactly right there.
+      const awaitsVerification = receipt.verification_status === "PENDING";
+
       // An APPROVER correcting an entry parked at their rung only saves it —
       // the approval chain is already open, with them, so submitting again
       // would be refused ("already has an open approval request"). Only a
-      // creator's edit re-enters the chain.
-      const needsSubmit = !isEdit || canResubmit;
+      // creator's edit re-enters the chain, and only once it is verified.
+      const needsSubmit = !awaitsVerification && (!isEdit || canResubmit);
 
       if (needsSubmit) {
         try {
@@ -546,7 +596,13 @@ function ReceivePaymentScreen() {
 
       const now = new Date();
       setSuccess({
-        kind: needsSubmit ? (isEdit ? "resubmitted" : "created") : "updated",
+        kind: awaitsVerification
+          ? "awaiting_verification"
+          : needsSubmit
+            ? isEdit
+              ? "resubmitted"
+              : "created"
+            : "updated",
         receiptNo: receipt.receipt_no,
         date: now.toLocaleDateString("en-IN", {
           day: "2-digit",
@@ -988,14 +1044,21 @@ function ReceivePaymentScreen() {
               setForm(fresh);
               setExpandedId(fresh.methods[0].id);
             }
-            // Land on Payment Tracking, never back on the form. replace() so
-            // Back from tracking does not return to a submitted entry, and
-            // refreshAt forces the list to refetch rather than show the cached
-            // page this receipt is missing from.
+            // Land where the user came FROM, never back on the form.
+            //
+            // An EDIT returns to the screen that opened it — the details page
+            // for the very receipt just changed, so the user sees their new
+            // figures immediately instead of being dumped on a list and having
+            // to find the row again. A CREATE has no such origin and goes to
+            // the tracking list, where the new entry now appears.
+            //
+            // replace() either way, so Back does not return to a form that has
+            // already been submitted; `refreshAt` forces the destination to
+            // refetch rather than render the copy it cached before the edit.
             router.replace({
-              pathname: "/(main)/payments/payment-tracking",
-              params: { refreshAt: String(Date.now()) },
-            });
+              pathname: returnTo.pathname,
+              params: { ...returnTo.params, refreshAt: String(Date.now()) },
+            } as never);
           }}
         />
       ) : null}

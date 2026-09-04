@@ -21,10 +21,30 @@ import paymentsService, {
  *   2. It re-fetches on navigation and on app foreground — the same triggers
  *      the drawer already uses for page grants.
  *
- * `user.extra_pages` is used as an INSTANT fallback so the UI has something
- * correct to render on first paint, before the request returns. It covers the
- * per-user grants and admin, missing only role-derived keys, which the server
- * response then fills in.
+ * The local answer (via `hasPaymentAction` -> `can()`) is used as an INSTANT
+ * fallback so the UI has something correct to render on first paint, before the
+ * request returns.
+ *
+ * WHY THIS HOOK SURVIVES THE PERMISSION MIGRATION
+ * -----------------------------------------------
+ * `user.permissions` now carries the same four keys, so a naive reading is that
+ * this hook is redundant. It is kept because it answers a slightly different
+ * question, on a different clock:
+ *
+ *   * `/payments/my-permissions/` is fetched with `cache: 'no-store'` on every
+ *     navigation. The profile — the source of `user.permissions` — refreshes on
+ *     the same triggers, but a payments permission revoked mid-session is the
+ *     case this module was written to catch promptly, and money screens are
+ *     where that matters most.
+ *   * It returns the server's own `can` object, i.e. the answer the API will
+ *     actually apply to the next request. Local evaluation is a prediction of
+ *     that; this is the thing itself.
+ *
+ * The two are no longer independent implementations: the local half now routes
+ * through the central `can()`, so a disagreement between them means the profile
+ * and the payments endpoint disagree on the server — worth surfacing, not
+ * worth hiding. If that never happens in practice, this hook can later collapse
+ * to `can(user, key)` with no call-site change.
  */
 export interface PaymentPermissionState {
   canCreatePayment: boolean;
@@ -40,17 +60,17 @@ export function usePaymentPermissions(): PaymentPermissionState {
   const { user } = useAuth();
   const pathname = usePathname();
 
-  const role = user?.role ?? null;
-  const extraPages = user?.extra_pages ?? [];
-  const roles = user?.roles;
-
-  // Optimistic local answer — correct for admins, roles and per-user grants,
-  // available immediately so no screen flashes "no access" while loading.
+  // Optimistic local answer, now resolved through the central permission model:
+  // `hasPaymentAction` reads the server-issued `permissions` when present and
+  // falls back to `extra_pages` only on the degraded path. It previously read
+  // `extra_pages` alone, so a key granted through a ROLE BUNDLE on the backend
+  // matrix was invisible until the network answer arrived — this closes that
+  // gap, and the two sources now agree by construction.
   const local = {
-    canCreatePayment: hasPaymentAction(PAYMENT_ACTIONS.PAYMENTS_CREATE, role, extraPages, roles),
-    canApprovePayment: hasPaymentAction(PAYMENT_ACTIONS.PAYMENTS_APPROVE, role, extraPages, roles),
-    canCreateDeposit: hasPaymentAction(PAYMENT_ACTIONS.DEPOSIT_CREATE, role, extraPages, roles),
-    canApproveDeposit: hasPaymentAction(PAYMENT_ACTIONS.DEPOSIT_APPROVE, role, extraPages, roles),
+    canCreatePayment: hasPaymentAction(PAYMENT_ACTIONS.PAYMENTS_CREATE, user),
+    canApprovePayment: hasPaymentAction(PAYMENT_ACTIONS.PAYMENTS_APPROVE, user),
+    canCreateDeposit: hasPaymentAction(PAYMENT_ACTIONS.DEPOSIT_CREATE, user),
+    canApproveDeposit: hasPaymentAction(PAYMENT_ACTIONS.DEPOSIT_APPROVE, user),
   };
 
   const [server, setServer] = useState<PaymentPermissions | null>(null);

@@ -107,6 +107,15 @@ export interface ApprovalDetail {
   partyCode: string;
   company: string;
   createdBy: string;
+  /**
+   * The login behind `createdBy`. Carried but NOT rendered on the details
+   * card — the full name reads better there. Kept because it is the only
+   * unambiguous identity when two accounts share a display name, which the
+   * live data does have.
+   */
+  createdByUsername: string;
+  /** ISO timestamp the entry was raised, for the handover comparison. */
+  createdAt: string | null;
   createdDate: string;
   createdTime: string;
   invoice: string;
@@ -142,6 +151,20 @@ export interface ApprovalDetail {
   rejectedBy: string;
   /** Receipt id, for navigating to the edit form. */
   documentId: number;
+  /**
+   * The handover (verification) axis — ORTHOGONAL to the approval status
+   * above. A receipt carries both, and one is never inferred from the other.
+   * Null on a backend that predates verification.
+   */
+  verificationStatus: "PENDING" | "VERIFIED" | null;
+  /** `YYYY-MM-DD` the money changed hands. Null on a legacy row. */
+  collectedAt: string | null;
+  verifiedBy: string;
+  verifiedByUsername: string;
+  verifiedAt: string | null;
+  verificationRemarks: string;
+  /** Creator's user id, for the self-verification check. */
+  createdById: number | null;
   /**
    * The collection person who physically handed the money over. Empty when the
    * party paid directly — that name is already shown as the party.

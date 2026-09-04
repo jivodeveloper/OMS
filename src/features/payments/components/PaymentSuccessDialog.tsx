@@ -9,7 +9,11 @@ import DialogHeader from "@/src/features/approval/components/dialogs/DialogHeade
 import DialogFooter from "@/src/features/approval/components/dialogs/DialogFooter";
 
 /** What just happened to the receipt — decides the wording and the accent. */
-export type PaymentSuccessKind = "created" | "resubmitted" | "updated";
+export type PaymentSuccessKind =
+  | "created"
+  | "resubmitted"
+  | "updated"
+  | "awaiting_verification";
 
 interface Props {
   visible: boolean;
@@ -49,6 +53,17 @@ const COPY: Record<
     subtitle: "The entry has been updated. It is still with you for approval.",
     stamp: "Updated On",
   },
+  // The handover gate. The receipt is saved but has NOT reached an approver —
+  // it waits for someone else to check the physical money against it, and
+  // their verification is what sends it for approval. Saying "sent to the
+  // approver" here would be wrong, and would have the creator wondering why
+  // it never appears in the approval queue.
+  awaiting_verification: {
+    title: "Payment Recorded!",
+    subtitle:
+      "The entry is waiting to be verified. Once someone confirms the cash or cheque, it goes for approval.",
+    stamp: "Recorded On",
+  },
 };
 
 /**
@@ -73,14 +88,23 @@ export default function PaymentSuccessDialog({
   onDone,
 }: Props) {
   const copy = COPY[kind];
-  // "Updated" is a save, not a submission — blue reads as informational where
-  // green would overclaim that the entry has moved on.
-  const accent = kind === "updated" ? COLORS.primary : COLORS.success;
+  // "Updated" is a save, not a submission, and a receipt awaiting verification
+  // has not moved either — blue reads as informational where green would
+  // overclaim that the entry is on its way to an approver.
+  const pendingHandover = kind === "awaiting_verification";
+  const accent =
+    kind === "updated" || pendingHandover ? COLORS.primary : COLORS.success;
 
   return (
     <DialogShell visible={visible} onRequestClose={onDone}>
       <DialogHeader
-        icon={kind === "updated" ? "save" : "checkmark-circle"}
+        icon={
+          pendingHandover
+            ? "shield-checkmark"
+            : kind === "updated"
+              ? "save"
+              : "checkmark-circle"
+        }
         accent={accent}
         title={title ?? copy.title}
         subtitle={copy.subtitle}

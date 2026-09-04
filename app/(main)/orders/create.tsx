@@ -505,9 +505,11 @@ export function OrderEntryScreen({
     openMode?: string;
   }>();
   const userRole = user?.role?.toLowerCase() || "";
-  // Where "Go to Orders" should send THIS user — resolved from their role and
-  // page grants, never hardcoded to one role's screen.
-  const ordersRoute = resolveOrdersRoute(user?.role, user?.extra_pages || []);
+  // Where "Go to Orders" should send THIS user — resolved from their own access,
+  // never hardcoded to one role's screen. Previously this passed role and grants
+  // but silently dropped `roles`, so a user holding an orders role only via
+  // extra_roles resolved to the wrong destination; the whole user is passed now.
+  const ordersRoute = resolveOrdersRoute(user);
   const isExplicitCreateMode = openMode === "create";
   const isEditMode = !isExplicitCreateMode && mode === "edit" && !!editOrderId;
   const isFocMode = screenVariant === "foc";

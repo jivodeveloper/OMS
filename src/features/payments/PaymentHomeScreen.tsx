@@ -308,6 +308,11 @@ export default function PaymentHomeScreen({ kind }: { kind: HomeKind }) {
           documentId: String(row.id),
           id: row.approvalId != null ? String(row.approvalId) : "",
           requestNo: row.docNo,
+          // Return HERE after acting. Without it a verifier who opened a
+          // payment from the home page was dropped on the tracking list
+          // afterwards — a screen they never asked for. The action bar
+          // itself is decided by permissions, not by this.
+          from: "dashboard",
         },
       } as never);
     },

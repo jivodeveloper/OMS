@@ -13,6 +13,7 @@ import { useLocalSearchParams } from "expo-router";
 import { fs, ms, sp } from "@/src/utils/responsive";
 import approvalsService, {
   type ApiApprovalDetail,
+  type ApiApprovalAssignee,
 } from "@/src/services/approvals.service";
 import paymentsService, {
   type BankDeposit,
@@ -105,28 +106,9 @@ const formatDateTime = (value?: string | null) => {
   })}`;
 };
 
-const formatCreatedOn = (value?: string | null) => {
-  if (!value) return "";
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return "";
-  return d.toLocaleString("en-IN", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: true,
-  });
-};
-
-const formatMoney = (value?: string | number | null) => {
-  const n = typeof value === "string" ? Number(value) : value;
-  if (n == null || !Number.isFinite(n)) return "—";
-  return `₹${n.toLocaleString("en-IN", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}`;
-};
+// `formatCreatedOn` and `formatMoney` were deleted with the summary card's
+// subtitle lines: the created-on stamp, party and amount now live only on the
+// Details page, so nothing here formatted them any more.
 
 /** One rendered card: an approval rung, or the trailing SAP posting card. */
 interface Stage {
@@ -135,7 +117,12 @@ interface Stage {
   badge: string;
   state: StageState;
   action?: string;
-  approvers?: { name: string; state: "APPROVED" | "REJECTED" | "PENDING" }[];
+  approvers?: {
+    name: string;
+    /** Shown beneath the name, so a stuck entry can be chased by hand. */
+    username?: string;
+    state: "APPROVED" | "REJECTED" | "PENDING";
+  }[];
   stageLabel?: string;
   timestamp?: string;
   remarks?: string;
@@ -293,8 +280,17 @@ export default function TrackingProgressScreen() {
                 style={styles.detailIcon}
               />
               <View style={styles.detailTextWrap}>
+                {/* "Approver" is wrong on the verification card, and "Waiting
+                    on" is what the reader actually wants to know while a step
+                    is unfinished — it names who to go and ask. */}
                 <Text style={styles.detailLabel}>
-                  {item.approvers.length > 1 ? "Approvers" : "Approver"}
+                  {item.state === "CURRENT" || item.state === "FUTURE"
+                    ? "Waiting on"
+                    : item.key === "verification"
+                      ? "Verified by"
+                      : item.approvers.length > 1
+                        ? "Approvers"
+                        : "Approver"}
                 </Text>
                 {item.approvers.map((person, i) => {
                   const personTone =
@@ -323,9 +319,20 @@ export default function TrackingProgressScreen() {
                           {String(person.name || "?").charAt(0).toUpperCase()}
                         </Text>
                       </View>
-                      <Text style={styles.approverName} numberOfLines={1}>
-                        {person.name}
-                      </Text>
+                      {/* Name over username. The name is who to ask for, the
+                          username is how to find them — two people can share
+                          a display name, so the timeline shows both when they
+                          differ. */}
+                      <View style={styles.approverNameWrap}>
+                        <Text style={styles.approverName} numberOfLines={1}>
+                          {person.name}
+                        </Text>
+                        {!!person.username && (
+                          <Text style={styles.approverUsername} numberOfLines={1}>
+                            @{person.username}
+                          </Text>
+                        )}
+                      </View>
                       <View
                         style={[
                           styles.approverStatusChip,
@@ -399,24 +406,12 @@ export default function TrackingProgressScreen() {
               <Text style={styles.summaryLabel}>
                 {isPayment ? "Payment ID" : "Deposit ID"}
               </Text>
+              {/* The number alone. Created-on, party and amount all live on
+                  the Details page, and repeating them here pushed the first
+                  timeline card off screen — on the screen that exists to show
+                  the timeline. */}
               <Text style={styles.summaryOrderNo} numberOfLines={1} adjustsFontSizeToFit>
                 {docNo}
-              </Text>
-              {!!doc?.created_at && (
-                <Text style={styles.summaryCreated} numberOfLines={1}>
-                  Created on {formatCreatedOn(doc.created_at)}
-                </Text>
-              )}
-              <Text style={styles.summaryCreated} numberOfLines={1}>
-                {isPayment
-                  ? (doc as PaymentReceipt)?.card_name
-                  : (doc as BankDeposit)?.bank_account_name}
-                {" · "}
-                {formatMoney(
-                  isPayment
-                    ? (doc as PaymentReceipt)?.total_amount
-                    : (doc as BankDeposit)?.deposit_amount,
-                )}
               </Text>
             </View>
           </View>
@@ -473,11 +468,19 @@ function DetailRow({
 }
 
 /**
- * Turn the approval ladder plus the document's SAP state into timeline cards.
+ * The document's whole journey as timeline cards:
  *
- * Rungs already acted on are green (or red); the rung awaiting action is amber;
- * rungs not yet reached are grey. A trailing blue card reports SAP, because
+ *     Created -> Verification -> Level 1 -> Level 2 ... -> SAP
+ *
+ * Rungs already acted on are green (or red); the one awaiting action is amber;
+ * those not yet reached are grey. A trailing blue card reports SAP, because
  * posting is what "approved" ultimately leads to.
+ *
+ * Creation and verification are drawn from the RECEIPT, not the approval
+ * request, because both happen before one exists. Without them a newly raised
+ * payment showed a timeline containing nothing but "SAP: not posted yet" —
+ * technically true and useless, since the thing it was actually waiting for
+ * (somebody to count the cash) was not on screen at all.
  */
 function buildStages(
   doc: PaymentReceipt | BankDeposit | null,
@@ -486,6 +489,75 @@ function buildStages(
 ): Stage[] {
   if (!doc) return [];
   const stages: Stage[] = [];
+
+  // ── 1. Created ────────────────────────────────────────────────────────
+  // Always done: the document exists, so this step is behind us by
+  // definition. It anchors the timeline and names who raised the entry.
+  const createdBy =
+    (doc as PaymentReceipt).created_by_name ||
+    (doc as PaymentReceipt).created_by_username ||
+    "—";
+  stages.push({
+    key: "created",
+    title: "Created",
+    badge: "Done",
+    state: "DONE",
+    action: createdBy,
+    stageLabel: "Payments — Create",
+    timestamp: formatDateTime(doc.created_at),
+  });
+
+  // ── 2. Verification (payments only) ───────────────────────────────────
+  // Deposits have no handover check, and a backend without the verification
+  // columns sends nothing — in both cases the step is omitted rather than
+  // drawn as an empty or perpetually-pending card.
+  const receipt = isPayment ? (doc as PaymentReceipt) : null;
+  const verification = receipt?.verification_status;
+  if (verification) {
+    const verified = verification === "VERIFIED";
+    stages.push({
+      key: "verification",
+      title: "Verification",
+      badge: verified ? "Verified" : "Pending",
+      // CURRENT, not FUTURE, while pending: this is where the document
+      // actually is, and the amber rail is what says so.
+      state: verified ? "DONE" : "CURRENT",
+      action: verified
+        ? receipt?.verified_by_name || "—"
+        : // When nobody is named below, say so here instead: an empty
+          // "Waiting on" list would otherwise read as though the step needs
+          // nobody. Administrators can always verify, they are just not the
+          // people to chase, so they are not listed.
+          (receipt?.eligible_verifiers?.length ?? 0) > 0
+          ? "Awaiting a handover check"
+          : "Awaiting a handover check — no verifier is assigned yet",
+      stageLabel: "Payments — Verify",
+      timestamp: verified ? formatDateTime(receipt?.verified_at) : undefined,
+      remarks: receipt?.verification_remarks || undefined,
+      // Who did it, or — while it waits — who CAN, so a creator watching
+      // their payment sit here knows whom to go and ask. The candidate list
+      // is server-resolved per read, so it follows permission changes.
+      approvers: verified
+        ? [
+            {
+              name:
+                receipt?.verified_by_name ||
+                receipt?.verified_by_username ||
+                "—",
+              username: receipt?.verified_by_username || undefined,
+              state: "APPROVED" as const,
+            },
+          ]
+        : (receipt?.eligible_verifiers ?? []).map((person) => ({
+            name: person.name || person.username,
+            username:
+              person.username && person.username !== person.name
+                ? person.username
+                : undefined,
+            state: "PENDING" as const,
+          })),
+    });
+  }
 
   if (approval) {
     const rejected = approval.status === "REJECTED";
@@ -504,7 +576,10 @@ function buildStages(
             sequence: i + 1,
             name: `Level ${i + 1}`,
             role: "",
-            approvers: [] as string[],
+            // Synthesized from `total_levels` when the server sends no ladder,
+            // so the rungs exist but their assignees are unknown — an empty
+            // list, not a list of names we would have to invent.
+            approvers: [] as ApiApprovalAssignee[],
           }));
 
     ladder.forEach((rung) => {
@@ -526,18 +601,32 @@ function buildStages(
             ? "CURRENT"
             : "FUTURE";
 
-      const namesFromLadder = rung.approvers?.length ? rung.approvers : [];
+      // Who is assigned to this rung, straight from the ladder the server
+      // returns on every fetch — so adding or removing an approver, or
+      // changing how many rungs there are, shows up without an app release.
+      const assigned = rung.approvers ?? [];
       const approvers = decision
         ? [
             {
-              name: decision.approver_username || "—",
+              // The person who actually decided. `approver_name` is the
+              // display name; the username identifies them unambiguously.
+              name:
+                decision.approver_name ||
+                decision.approver_username ||
+                "—",
+              username: decision.approver_username || undefined,
               state: (isRejectedHere ? "REJECTED" : "APPROVED") as
                 | "APPROVED"
                 | "REJECTED",
             },
           ]
-        : namesFromLadder.map((name) => ({
-            name,
+        : assigned.map((person) => ({
+            name: person.name || person.username,
+            // Hidden when it would just repeat the name.
+            username:
+              person.username && person.username !== person.name
+                ? person.username
+                : undefined,
             state: "PENDING" as const,
           }));
 
@@ -564,6 +653,23 @@ function buildStages(
         timestamp: decision ? formatDateTime(decision.acted_at) : undefined,
         remarks: decision?.remarks || undefined,
       });
+    });
+  } else if (doc.status !== "CANCELLED" && doc.status !== "REJECTED") {
+    // No approval request exists yet — the document has not been submitted,
+    // which for a payment means it is still awaiting verification.
+    //
+    // One placeholder rung rather than none. The ladder is configured per
+    // company and is not knowable from here until the request is created, so
+    // guessing at level names would be inventing information; saying that an
+    // approval step is coming is honest and stops the timeline jumping
+    // straight from "Created" to "SAP".
+    stages.push({
+      key: "approval-pending",
+      title: "Approval",
+      badge: "Not started",
+      state: "FUTURE",
+      action: "Begins once the payment is verified",
+      stageLabel: "Payments — Approve",
     });
   }
 
@@ -814,17 +920,25 @@ const styles = StyleSheet.create({
     borderRadius: ms(11),
     alignItems: "center",
     justifyContent: "center",
+    // Or a long name squashes the circle into an ellipse on a narrow screen.
+    flexShrink: 0,
   },
   approverAvatarText: {
     fontSize: fs(11),
     fontWeight: "800",
   },
+  // The name/username pair takes the flexible middle column; the name itself
+  // no longer flexes, or the username beneath it would be squeezed out.
+  approverNameWrap: { flex: 1, minWidth: 0 },
   approverName: {
-    flex: 1,
-    minWidth: 0,
     fontSize: fs(13),
     color: "#374151",
     fontWeight: "600",
+  },
+  approverUsername: {
+    fontSize: fs(11),
+    color: "#9CA3AF",
+    marginTop: 1,
   },
   approverStatusChip: {
     flexDirection: "row",

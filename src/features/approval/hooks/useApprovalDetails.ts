@@ -191,6 +191,11 @@ function toApprovalDetail(receipt: PaymentReceipt): ApprovalDetail {
     partyCode: receipt.card_code,
     company: receipt.company,
     createdBy: receipt.created_by_name || receipt.created_by_username || "—",
+    // The login itself, shown under the name. Two people can share a display
+    // name — the live data has two accounts both called "Admin" — so the
+    // username is what identifies who actually acted.
+    createdByUsername: receipt.created_by_username ?? "",
+    createdAt: receipt.created_at ?? null,
     // Named collection person only. "PARTY" means the party paid direct, and
     // that is already on screen as the party name.
     sapBranch: receipt.sap_branch?.name
@@ -204,6 +209,10 @@ function toApprovalDetail(receipt: PaymentReceipt): ApprovalDetail {
         : "",
     createdDate: formatDate(receipt.created_at),
     createdTime: formatTime(receipt.created_at),
+    // The day the money actually changed hands — user-entered, and NOT the
+    // same as `created_at`: cash taken on Monday may be typed up on Thursday.
+    // This is what the handover span is measured from.
+    collectedAt: receipt.payment_date ?? null,
     invoice,
     // What was owed when the invoice was picked. Older receipts stored 0, so
     // the card hides itself rather than showing a false "over-applied".
@@ -234,6 +243,15 @@ function toApprovalDetail(receipt: PaymentReceipt): ApprovalDetail {
     rejectionReason: receipt.approval?.rejection_reason ?? "",
     rejectedBy: receipt.approval?.rejected_by ?? "",
     documentId: receipt.id,
+    // The handover axis, carried through so the verification view of this
+    // screen can offer its actions. Read from the server on every load —
+    // never inferred from the approval status, which is a different thing.
+    verificationStatus: receipt.verification_status ?? null,
+    verifiedBy: receipt.verified_by_name ?? "",
+    verifiedByUsername: receipt.verified_by_username ?? "",
+    verifiedAt: receipt.verified_at ?? null,
+    verificationRemarks: receipt.verification_remarks ?? "",
+    createdById: receipt.created_by ?? null,
   };
 }
 

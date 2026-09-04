@@ -139,21 +139,17 @@ export default function DashboardScreen() {
    * it meant their home page was a wall of empty sales figures. Returning
    * early keeps that whole path untouched for everyone who does hold orders.
    */
-  const paymentsOnly = isPaymentsOnlyUser(
-    user?.role,
-    user?.extra_pages || [],
-    user?.roles,
-  );
+  const paymentsOnly = isPaymentsOnlyUser(user);
   if (paymentsOnly) {
-    // Deposits-only users see deposits; anyone with payments sees payments.
-    const kind = canAccessScreen(
-      "payments/payment-tracking",
-      (user?.role || "").toLowerCase(),
-      user?.extra_pages || [],
-      user?.roles,
-    )
-      ? "payment"
-      : "deposit";
+    // Deposits-only users see deposits; anyone doing PAYMENT work — recording
+    // or verifying — sees the payments home. Verification counts here because
+    // a verifier's whole day is payments; sending them to the deposits home
+    // would show them banking figures they have no part in.
+    const kind =
+      canAccessScreen("payments/payment-tracking", user) ||
+      canAccessScreen("payments/verification", user)
+        ? "payment"
+        : "deposit";
     return <PaymentHomeScreen kind={kind} />;
   }
 

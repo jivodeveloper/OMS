@@ -33,6 +33,8 @@ import paymentsService, {
 } from "@/src/services/payments.service";
 import { useCompanies } from "./usePaymentMasters";
 import { usePaymentPermissions } from "./usePaymentPermissions";
+import VerificationDateFilter from "./components/VerificationDateFilter";
+import { labelFor, windowFor, type VerificationRange } from "./verificationWindow";
 
 /**
  * Tracking list for payments and deposits.
@@ -138,12 +140,72 @@ const APPROVER_STATUS_OPTIONS: StatusOption[] = [
   },
 ];
 
-const CREATOR_STATUS_OPTIONS: StatusOption[] = [
-  { label: "All", value: "all", query: "group_by_status=true" },
+/**
+ * The verification queue's own views.
+ *
+ * "Pending" is the queue proper — what still needs counting. "Verified" is
+ * there so a verifier can look back at what they have already cleared without
+ * leaving for the tracking screen, which is the only other place it shows.
+ * "All" drops the verification filter entirely, so the period's whole picture
+ * is one tap away.
+ *
+ * Note the DEFAULT stays "Pending" (see `statusView`): this screen is a work
+ * queue first, and opening it on everything would bury the entries that need
+ * acting on.
+ */
+const VERIFICATION_STATUS_OPTIONS: StatusOption[] = [
+  // Everything, verified or not — the whole picture for this period.
+  //
+  // An EMPTY query, not `verification_status=PENDING,VERIFIED`: a receipt
+  // raised before the verification columns existed carries neither value, and
+  // naming both would silently drop it. Sending no filter at all is what
+  // "All" actually means. The parser skips a blank pair, so this is safe.
+  {
+    label: "All",
+    value: "all",
+    query: "",
+  },
+  // The queue proper: what still needs counting.
   {
     label: "Pending",
     value: "PENDING",
-    query: "status=PENDING_APPROVAL,APPROVED,POSTING_TO_SAP",
+    query: "verification_status=PENDING",
+  },
+  // "Verified" replaces the approver list's "Approved" — a verifier's own act
+  // is verification, and labelling it Approved would claim work they did not
+  // do. Everything they have cleared, wherever it has reached since.
+  {
+    label: "Verified",
+    value: "VERIFIED",
+    query: "verification_status=VERIFIED",
+  },
+  // Where the entries they verified ended up. Both are scoped to
+  // verification_status=VERIFIED, so the list stays "things I handled" rather
+  // than becoming a second copy of Payment Tracking.
+  {
+    label: "Completed",
+    value: "COMPLETED",
+    query: "verification_status=VERIFIED&status=POSTED",
+  },
+  {
+    label: "Rejected",
+    value: "REJECTED",
+    query: "verification_status=VERIFIED&status=REJECTED",
+  },
+];
+
+const CREATOR_STATUS_OPTIONS: StatusOption[] = [
+  { label: "All", value: "all", query: "group_by_status=true" },
+  {
+    // DRAFT is included because a receipt now waits for a HANDOVER CHECK
+    // before it enters the approval chain: it is saved, it is going somewhere,
+    // and its creator must be able to see it. Without this a newly raised
+    // payment appeared in NO filter at all — not Pending (nothing submitted
+    // yet), not Completed, not Rejected — which read as the entry having been
+    // lost. It leaves this list the moment a verifier sends it for approval.
+    label: "Pending",
+    value: "PENDING",
+    query: "status=DRAFT,PENDING_APPROVAL,APPROVED,POSTING_TO_SAP",
   },
   { label: "Completed", value: "POSTED", query: "status=POSTED" },
   { label: "Rejected", value: "REJECTED", query: "status=REJECTED" },
@@ -260,7 +322,13 @@ const receiptToRow = (r: PaymentReceipt): TrackRow => ({
   subtitle: r.card_code,
   amount: Number(r.total_amount) || 0,
   status: r.status,
-  statusLabel: STATUS_LABEL[r.status] ?? r.status_display ?? r.status,
+  // A DRAFT that is awaiting its handover check is labelled for what it is
+  // actually waiting on. "Draft" reads as unfinished work the creator still
+  // has to do, when in fact it is complete and parked with somebody else.
+  statusLabel:
+    r.status === "DRAFT" && r.verification_status === "PENDING"
+      ? "Awaiting verification"
+      : (STATUS_LABEL[r.status] ?? r.status_display ?? r.status),
   date: r.created_at,
   createdBy: r.created_by_name || "—",
   company: r.company,
@@ -335,9 +403,24 @@ interface Props {
    * decided from permissions below rather than by the caller.
    */
   mine?: boolean;
+  /**
+   * VERIFICATION mode: the same list, filtered to receipts awaiting their
+   * handover check.
+   *
+   * A mode on this screen rather than a screen of its own, because the queue
+   * IS the tracking list with one filter changed — the card, the search, the
+   * count bar and the empty state are all the same. A second component would
+   * have been ~400 lines of copied layout free to drift away from this one,
+   * which is how the two ended up looking different in the first place.
+   */
+  verification?: boolean;
 }
 
-export default function PaymentTrackingScreen({ kind, mine }: Props) {
+export default function PaymentTrackingScreen({
+  kind,
+  mine,
+  verification = false,
+}: Props) {
   const isPayment = kind === "PAYMENT";
   const perms = usePaymentPermissions();
 
@@ -345,10 +428,14 @@ export default function PaymentTrackingScreen({ kind, mine }: Props) {
   // so they must see everything they can act on, not just what they raised.
   // A creator without approve rights still sees only their own entries.
   const canApprove = isPayment ? perms.canApprovePayment : perms.canApproveDeposit;
-  const scopedToMine = mine ?? !canApprove;
-  const statusOptions = canApprove
-    ? APPROVER_STATUS_OPTIONS
-    : CREATOR_STATUS_OPTIONS;
+  // A verifier works everyone's entries, not their own — they are forbidden
+  // from verifying what they raised — so the queue is never scoped to `mine`.
+  const scopedToMine = verification ? false : (mine ?? !canApprove);
+  const statusOptions = verification
+    ? VERIFICATION_STATUS_OPTIONS
+    : canApprove
+      ? APPROVER_STATUS_OPTIONS
+      : CREATOR_STATUS_OPTIONS;
 
   const [rows, setRows] = useState<TrackRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -394,6 +481,11 @@ export default function PaymentTrackingScreen({ kind, mine }: Props) {
   const [searchQuery, setSearchQuery] = useState("");
   const [companyFilter, setCompanyFilter] = useState<Company | "">("");
   const [dateFilter, setDateFilter] = useState<DateFilterValue>(null);
+  // The verification queue uses a PERIOD dropdown (last 2 days, last 7, a
+  // month, a day, all time) instead of the single-day box: the two commonest
+  // questions there are "what came in today and yesterday" and "what is still
+  // outstanding this week", neither of which a one-day picker can express.
+  const [range, setRange] = useState<VerificationRange>({ kind: "default" });
   const [isFilterModalVisible, setIsFilterModalVisible] = useState(false);
 
   const companies = useCompanies();
@@ -422,7 +514,9 @@ export default function PaymentTrackingScreen({ kind, mine }: Props) {
         }
         if (companyFilter) params.company = companyFilter;
         if (scopedToMine) params.mine = "true";
-        const window = dateWindow(dateFilter);
+        // Verification asks its period dropdown; every other view keeps the
+        // single-day box it has always had.
+        const window = verification ? windowFor(range) : dateWindow(dateFilter);
         if (window) {
           params.date_from = window.from;
           params.date_to = window.to;
@@ -452,7 +546,8 @@ export default function PaymentTrackingScreen({ kind, mine }: Props) {
     // which arrive asynchronously. Depending on the prop meant the first fetch
     // ran with the pre-permission guess and never re-ran once the real answer
     // landed — an approver saw an empty list.
-    [isPayment, statusView, statusOptions, companyFilter, dateFilter, scopedToMine],
+    [isPayment, statusView, statusOptions, companyFilter, dateFilter,
+     scopedToMine, verification, range],
   );
 
   useEffect(() => {
@@ -529,9 +624,11 @@ export default function PaymentTrackingScreen({ kind, mine }: Props) {
       // to the dashboard. The header reads this param first (see
       // app/(main)/_layout.tsx headerLeft), which is what the orders screens
       // have always done.
-      const from = isPayment
-        ? "payments/payment-tracking"
-        : "payments/deposit-tracking";
+      const from = verification
+        ? "payments/verification"
+        : isPayment
+          ? "payments/payment-tracking"
+          : "payments/deposit-tracking";
 
       if (!isPayment) {
         router.push({
@@ -546,12 +643,20 @@ export default function PaymentTrackingScreen({ kind, mine }: Props) {
           documentId: String(row.id),
           id: row.approvalId != null ? String(row.approvalId) : "",
           requestNo: row.docNo,
+          // Navigation only. The details screen decides which actions to
+          // offer from the viewer's permissions and the receipt's state, so
+          // the same payment gives a verifier the same bar whether they open
+          // it from here, the tracking list or the home page.
           from,
         },
       } as never);
     },
-    [isPayment],
+    [isPayment, verification],
   );
+
+  // Hoisted out of the render: an inline arrow is a new function identity on
+  // every pass, which defeats FlatList's own memoisation of the rows.
+  const keyExtractor = useCallback((item: TrackRow) => String(item.id), []);
 
   const openProgress = useCallback(
     (row: TrackRow) => {
@@ -561,13 +666,18 @@ export default function PaymentTrackingScreen({ kind, mine }: Props) {
           id: String(row.id),
           kind,
           // Back returns to the list this was opened from — see openDetails.
-          from: isPayment
-            ? "payments/payment-tracking"
-            : "payments/deposit-tracking",
+          // The verification queue must be named explicitly: sending a
+          // verifier back to Payment Tracking dropped them on a page they may
+          // hold no permission for, which is the "Access restricted" screen.
+          from: verification
+            ? "payments/verification"
+            : isPayment
+              ? "payments/payment-tracking"
+              : "payments/deposit-tracking",
         },
       } as never);
     },
-    [kind, isPayment],
+    [kind, isPayment, verification],
   );
 
   const renderItem = useCallback(
@@ -902,11 +1012,15 @@ export default function PaymentTrackingScreen({ kind, mine }: Props) {
           </View>
 
           <View style={styles.countBarDateWrap}>
-            <InlineOrderDateFilter
-              value={dateFilter}
-              onChange={setDateFilter}
-              variant="onDark"
-            />
+            {verification ? (
+              <VerificationDateFilter value={range} onChange={setRange} />
+            ) : (
+              <InlineOrderDateFilter
+                value={dateFilter}
+                onChange={setDateFilter}
+                variant="onDark"
+              />
+            )}
           </View>
         </LinearGradient>
       )}
@@ -919,12 +1033,23 @@ export default function PaymentTrackingScreen({ kind, mine }: Props) {
         <FlatList
           data={visible}
           renderItem={renderItem}
-          keyExtractor={(item) => String(item.id)}
+          keyExtractor={keyExtractor}
           contentContainerStyle={styles.listContent}
           ListEmptyComponent={renderEmpty}
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
           }
+          // These cards are tall and detail-heavy — party, chips, an invoice
+          // strip and two buttons each — so the defaults (10 initial, a
+          // 21-screen retention window) mount far more than fits and make the
+          // first paint and every scroll do avoidable work.
+          initialNumToRender={6}
+          maxToRenderPerBatch={8}
+          windowSize={7}
+          // Frees the views of rows scrolled well away. Worth it here because
+          // each row is expensive; on a list of cheap rows it would cost more
+          // than it saves.
+          removeClippedSubviews
         />
       )}
 

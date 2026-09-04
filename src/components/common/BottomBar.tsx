@@ -36,24 +36,23 @@ export default function BottomBar({
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
   const drawerOpen = useDrawerOpen();
-  const role = (user?.role || "").toLowerCase();
-  const extraPages = user?.extra_pages || [];
   const [deniedLabel, setDeniedLabel] = useState<string | null>(null);
   const [createSheetOpen, setCreateSheetOpen] = useState(false);
 
-  // The second tab adapts to what the user actually has: an orders screen when
-  // they hold one, otherwise their payments or deposits queue. Labelling it
-  // "Orders" for a payments-only user sent them somewhere they cannot open.
-  const workQueue = resolveWorkQueueRoute(role, extraPages, user?.roles);
+  // The second tab adapts to what the user actually has, in priority order:
+  // Orders, then Payments, Deposits, Verify. Labelling it "Orders" for a
+  // payments-only user sent them somewhere they cannot open. It always
+  // resolves to something, so the bar keeps five icons for every account.
+  const workQueue = resolveWorkQueueRoute(user);
 
   // Everything this user may create. None hides the button; one opens directly;
   // several open the chooser sheet.
-  const createTargets = createTargetsFor(role, extraPages, user?.roles);
+  const createTargets = createTargetsFor(user);
 
   // Where Reports goes for THIS user: the sales daily report when they hold
   // it, otherwise the Payments Dashboard. Null when they have neither, so the
   // tab shows the permission dialog instead of navigating somewhere refused.
-  const reports = resolveReportsRoute(role, extraPages, user?.roles);
+  const reports = resolveReportsRoute(user);
 
   // Highlight the tab that matches the current route (so the global bar shows
   // the right active tab on every screen). An explicit `active` prop wins.
@@ -84,10 +83,10 @@ export default function BottomBar({
     return "home";
   }, [active, pathname]);
 
-  // Guard: when the work-queue tab is absent (no orders/payments/deposits),
-  // never leave "orders" selected — nothing would appear highlighted.
-  const resolvedActiveTab: TabKey =
-    activeTab === "orders" && !workQueue ? "home" : activeTab;
+  // The work-queue tab is now always present, so "orders" can always be the
+  // highlighted tab — the guard that redirected to "home" when it was absent
+  // is no longer needed.
+  const resolvedActiveTab: TabKey = activeTab;
 
   // Hide the footer while the sidebar is open (the drawer covers the screen),
   // then show it again on close. All hooks above run unconditionally.
@@ -95,7 +94,7 @@ export default function BottomBar({
 
   // Navigate if permitted, otherwise surface the "no permission" dialog.
   const guarded = (screen: string, label: string, navigate: () => void) => {
-    if (canAccessScreen(screen, role, extraPages, user?.roles)) navigate();
+    if (canAccessScreen(screen, user)) navigate();
     else setDeniedLabel(label);
   };
 
@@ -134,23 +133,21 @@ export default function BottomBar({
           router.navigate("/(main)/dashboard" as never);
       },
     },
-    // Orders / Payments / Deposits, in that priority order. Omitted entirely
-    // when the user holds none of them: this tab used to fall back to the
-    // dashboard, which rendered a second "Home" beside the real one.
-    ...(workQueue
-      ? [
-          {
-            key: "orders" as TabKey,
-            label: workQueue.label,
-            icon: workQueue.icon as keyof typeof Ionicons.glyphMap,
-            badge: ordersBadge,
-            onPress: () =>
-              guarded(workQueue.screen, workQueue.label, () =>
-                router.push(workQueue.route as never),
-              ),
-          },
-        ]
-      : []),
+    // Orders / Payments / Deposits / Verify, in that priority order. ALWAYS
+    // rendered: resolveWorkQueueRoute never returns null, so the bar keeps the
+    // same five icons for every user and never reflows between accounts.
+    // `guarded` re-checks access on tap, so a user holding none of the four
+    // sees the tab and gets the "no permission" dialog instead of navigating.
+    {
+      key: "orders" as TabKey,
+      label: workQueue.label,
+      icon: workQueue.icon as keyof typeof Ionicons.glyphMap,
+      badge: ordersBadge,
+      onPress: () =>
+        guarded(workQueue.screen, workQueue.label, () =>
+          router.push(workQueue.route as never),
+        ),
+    },
     {
       key: "create",
       label: "Create",
