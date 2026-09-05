@@ -137,13 +137,38 @@ function GeneralInformationCard({ detail }: GeneralInformationCardProps) {
         </>
       ) : null}
 
+      {/* Remarks from EVERY step, each attributed to the person who wrote it.
+          Only the creator's note used to appear, so a verifier's note — often
+          the one explaining a discrepancy the approver is being asked to
+          accept — was captured, stored, and then never shown to the one person
+          who needed it. Labelled by author rather than stacked anonymously:
+          "short by 200, counted twice" means something different from the
+          creator than from the checker. */}
       {detail.remarks ? (
         <>
           <View style={styles.divider} />
           <Field
             icon="chatbox-ellipses-outline"
-            label="Remarks"
+            label={
+              detail.createdBy ? `Remarks by ${detail.createdBy}` : "Remarks"
+            }
             value={detail.remarks}
+            full
+          />
+        </>
+      ) : null}
+
+      {detail.verificationRemarks ? (
+        <>
+          <View style={styles.divider} />
+          <Field
+            icon="shield-checkmark-outline"
+            label={
+              detail.verifiedBy
+                ? `Verification remarks by ${detail.verifiedBy}`
+                : "Verification remarks"
+            }
+            value={detail.verificationRemarks}
             full
           />
         </>

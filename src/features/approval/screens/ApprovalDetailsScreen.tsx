@@ -32,6 +32,7 @@ import AttachmentViewer from "../components/AttachmentViewer";
 import ApprovalBottomBar from "../components/ApprovalBottomBar";
 import VerifyBottomBar from "@/src/features/payments/components/VerifyBottomBar";
 import VerifyDialog from "@/src/features/payments/components/VerifyDialog";
+import VerifyLoadingDialog from "@/src/features/payments/components/VerifyLoadingDialog";
 import VerifySuccessDialog from "@/src/features/payments/components/VerifySuccessDialog";
 import EditHistoryCard from "@/src/features/payments/components/EditHistoryCard";
 import { useAuth } from "@/src/context/AuthContext";
@@ -562,6 +563,13 @@ export default function ApprovalDetailsScreen() {
           onRefresh();
         }}
       />
+
+      {/* Bridges the gap between confirm and success. Without it the details
+          page sat bare while the request was in flight, and a verifier who saw
+          no feedback would tap Verify again — the second call fails, so a
+          verification that actually succeeded reports an error. Blocking and
+          undismissable, so the ambiguous state cannot be reached at all. */}
+      <VerifyLoadingDialog visible={verifySubmitting} />
 
       <VerifySuccessDialog
         visible={verifiedAt !== null}
