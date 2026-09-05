@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import approvalsService from "@/src/services/approvals.service";
 import paymentsService, {
+  type StatusHistoryRow,
   type PaymentReceipt,
 } from "@/src/services/payments.service";
 import type {
@@ -18,6 +19,8 @@ interface UseApprovalDetailsResult {
   /** True when the last decision completed the chain and went to SAP. */
   isFinal: boolean;
   detail: ApprovalDetail | null;
+  /** The business timeline, for the Edit History card. */
+  history: StatusHistoryRow[];
   loading: boolean;
   refreshing: boolean;
   error: string | null;
@@ -81,8 +84,16 @@ const paymentTypeLabel = (methods: PaymentReceipt["methods"]) => {
   return `Mixed (${kinds.map(methodLabel).join(" + ")})`;
 };
 
-const attachmentKind = (name: string): ApprovalAttachment["kind"] =>
-  name.toLowerCase().endsWith(".pdf") ? "pdf" : "image";
+/**
+ * Which icon to show, from the stored file extension.
+ *
+ * The API exposes `file_type` rather than a filename — the server-side name is
+ * an internal detail. Guessing from the attachment TYPE instead would be
+ * wrong: every file on record is a JPEG, including the deposit slips, so a
+ * type-based rule would show a PDF icon on more than half of them.
+ */
+const attachmentKind = (fileType: string): ApprovalAttachment["kind"] =>
+  (fileType || "").toLowerCase() === "pdf" ? "pdf" : "image";
 
 /**
  * Map the receipt API onto the shape this screen already renders.
@@ -94,11 +105,14 @@ function toApprovalDetail(receipt: PaymentReceipt): ApprovalDetail {
   const allAttachments: ApprovalAttachment[] = (receipt.attachments || []).map(
     (a) => ({
       id: String(a.id),
-      name: a.original_name,
-      // The API returns no byte count. Showing the attachment TYPE is honest
-      // and useful; inventing a size would not be.
-      size: a.type_display || "",
-      kind: attachmentKind(a.original_name),
+      // WHAT it is. The upload's own filename is gone from the API — it was a
+      // camera UUID on almost every row and told an approver nothing. The
+      // type does: "Cheque image", "Deposit slip".
+      name: a.type_display || "Attachment",
+      // The API returns no byte count, so the upload date fills the second
+      // line instead. Inventing a size would not be honest.
+      size: formatDate(a.created_at),
+      kind: attachmentKind(a.file_type),
       downloadUrl: a.download_url,
     }),
   );
@@ -165,9 +179,20 @@ function toApprovalDetail(receipt: PaymentReceipt): ApprovalDetail {
     };
   });
 
-  // Only what no method claimed. The card hides itself when this is empty, so
-  // a proof shown inside its own payment is never repeated below it.
-  const attachments = allAttachments.filter((a) => !claimed.has(a.id));
+  // EVERY attachment, including the ones a payment line claimed above.
+  //
+  // This used to be the remainder — `filter(a => !claimed.has(a.id))` — on the
+  // reasoning that a proof shown inside its own payment should not repeat
+  // below it. But the accordions all start COLLAPSED (`expandedPaymentId`
+  // begins null), so a cheque image attributed to its cheque line rendered
+  // nowhere at all: not in the card, and not on screen until the approver
+  // happened to expand that exact line. An approver deciding on a payment
+  // could not see the evidence for it.
+  //
+  // Repetition is the lesser problem, and it only occurs once a line is
+  // expanded. The card stays the one place where everything attached to this
+  // document is guaranteed to be visible.
+  const attachments = allAttachments;
 
   // The invoice an approver checks the payment against. An advance has none,
   // and saying so is more useful than a blank.
@@ -292,6 +317,7 @@ export function useApprovalDetails(
   // for Done, and the screen's own handler does the leaving.
 ): UseApprovalDetailsResult {
   const [detail, setDetail] = useState<ApprovalDetail | null>(null);
+  const [history, setHistory] = useState<StatusHistoryRow[]>([]);
   const [approvalId, setApprovalId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -326,6 +352,15 @@ export function useApprovalDetails(
         if (!alive.current) return;
         setDetail(toApprovalDetail(receipt));
         setApprovalId(receipt.approval?.id ?? null);
+
+        // Non-fatal: the page renders without it, so a history outage costs
+        // the edit trail rather than the whole screen.
+        try {
+          const rows = await paymentsService.getReceiptHistory(id);
+          if (alive.current) setHistory(rows);
+        } catch {
+          if (alive.current) setHistory([]);
+        }
       } catch (err) {
         if (!alive.current) return;
         setError(messageFrom(err));
@@ -457,6 +492,7 @@ export function useApprovalDetails(
 
   return {
     detail,
+    history,
     loading,
     refreshing,
     error,

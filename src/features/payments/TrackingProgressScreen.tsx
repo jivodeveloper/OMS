@@ -18,6 +18,7 @@ import approvalsService, {
 import paymentsService, {
   type BankDeposit,
   type PaymentReceipt,
+  type StatusHistoryRow,
 } from "@/src/services/payments.service";
 import type { TrackingKind } from "./PaymentTrackingScreen";
 
@@ -125,9 +126,26 @@ interface Stage {
   }[];
   stageLabel?: string;
   timestamp?: string;
-  remarks?: string;
+  /**
+   * Every remark left at this step, each with the person who left it.
+   *
+   * A list, not a string: an approval rung can be rejected, edited and
+   * approved again, and each of those carries its own note from a different
+   * person. Collapsing them to one field showed whichever happened to be
+   * stored on the document — in practice always the creator's.
+   */
+  remarks?: StageRemark[];
   /** SAP card only. */
   info?: { label: string; value: string }[];
+}
+
+/** One note, attributed. `by` is a username, or "System" for server actions. */
+interface StageRemark {
+  by: string;
+  text: string;
+  at?: string;
+  /** e.g. "Verified" — what the person was doing when they wrote it. */
+  action?: string;
 }
 
 export default function TrackingProgressScreen() {
@@ -138,6 +156,9 @@ export default function TrackingProgressScreen() {
 
   const [doc, setDoc] = useState<PaymentReceipt | BankDeposit | null>(null);
   const [approval, setApproval] = useState<ApiApprovalDetail | null>(null);
+  // The business timeline. Every remark anyone has left lives here with the
+  // username that left it; the document itself only carries the creator's.
+  const [history, setHistory] = useState<StatusHistoryRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
@@ -167,6 +188,19 @@ export default function TrackingProgressScreen() {
       } else {
         setApproval(null);
       }
+
+      // Non-fatal on purpose: the timeline still renders from the document and
+      // the approval chain, so a history outage costs the remarks, not the
+      // page. An older backend without the deposit route lands here too.
+      try {
+        setHistory(
+          isPayment
+            ? await paymentsService.getReceiptHistory(id)
+            : await paymentsService.getDepositHistory(id),
+        );
+      } catch {
+        setHistory([]);
+      }
     } catch (err) {
       const status = (err as { response?: { status?: number } })?.response?.status;
       setError(
@@ -191,7 +225,7 @@ export default function TrackingProgressScreen() {
     void load();
   };
 
-  const stages = buildStages(doc, approval, isPayment);
+  const stages = buildStages(doc, approval, isPayment, history);
 
   if (loading && !refreshing) {
     return (
@@ -367,12 +401,33 @@ export default function TrackingProgressScreen() {
           {!!item.timestamp && (
             <DetailRow icon="time-outline" label="Timestamp" value={item.timestamp} />
           )}
-          {!!item.remarks && (
-            <DetailRow
-              icon="document-text-outline"
-              label="Remarks"
-              value={item.remarks}
-            />
+          {!!item.remarks?.length && (
+            <View style={styles.detailRow}>
+              <Ionicons
+                name="document-text-outline"
+                size={fs(16)}
+                color="#1E1E1E"
+                style={styles.detailIcon}
+              />
+              <View style={styles.detailTextWrap}>
+                <Text style={styles.detailLabel}>Remarks</Text>
+                {item.remarks.map((remark, i) => (
+                  <View
+                    key={`${item.key}-remark-${i}`}
+                    style={i > 0 ? styles.remarkBlockSpaced : undefined}
+                  >
+                    <Text style={styles.detailValue}>{remark.text}</Text>
+                    {/* Who wrote it, and while doing what — the question a
+                        single unattributed line could never answer. */}
+                    <Text style={styles.remarkAuthor}>
+                      {remark.by}
+                      {remark.action ? ` · ${remark.action}` : ""}
+                      {remark.at && remark.at !== "—" ? ` · ${remark.at}` : ""}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            </View>
           )}
 
           {/* SAP card carries a list of key/value rows instead of the fields
@@ -486,9 +541,39 @@ function buildStages(
   doc: PaymentReceipt | BankDeposit | null,
   approval: ApiApprovalDetail | null,
   isPayment: boolean,
+  history: StatusHistoryRow[] = [],
 ): Stage[] {
   if (!doc) return [];
   const stages: Stage[] = [];
+
+  /**
+   * Remarks from the timeline whose action matches this step.
+   *
+   * The history is the only place a remark is stored WITH its author, so it
+   * is the source for every step except Created — the document's own
+   * `remarks` field is the creator's note and predates the timeline on older
+   * entries.
+   */
+  const remarksFor = (...actions: string[]): StageRemark[] =>
+    history
+      .filter((row) => actions.includes(row.action) && !!row.reason?.trim())
+      .map((row) => ({
+        by: row.changed_by_username || row.performed_by || "System",
+        text: row.reason.trim(),
+        at: formatDateTime(row.created_at),
+        action: row.action_display,
+      }));
+
+  /** Drop repeats of a note already shown, comparing on text alone. */
+  const withoutDuplicates = (list: StageRemark[]) => {
+    const seen = new Set<string>();
+    return list.filter((r) => {
+      const key = `${r.by}|${r.text}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  };
 
   // ── 1. Created ────────────────────────────────────────────────────────
   // Always done: the document exists, so this step is behind us by
@@ -505,6 +590,22 @@ function buildStages(
     action: createdBy,
     stageLabel: "Payments — Create",
     timestamp: formatDateTime(doc.created_at),
+    // The creator's own note, then any edit notes. `doc.remarks` is used
+    // rather than the CREATED history row because entries raised before the
+    // timeline existed have the former and not the latter.
+    remarks: withoutDuplicates([
+      ...(doc.remarks?.trim()
+        ? [
+            {
+              by: createdBy,
+              text: doc.remarks.trim(),
+              at: formatDateTime(doc.created_at),
+              action: "Created",
+            },
+          ]
+        : []),
+      ...remarksFor("CREATED", "UPDATED"),
+    ]),
   });
 
   // ── 2. Verification (payments only) ───────────────────────────────────
@@ -533,7 +634,22 @@ function buildStages(
           : "Awaiting a handover check — no verifier is assigned yet",
       stageLabel: "Payments — Verify",
       timestamp: verified ? formatDateTime(receipt?.verified_at) : undefined,
-      remarks: receipt?.verification_remarks || undefined,
+      // The VERIFIED history row carries the same text as
+      // `verification_remarks` but names who wrote it, so it wins; the column
+      // is the fallback for entries verified before the row existed.
+      remarks: withoutDuplicates([
+        ...remarksFor("VERIFIED"),
+        ...(receipt?.verification_remarks?.trim()
+          ? [
+              {
+                by: receipt.verified_by_name || receipt.verified_by_username || "—",
+                text: receipt.verification_remarks.trim(),
+                at: formatDateTime(receipt.verified_at),
+                action: "Verified",
+              },
+            ]
+          : []),
+      ]),
       // Who did it, or — while it waits — who CAN, so a creator watching
       // their payment sit here knows whom to go and ask. The candidate list
       // is server-resolved per read, so it follows permission changes.
@@ -651,7 +767,21 @@ function buildStages(
         approvers,
         stageLabel: ordinalLevel(rung.position),
         timestamp: decision ? formatDateTime(decision.acted_at) : undefined,
-        remarks: decision?.remarks || undefined,
+        // Scoped to THIS rung: the approval detail names the approver, which
+        // the history's level field cannot be relied on to do for older rows.
+        remarks: decision?.remarks?.trim()
+          ? [
+              {
+                by:
+                  decision.approver_name ||
+                  decision.approver_username ||
+                  "—",
+                text: decision.remarks.trim(),
+                at: formatDateTime(decision.acted_at),
+                action: isRejectedHere ? "Rejected" : "Approved",
+              },
+            ]
+          : undefined,
       });
     });
   } else if (doc.status !== "CANCELLED" && doc.status !== "REJECTED") {
@@ -894,6 +1024,18 @@ const styles = StyleSheet.create({
     fontSize: fs(13),
     lineHeight: fs(18),
     color: "#4B5563",
+  },
+  // Attribution sits under its note, lighter and smaller, so a card with
+  // several remarks still reads as note-then-author rather than a flat list.
+  remarkAuthor: {
+    fontSize: fs(11),
+    lineHeight: fs(15),
+    color: "#6B7280",
+    fontWeight: "600",
+    marginTop: 1,
+  },
+  remarkBlockSpaced: {
+    marginTop: sp(8),
   },
   center: {
     flex: 1,

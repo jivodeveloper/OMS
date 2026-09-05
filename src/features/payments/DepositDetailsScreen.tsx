@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Linking,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -16,6 +17,10 @@ import { useIsFocused } from "@react-navigation/native";
 import { setHeaderEditHandler } from "@/src/utils/headerEdit";
 import ApprovalBottomBar from "@/src/features/approval/components/ApprovalBottomBar";
 import SapInfoCard from "@/src/features/payments/components/SapInfoCard";
+import AttachmentList from "@/src/features/approval/components/AttachmentList";
+import EditHistoryCard from "@/src/features/payments/components/EditHistoryCard";
+import AttachmentViewer from "@/src/features/approval/components/AttachmentViewer";
+import type { ApprovalAttachment } from "@/src/features/approval/types";
 import ApproveDialog from "@/src/features/approval/components/dialogs/ApproveDialog";
 import RejectDialog from "@/src/features/approval/components/dialogs/RejectDialog";
 import ApprovalLoadingDialog from "@/src/features/approval/components/dialogs/ApprovalLoadingDialog";
@@ -24,10 +29,12 @@ import SapErrorDialog from "@/src/features/approval/components/dialogs/SapErrorD
 import { showToast } from "@/src/components/common/Toast";
 import approvalsService from "@/src/services/approvals.service";
 
+import { handoverDays } from "@/src/features/payments/handoverSpan";
 import { COLORS } from "@/src/constants/theme";
 import { fs, ms, sp } from "@/src/utils/responsive";
 import paymentsService, {
   type BankDeposit,
+  type StatusHistoryRow,
 } from "@/src/services/payments.service";
 
 const STATUS_LABEL: Record<string, string> = {
@@ -74,6 +81,18 @@ const money = (value: string | number | null | undefined) =>
  * account, a depositor, and a collected-vs-banked comparison that a payment
  * has no equivalent of.
  */
+/** "24 Aug 2026" — day-first, matching every other date on this screen. */
+const shortDate = (value?: string | null) => {
+  if (!value) return "—";
+  const d = new Date(value.length <= 10 ? `${value}T00:00:00` : value);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleDateString("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
+};
+
 export default function DepositDetailsScreen() {
   const params = useLocalSearchParams<{ id?: string; refreshAt?: string }>();
   const id = Number(params.id);
@@ -104,6 +123,8 @@ export default function DepositDetailsScreen() {
   >("none");
   const [decision, setDecision] = useState<"approve" | "reject">("approve");
   const [remarks, setRemarks] = useState("");
+  const [viewing, setViewing] = useState<ApprovalAttachment | null>(null);
+  const [history, setHistory] = useState<StatusHistoryRow[]>([]);
   const [busy, setBusy] = useState(false);
   /** True when the approval just taken was the LAST one — it went to SAP. */
   const [isFinal, setIsFinal] = useState(false);
@@ -122,6 +143,13 @@ export default function DepositDetailsScreen() {
       try {
         setDeposit(await paymentsService.getDeposit(id));
         setError("");
+        // Non-fatal: the page renders without it, so a history outage costs
+        // the edit trail rather than the whole screen.
+        try {
+          setHistory(await paymentsService.getDepositHistory(id));
+        } catch {
+          setHistory([]);
+        }
       } catch (err) {
         const status = (err as { response?: { status?: number } })?.response
           ?.status;
@@ -318,6 +346,85 @@ export default function DepositDetailsScreen() {
     ? tenderParts.join(" · ")
     : deposit.deposit_type;
 
+  /**
+   * Deposit attachments in the shape the shared card renders.
+   *
+   * Labelled by TYPE, not filename — `original_name` is whatever the phone
+   * called the upload, and in practice that is a camera UUID that tells an
+   * approver nothing. "Bank deposit slip" does.
+   */
+  const depositAttachments: ApprovalAttachment[] = (deposit.attachments || [])
+    .map((a) => ({
+      id: String(a.id),
+      name: a.type_display || "Attachment",
+      size: shortDate(a.created_at),
+      kind:
+        (a.file_type || "").toLowerCase() === "pdf"
+          ? ("pdf" as const)
+          : ("image" as const),
+      downloadUrl: a.download_url,
+    }));
+
+  const openAttachment = (attachment: ApprovalAttachment) => {
+    if (!attachment.downloadUrl) {
+      showToast(`${attachment.name} has no stored file.`, "info");
+      return;
+    }
+    setViewing(attachment);
+  };
+
+  /** Save the file and hand it to the OS. See the approval screen's twin. */
+  const downloadAttachment = async (attachment: ApprovalAttachment) => {
+    if (!attachment.downloadUrl) {
+      showToast(`${attachment.name} has no stored file.`, "info");
+      return;
+    }
+    try {
+      showToast(`Downloading ${attachment.name}…`, "info");
+      const uri = await paymentsService.downloadAttachment(
+        attachment.id,
+        attachment.name,
+      );
+      await Linking.openURL(uri);
+    } catch (err) {
+      showToast(
+        (err as Error)?.message || "Could not download the file.",
+        "error",
+      );
+    }
+  };
+
+  /**
+   * How long the money waited between reaching SAP and reaching the bank.
+   *
+   * Uses the LATEST posting across the deposit's receipts: the deposit cannot
+   * have been banked before its last payment was booked, so measuring from any
+   * earlier one would overstate the delay. Null when no receipt has posted yet
+   * — there is no gap to report until there is a posting date to measure from.
+   */
+  const bankingGap = (() => {
+    const postedAt = (deposit.lines || [])
+      .map((line) => line.receipt_posted_at)
+      .filter((value): value is string => !!value)
+      .sort()
+      .pop();
+    if (!postedAt || !deposit.deposit_date) return null;
+    // `handoverDays` takes a calendar day first and an instant second, which
+    // is exactly this pair the other way round: SAP posts at an instant, the
+    // deposit carries a bare date. So the posting is reduced to its day and
+    // the deposit date is widened to midnight local.
+    const days = handoverDays(
+      postedAt.slice(0, 10),
+      `${deposit.deposit_date}T00:00:00`,
+    );
+    if (days == null) return null;
+    return {
+      days,
+      postedLabel: shortDate(postedAt),
+      depositedLabel: shortDate(deposit.deposit_date),
+    };
+  })();
+
   return (
     <View style={styles.screen}>
       <ScrollView
@@ -349,20 +456,30 @@ export default function DepositDetailsScreen() {
           </View>
         </View>
 
-        {/* Bank and account number, mirroring party + party code on a payment. */}
+        {/* The MOVEMENT, read left to right: the G/L the money left, then
+            the bank it landed in.
+
+            Source first because that is the direction the money travels, and
+            because `bank_account_name` already ends with the destination G/L
+            — putting the bank first made the row state the destination twice
+            and the source not at all. */}
         <View style={styles.bankRow}>
           <Ionicons name="business-outline" size={ms(14)} color="#BFDBFE" />
+          {!!deposit.source_gl_account && (
+            <>
+              <Text style={styles.bankGl} numberOfLines={1}>
+                {deposit.source_gl_account}
+              </Text>
+              <Ionicons
+                name="arrow-forward"
+                size={ms(13)}
+                color="#BFDBFE"
+              />
+            </>
+          )}
           <Text style={styles.bankName} numberOfLines={1}>
             {deposit.bank_account_name || "Bank deposit"}
           </Text>
-          {!!deposit.bank_gl_account && (
-            <>
-              <View style={styles.separator} />
-              <Text style={styles.bankGl} numberOfLines={1}>
-                GL {deposit.bank_gl_account}
-              </Text>
-            </>
-          )}
         </View>
       </LinearGradient>
 
@@ -377,25 +494,72 @@ export default function DepositDetailsScreen() {
             />
           </View>
           <Text style={styles.cardTitle}>General Information</Text>
+          {/* The banking delay as a badge on the header, so the one number a
+              reviewer is looking for is on the same line as the card's name
+              rather than buried among the fields. */}
+          {bankingGap ? (
+            <View
+              style={[
+                styles.gapPill,
+                bankingGap.days > 2 ? styles.gapPillLate : null,
+              ]}
+            >
+              <Ionicons
+                name="time-outline"
+                size={ms(12)}
+                color={bankingGap.days > 2 ? COLORS.error : COLORS.textSecondary}
+              />
+              <Text
+                style={[
+                  styles.gapPillText,
+                  bankingGap.days > 2 ? styles.gapPillTextLate : null,
+                ]}
+              >
+                {bankingGap.days === 0
+                  ? "Same day"
+                  : `${bankingGap.days} ${
+                      bankingGap.days === 1 ? "day" : "days"
+                    }`}
+              </Text>
+            </View>
+          ) : null}
         </View>
 
+        {/* 1 — HOW LONG the money sat: the two dates the gap is measured
+            between, side by side, so the span is read directly rather than
+            worked out from opposite ends of the card.
+
+            Measured from the LATEST receipt in the deposit, not the
+            earliest: the deposit could not have been banked before its
+            last payment was booked, so that is the date the gap starts
+            from. Anything else would flatter the number. */}
+        {bankingGap ? (
+          <>
+            <View style={styles.grid}>
+              <Field
+                icon="cash-outline"
+                label="Payment Posted"
+                value={bankingGap.postedLabel}
+              />
+              {/* "Banked On", not "Deposited": this is the user-entered
+                  `deposit_date` — the day the money actually reached the
+                  bank — NOT the day this entry was typed up. The two are
+                  separate fields and can differ, so the label has to say
+                  which one it is. */}
+              <Field
+                icon="business-outline"
+                label="Banked On"
+                value={bankingGap.depositedLabel}
+              />
+            </View>
+            <View style={styles.divider} />
+          </>
+        ) : null}
+
+        {/* 2 — WHAT this is: which company, and what is physically in the
+            bag. */}
         <View style={styles.grid}>
           <Field icon="business-outline" label="Company" value={deposit.company} />
-          <Field
-            icon="person-outline"
-            label="Created By"
-            value={deposit.created_by_name || "—"}
-          />
-        </View>
-
-        <View style={styles.divider} />
-
-        <View style={styles.grid}>
-          <Field
-            icon="calendar-outline"
-            label="Deposit Date"
-            value={deposit.deposit_date || "—"}
-          />
           <Field
             icon="wallet-outline"
             label="Deposit Type"
@@ -408,12 +572,21 @@ export default function DepositDetailsScreen() {
 
         <View style={styles.divider} />
 
-        <Field
-          icon="person-circle-outline"
-          label="Deposited By"
-          value={deposit.deposited_by_name || "—"}
-          full
-        />
+        {/* 3 — WHO. The two people on either side of the hand-over, paired
+            so an approver reads them as a pair rather than hunting for the
+            second one further down the card. */}
+        <View style={styles.grid}>
+          <Field
+            icon="person-outline"
+            label="Created By"
+            value={deposit.created_by_name || "—"}
+          />
+          <Field
+            icon="person-circle-outline"
+            label="Deposited By"
+            value={deposit.deposited_by_name || "—"}
+          />
+        </View>
 
         {deposit.slip_number ? (
           <>
@@ -438,6 +611,23 @@ export default function DepositDetailsScreen() {
             />
           </>
         ) : null}
+
+        {/* 4 — WHEN this ENTRY was raised.
+            Deliberately NOT `deposit_date`, which row 1 already shows as
+            "Banked On". These are two different facts: `deposit_date` is
+            typed by the user and says when the money reached the bank,
+            while `created_at` is stamped by the server and says when the
+            record was made. Someone banking on Monday and entering it on
+            Wednesday produces two different dates, and showing only one of
+            them hides that. */}
+        <View style={styles.divider} />
+
+        <Field
+          icon="calendar-outline"
+          label="Entry Created"
+          value={shortDate(deposit.created_at)}
+          full
+        />
       </View>
 
       {/* ── Deposit Summary — the deposit's answer to Invoice Summary ── */}
@@ -491,12 +681,20 @@ export default function DepositDetailsScreen() {
             explain, and printing "₹0.00" under two equal figures is noise. */}
         {isShort ? (
           <View style={styles.shortfallBox}>
-            <Text style={styles.summaryLabel}>Shortfall</Text>
-            <Text style={styles.shortfallValue}>{money(shortfall)}</Text>
+            {/* Amount and reason on ONE row: the figure is meaningless
+                without its justification, so they are read together rather
+                than stacked. Wraps to two lines on a narrow screen. */}
+            <View style={styles.shortfallCol}>
+              <Text style={styles.summaryLabel}>Shortfall</Text>
+              <Text style={styles.shortfallValue}>{money(shortfall)}</Text>
+            </View>
             {deposit.shortfall_reason ? (
-              <Text style={styles.shortfallReason}>
-                {deposit.shortfall_reason}
-              </Text>
+              <View style={styles.shortfallReasonCol}>
+                <Text style={styles.summaryLabel}>Reason</Text>
+                <Text style={styles.shortfallReason}>
+                  {deposit.shortfall_reason}
+                </Text>
+              </View>
             ) : null}
           </View>
         ) : null}
@@ -508,6 +706,13 @@ export default function DepositDetailsScreen() {
           SAP?" is the first question after approving — the answer used to
           require opening View Progress. */}
       <SapInfoCard doc={deposit} kind="deposit" style={styles.sapCard} />
+
+      {/* ── Deposit slips and bank receipts ──
+          The proof the money reached the bank. The API has always returned
+          these; the deposit screens simply never rendered them, so an
+          approver signing off a deposit could not see its slip. */}
+      {/* What changed since this deposit was raised, and who changed it. */}
+      <EditHistoryCard history={history} style={styles.sapCard} />
 
       {/* ── Receipts banked — the deposit's answer to Payment Information ── */}
       {deposit.lines?.length ? (
@@ -659,6 +864,17 @@ export default function DepositDetailsScreen() {
           })}
         </View>
       ) : null}
+
+      {/* Proof the money reached the bank, LAST — an approver reads the
+          figures and the receipts first, then checks them against the slip.
+          Above the receipts it sat between the summary and the thing being
+          summarised. */}
+      <AttachmentList
+        attachments={depositAttachments}
+        onView={openAttachment}
+        onDownload={downloadAttachment}
+        style={styles.sapCard}
+      />
       </ScrollView>
 
       {/* Only for whoever the deposit is parked with. A creator, or an
@@ -710,6 +926,8 @@ export default function DepositDetailsScreen() {
 
       {/* The approval succeeded; SAP refused the posting. Two different
           outcomes, so they get two different dialogs. */}
+      <AttachmentViewer attachment={viewing} onClose={() => setViewing(null)} />
+
       <SapErrorDialog
         visible={!!sapError}
         message={sapError}
@@ -770,7 +988,11 @@ function Field({
         <Text style={styles.label}>{label}</Text>
         {tone === "badge" ? (
           <View style={styles.badge}>
-            <Text style={styles.badgeText} numberOfLines={1}>
+            {/* Two lines, not one. "3 cash · 2 cheque" does not fit a
+                half-width column on a small phone, and a clipped tender
+                breakdown is the one thing on this card an approver must
+                not misread. */}
+            <Text style={styles.badgeText} numberOfLines={2}>
               {value}
             </Text>
           </View>
@@ -840,11 +1062,6 @@ const styles = StyleSheet.create({
     fontSize: fs(14),
     fontWeight: "700",
   },
-  separator: {
-    width: 1,
-    height: ms(12),
-    backgroundColor: "rgba(255,255,255,0.35)",
-  },
   bankGl: { color: "#DBEAFE", fontSize: fs(12), fontWeight: "600" },
 
   // Same gutter as `card` — SapInfoCard brings no outer margin of its own.
@@ -877,7 +1094,38 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  cardTitle: { fontSize: fs(15), fontWeight: "700", color: COLORS.text },
+  // `flex: 1` so a header can carry a trailing badge: the title takes the
+  // space it needs and pushes anything after it to the right edge. Harmless
+  // on the headers that carry nothing else.
+  cardTitle: {
+    flex: 1,
+    fontSize: fs(15),
+    fontWeight: "700",
+    color: COLORS.text,
+  },
+  // The banking delay, on the General Information header.
+  gapPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: sp(4),
+    paddingHorizontal: sp(8),
+    paddingVertical: sp(3),
+    borderRadius: sp(10),
+    backgroundColor: COLORS.inputBackground,
+    borderWidth: 1,
+    borderColor: COLORS.borderLight,
+  },
+  // Past two days the delay is the point, not a footnote.
+  gapPillLate: {
+    backgroundColor: "#FEF2F2",
+    borderColor: "#FCA5A5",
+  },
+  gapPillText: {
+    fontSize: fs(11),
+    fontWeight: "700",
+    color: COLORS.textSecondary,
+  },
+  gapPillTextLate: { color: COLORS.error },
 
   grid: { flexDirection: "row", flexWrap: "wrap" },
   field: {
@@ -904,6 +1152,9 @@ const styles = StyleSheet.create({
   },
   badge: {
     alignSelf: "flex-start",
+    // Never wider than the column it sits in: without this the badge sizes
+    // to its text and pushes the row sideways on a narrow screen.
+    maxWidth: "100%",
     backgroundColor: COLORS.primaryLight,
     borderRadius: sp(8),
     paddingVertical: sp(3),
@@ -961,22 +1212,27 @@ const styles = StyleSheet.create({
   },
   chipText: { fontSize: fs(10), fontWeight: "700" },
   shortfallBox: {
-    alignItems: "center",
+    flexDirection: "row",
+    alignItems: "flex-start",
+    flexWrap: "wrap",
+    gap: sp(12),
     marginTop: sp(12),
     paddingTop: sp(12),
     borderTopWidth: 1,
     borderTopColor: COLORS.borderLight,
   },
+  // The amount keeps only the width it needs; the reason takes the rest.
+  shortfallCol: { flexShrink: 0 },
+  shortfallReasonCol: { flex: 1, minWidth: ms(140) },
   shortfallValue: {
     fontSize: fs(18),
     fontWeight: "800",
     color: COLORS.warning,
   },
   shortfallReason: {
-    fontSize: fs(11),
-    color: COLORS.textSecondary,
-    textAlign: "center",
-    marginTop: sp(4),
+    fontSize: fs(12),
+    lineHeight: fs(17),
+    color: COLORS.text,
   },
 
   lineRow: {

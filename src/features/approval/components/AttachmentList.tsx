@@ -1,5 +1,11 @@
 import React from "react";
-import { StyleSheet, Text, View } from "react-native";
+import {
+  StyleSheet,
+  Text,
+  View,
+  type StyleProp,
+  type ViewStyle,
+} from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { COLORS } from "@/src/constants/theme";
 import { fs, ms, sp } from "@/src/utils/responsive";
@@ -10,6 +16,14 @@ interface AttachmentListProps {
   attachments: ApprovalAttachment[];
   onView: (attachment: ApprovalAttachment) => void;
   onDownload: (attachment: ApprovalAttachment) => void;
+  /**
+   * Outer spacing, supplied by the screen.
+   *
+   * The approval page wraps its cards in a padded container; the deposit page
+   * margins each card itself. A fixed gutter here would be right on one and
+   * doubled on the other.
+   */
+  style?: StyleProp<ViewStyle>;
 }
 
 /**
@@ -23,11 +37,16 @@ interface AttachmentListProps {
  * panel on every single-method request is noise, and its absence already says
  * the same thing.
  */
-function AttachmentList({ attachments, onView, onDownload }: AttachmentListProps) {
+function AttachmentList({
+  attachments,
+  onView,
+  onDownload,
+  style,
+}: AttachmentListProps) {
   if (attachments.length === 0) return null;
 
   return (
-    <View style={styles.card}>
+    <View style={[styles.card, style]}>
       <View style={styles.sectionHeader}>
         <View style={styles.sectionIcon}>
           <Ionicons name="attach" size={ms(16)} color={COLORS.primary} />

@@ -2,7 +2,7 @@ import React from "react";
 import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { COLORS } from "@/src/constants/theme";
-import { fs } from "@/src/utils/responsive";
+import { fs, ms, sp } from "@/src/utils/responsive";
 import type { ApprovalAttachment } from "../types";
 
 interface AttachmentCardProps {
@@ -63,12 +63,12 @@ const styles = StyleSheet.create({
   card: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
+    gap: sp(10),
     backgroundColor: COLORS.surface,
     borderWidth: 1,
     borderColor: COLORS.borderLight,
     borderRadius: 12,
-    padding: 10,
+    padding: sp(10),
     marginBottom: 10,
   },
   thumb: {
@@ -78,8 +78,11 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  // `minWidth: 0` so a long file name wraps or ellipsises inside the row
+  // instead of pushing the view/download buttons off the card.
   text: {
     flex: 1,
+    minWidth: 0,
   },
   name: {
     fontSize: fs(13),
@@ -93,12 +96,17 @@ const styles = StyleSheet.create({
   },
   actions: {
     flexDirection: "row",
-    gap: 6,
+    gap: sp(6),
+    // Never squeezed: the buttons keep their tap target whatever the name
+    // beside them is doing.
+    flexShrink: 0,
   },
   iconBtn: {
-    width: 34,
-    height: 34,
-    borderRadius: 10,
+    // Scaled, not fixed 34px — a 44px-wide tap target on a small phone and a
+    // proportionate one on a tablet, matching every other control in the app.
+    width: ms(34),
+    height: ms(34),
+    borderRadius: sp(10),
     backgroundColor: COLORS.primaryLighter,
     borderWidth: 1,
     borderColor: COLORS.borderBlue,

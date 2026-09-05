@@ -260,7 +260,8 @@ export interface PaymentReceipt {
     id: number;
     attachment_type: string;
     type_display: string;
-    original_name: string;
+    /** Stored extension, e.g. "pdf" or "jpeg" — for picking an icon. */
+    file_type: string;
     uploaded_by_name: string;
     download_url: string;
     created_at: string;
@@ -347,6 +348,13 @@ export interface BankDeposit {
   bank_key: string;
   bank_code: string;
   bank_gl_account: string;
+  /**
+   * The G/L this deposit EMPTIES — the other half of the movement.
+   *
+   * `bank_gl_account` is only the destination. Resolved server-side from the
+   * company mapping, so it is null when unconfigured.
+   */
+  source_gl_account: string | null;
   bank_account_name: string;
   deposit_type: "CASH" | "CHEQUE" | "MIXED";
   collected_amount: string;
@@ -367,6 +375,21 @@ export interface BankDeposit {
   created_by_name: string;
   created_at: string;
   /**
+   * Deposit slips and bank receipts. The API has always returned these — the
+   * type simply never declared them, so no deposit screen could render the
+   * proof that the money actually reached the bank.
+   */
+  attachments: {
+    id: number;
+    attachment_type: string;
+    type_display: string;
+    /** Stored extension, e.g. "pdf" or "jpeg" — for picking an icon. */
+    file_type: string;
+    uploaded_by_name: string;
+    download_url: string;
+    created_at: string;
+  }[];
+  /**
    * The banked receipts, each carrying enough of its receipt for an approver
    * to verify the physical money without opening it separately — which tender
    * it was, and for a cheque its number, the payer's bank and its date.
@@ -378,6 +401,8 @@ export interface BankDeposit {
     card_name: string;
     card_code: string;
     payment_date: string;
+    /** When the receipt reached SAP. Null until it posts. */
+    receipt_posted_at: string | null;
     receipt_status: string;
     receipt_total: string;
     receipt_remarks: string;
@@ -436,8 +461,20 @@ export interface StatusHistoryRow {
   level: number | null;
   /** The username, or "System" for anything the server did on its own. */
   performed_by: string;
+  /** The actor's full name, resolved live; the username when unresolvable. */
+  performed_by_name: string;
   reason: string;
   changed_by_username: string;
+  /**
+   * WHICH fields an edit changed: `{ field: { old, new } }`.
+   *
+   * Present only on UPDATED rows, and null when nothing tracked changed — the
+   * backend refuses to store a diff on any other action, so a non-null value
+   * here always describes a real edit. Money arrives as a STRING, never a
+   * number: JSON has no decimal type and a float would render 1000.00 as
+   * 999.9999999999999 in an audit record.
+   */
+  change_data: Record<string, { old: unknown; new: unknown }> | null;
   created_at: string;
 }
 
@@ -706,6 +743,51 @@ export const paymentsService = {
     return result.uri;
   },
 
+  /**
+   * Save one attachment to the device and return a URI the OS can open.
+   *
+   * The download endpoint is permission-checked, so the file cannot be handed
+   * to Linking.openURL — that sends an unauthenticated request and comes back
+   * 401. The bytes are fetched WITH the bearer token, written to a local file,
+   * and on Android exposed as a content:// URI (a raw file:// URI is blocked
+   * by FileProvider when another app opens it).
+   *
+   * Same legacy FS API as the receipt PDF above, for the same reason: it is
+   * the stable surface in expo-file-system v19.
+   */
+  downloadAttachment: async (
+    attachmentId: number | string,
+    fileName: string,
+  ): Promise<string> => {
+    const FileSystem = await import("expo-file-system/legacy");
+    const { Platform } = await import("react-native");
+    const token = await storage.getAccessToken();
+
+    const url = `${API_BASE_URL}/payments/attachments/${attachmentId}/download/`;
+    // The name is used as a filename, so anything that could escape the
+    // directory or break the path is replaced rather than trusted.
+    const safeName = (fileName || `attachment-${attachmentId}`)
+      .replace(/[^A-Za-z0-9._-]+/g, "_")
+      .slice(0, 80);
+    const dir = FileSystem.documentDirectory || FileSystem.cacheDirectory;
+    const result = await FileSystem.downloadAsync(url, `${dir}${safeName}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    });
+    if (result.status === 403) {
+      throw new Error("You do not have permission to download this file.");
+    }
+    if (result.status === 404) {
+      throw new Error("The file is missing from the store.");
+    }
+    if (result.status !== 200) {
+      throw new Error(`Could not download the file (status ${result.status}).`);
+    }
+    if (Platform.OS === "android") {
+      return await FileSystem.getContentUriAsync(result.uri);
+    }
+    return result.uri;
+  },
+
   listReceipts: async (params: Record<string, string> = {}): Promise<PaymentReceipt[]> => {
     const query = new URLSearchParams(params).toString();
     const res = await api.get(
@@ -826,6 +908,14 @@ export const paymentsService = {
   /** Status timeline for a receipt — who changed what, and when. */
   getReceiptHistory: async (id: number): Promise<StatusHistoryRow[]> => {
     const res = await api.get(`/payments/receipts/${id}/history/`, undefined, {
+      cache: "no-store",
+    });
+    return rows<StatusHistoryRow>(res);
+  },
+
+  /** The same timeline for a deposit. Identical shape, different document. */
+  getDepositHistory: async (id: number): Promise<StatusHistoryRow[]> => {
+    const res = await api.get(`/payments/deposits/${id}/history/`, undefined, {
       cache: "no-store",
     });
     return rows<StatusHistoryRow>(res);

@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   LayoutAnimation,
+  Linking,
   Platform,
   RefreshControl,
   ScrollView,
@@ -31,6 +32,8 @@ import AttachmentViewer from "../components/AttachmentViewer";
 import ApprovalBottomBar from "../components/ApprovalBottomBar";
 import VerifyBottomBar from "@/src/features/payments/components/VerifyBottomBar";
 import VerifyDialog from "@/src/features/payments/components/VerifyDialog";
+import VerifySuccessDialog from "@/src/features/payments/components/VerifySuccessDialog";
+import EditHistoryCard from "@/src/features/payments/components/EditHistoryCard";
 import { useAuth } from "@/src/context/AuthContext";
 import { can, PERMISSION_KEYS } from "@/src/constants/permissions";
 import paymentsService from "@/src/services/payments.service";
@@ -95,6 +98,7 @@ export default function ApprovalDetailsScreen() {
 
   const {
     detail,
+    history,
     loading,
     refreshing,
     error,
@@ -129,6 +133,12 @@ export default function ApprovalDetailsScreen() {
   const { user } = useAuth();
   const [verifyOpen, setVerifyOpen] = useState(false);
   const [verifySubmitting, setVerifySubmitting] = useState(false);
+  // Set only once the SERVER has confirmed the verification, so the dialog can
+  // never claim an outcome the backend did not record.
+  const [verifiedAt, setVerifiedAt] = useState<{
+    date: string;
+    time: string;
+  } | null>(null);
 
   const awaitingVerification = detail?.verificationStatus === "PENDING";
   const holdsVerifyKey = can(user, PERMISSION_KEYS.PAYMENTS_VERIFY);
@@ -149,8 +159,21 @@ export default function ApprovalDetailsScreen() {
         await paymentsService.verifyReceipt(detail.documentId, remarks);
         // Only after the server confirms — the verification state is its
         // answer, never a local guess.
-        showToast("Payment verified and sent for approval.", "success");
-        leaveAfterDecision();
+        //
+        // No toast: the success dialog states the outcome and waits. A banner
+        // would race the dialog and be gone before it was read.
+        const now = new Date();
+        setVerifiedAt({
+          date: now.toLocaleDateString("en-GB", {
+            day: "2-digit",
+            month: "short",
+            year: "numeric",
+          }),
+          time: now.toLocaleTimeString("en-GB", {
+            hour: "2-digit",
+            minute: "2-digit",
+          }),
+        });
       } catch (err) {
         // Every refusal lands here — no permission, already verified by
         // someone else, own receipt, already in SAP. The server's wording
@@ -165,8 +188,27 @@ export default function ApprovalDetailsScreen() {
         setVerifySubmitting(false);
       }
     },
-    [detail, leaveAfterDecision, onRefresh],
+    [detail, onRefresh],
   );
+
+  /**
+   * Leave only when the verifier taps Done.
+   *
+   * Same exit as an approval decision, so a verifier lands back on the queue
+   * they came from with a refetch signal and sees the row in its new state.
+   */
+  // Same shape the cards and accordions use, so the figure in the dialog reads
+  // identically to the one the verifier just checked on the page behind it.
+  const amountLabel = detail
+    ? `₹${detail.amount.toLocaleString("en-IN", {
+        maximumFractionDigits: 2,
+      })}`
+    : "";
+
+  const handleVerifyDone = useCallback(() => {
+    setVerifiedAt(null);
+    leaveAfterDecision();
+  }, [leaveAfterDecision]);
   // The dialog no longer dismisses itself, so there is no auto-leave callback:
   // navigation happens only when the approver taps Done (see handleDone).
 
@@ -241,6 +283,32 @@ export default function ApprovalDetailsScreen() {
       return;
     }
     setViewing(attachment);
+  }, []);
+
+  /**
+   * Save the file and hand it to the OS.
+   *
+   * Was wired to `handleAttachment`, so the download button opened the viewer
+   * — the same thing the eye already did, and nothing ever reached the device.
+   */
+  const handleDownload = useCallback(async (attachment: ApprovalAttachment) => {
+    if (!attachment.downloadUrl) {
+      showToast(`${attachment.name} has no stored file.`, "info");
+      return;
+    }
+    try {
+      showToast(`Downloading ${attachment.name}…`, "info");
+      const uri = await paymentsService.downloadAttachment(
+        attachment.id,
+        attachment.name,
+      );
+      await Linking.openURL(uri);
+    } catch (err) {
+      showToast(
+        (err as Error)?.message || "Could not download the file.",
+        "error",
+      );
+    }
   }, []);
 
 
@@ -415,10 +483,15 @@ export default function ApprovalDetailsScreen() {
             ))}
           </View>
 
+          {/* What changed since this was raised, and who changed it. Above
+              the attachments so an approver sees the corrections before the
+              proof they are meant to check against. */}
+          <EditHistoryCard history={history} />
+
           <AttachmentList
             attachments={detail.attachments}
             onView={handleAttachment}
-            onDownload={handleAttachment}
+            onDownload={handleDownload}
           />
         </View>
       </ScrollView>
@@ -460,7 +533,7 @@ export default function ApprovalDetailsScreen() {
         // already-formatted string from `money()`. Coerced rather than
         // "corrected": the type is wrong repo-wide and every consumer renders
         // it as text, so changing it here would be a wide unrelated edit.
-        amount={String(detail.amount)}
+        amount={amountLabel}
         onClose={() => setVerifyOpen(false)}
         onConfirm={handleVerify}
       />
@@ -488,6 +561,15 @@ export default function ApprovalDetailsScreen() {
           clearError();
           onRefresh();
         }}
+      />
+
+      <VerifySuccessDialog
+        visible={verifiedAt !== null}
+        receiptNo={detail.requestNo}
+        amount={amountLabel}
+        date={verifiedAt?.date ?? ""}
+        time={verifiedAt?.time ?? ""}
+        onDone={handleVerifyDone}
       />
 
       <ApprovalLoadingDialog visible={stage === "loading"} decision={decision} />
