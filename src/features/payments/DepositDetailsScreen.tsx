@@ -600,12 +600,20 @@ export default function DepositDetailsScreen() {
           </>
         ) : null}
 
+        {/* Attributed, matching the receipt page. A deposit has no
+            verification step, so there is only ever one note here — but naming
+            its author still tells an approver whose account of the hand-over
+            they are reading. */}
         {deposit.remarks ? (
           <>
             <View style={styles.divider} />
             <Field
               icon="chatbox-ellipses-outline"
-              label="Remarks"
+              label={
+                deposit.created_by_name
+                  ? `Remarks by ${deposit.created_by_name}`
+                  : "Remarks"
+              }
               value={deposit.remarks}
               full
             />

@@ -23,6 +23,9 @@ import FormField from "./_components/FormField";
 import DepositPaymentRow from "./_components/DepositPaymentRow";
 import AttachmentPicker from "./_components/AttachmentPicker";
 import type { PickedFile } from "./_lib/pickAttachment";
+import DepositLoadingDialog, {
+  type DepositStage,
+} from "@/src/features/payments/components/DepositLoadingDialog";
 import PaymentSuccessDialog, {
   type PaymentSuccessKind,
 } from "@/src/features/payments/components/PaymentSuccessDialog";
@@ -137,6 +140,14 @@ function BankDepositScreen() {
   const [slipFiles, setSlipFiles] = useState<PickedFile[]>([]);
   const [receiptFiles, setReceiptFiles] = useState<PickedFile[]>([]);
   const [saving, setSaving] = useState(false);
+  // Which round trip the progress dialog is reporting. Recording a deposit is
+  // create -> upload each file -> submit, so a single "please wait" would read
+  // as hung on a slow link; naming the step shows it is still moving.
+  const [stage, setStage] = useState<DepositStage>("saving");
+  const [uploadAt, setUploadAt] = useState<{ index: number; total: number }>({
+    index: 0,
+    total: 0,
+  });
   const [success, setSuccess] = useState<{
     kind: PaymentSuccessKind;
     /** Where to land after an edit — the deposit that was just changed. */
@@ -482,6 +493,8 @@ function BankDepositScreen() {
 
   const handleSubmit = async () => {
     if (submitBlocked) return;
+    setStage("saving");
+    setUploadAt({ index: 0, total: 0 });
     setSaving(true);
     try {
       const payload = {
@@ -510,11 +523,18 @@ function BankDepositScreen() {
       // an approver may open it immediately, and proof that arrives after they
       // have looked is proof they never saw.
       const failedUploads: string[] = [];
+      // Counted across BOTH kinds so the dialog reads "3 of 5", not "1 of 2"
+      // twice over — the user is watching one queue of files, not two.
+      const totalUploads = slipFiles.length + receiptFiles.length;
+      let uploadedSoFar = 0;
+      if (totalUploads > 0) setStage("uploading");
       for (const [files, kind] of [
         [slipFiles, "DEPOSIT_SLIP"],
         [receiptFiles, "DEPOSIT_RECEIPT"],
       ] as const) {
         for (const file of files) {
+          uploadedSoFar += 1;
+          setUploadAt({ index: uploadedSoFar, total: totalUploads });
           try {
             await paymentsService.uploadDepositAttachment(
               deposit.id,
@@ -537,9 +557,14 @@ function BankDepositScreen() {
        */
       const needsSubmit = !isEdit || canResubmit;
       if (needsSubmit) {
+        setStage("submitting");
         try {
           await paymentsService.submitDeposit(deposit.id);
         } catch (err) {
+          // Drop the progress dialog BEFORE the alert. Both are Modals, and
+          // `finally` has not run yet, so raising the alert first would stack
+          // it on top of a spinner still claiming to be working.
+          setSaving(false);
           appAlert(
             "Saved as draft",
             `${deposit.deposit_no ?? "The deposit"} was saved but could not be submitted: ${messageFrom(err)}. Submit it again from the deposits list.`,
@@ -570,6 +595,9 @@ function BankDepositScreen() {
           : undefined,
       });
     } catch (err) {
+      // Same reason as the submit failure above: hide the spinner first, then
+      // show the alert, so the two Modals never overlap.
+      setSaving(false);
       appAlert("Could not record deposit", messageFrom(err));
     } finally {
       setSaving(false);
@@ -1288,6 +1316,20 @@ function BankDepositScreen() {
           </Button>
         </View>
       </KeyboardAvoidingView>
+
+      {/* The middle of confirm -> loading -> success. The button's own spinner
+          sits at the foot of a long form and is off-screen for anyone who has
+          scrolled up, so it could not carry a multi-second, multi-request
+          operation on its own. Blocking, so the form cannot be edited or the
+          button tapped a second time mid-flight — a second tap on a CREATE
+          would mint a second deposit for one physical hand-over. */}
+      <DepositLoadingDialog
+        visible={saving && !success}
+        stage={stage}
+        isEdit={isEdit}
+        uploadIndex={uploadAt.index}
+        uploadTotal={uploadAt.total}
+      />
 
       {success ? (
         <PaymentSuccessDialog
