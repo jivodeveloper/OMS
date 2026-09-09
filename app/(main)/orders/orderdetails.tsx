@@ -84,6 +84,59 @@ const getItemSchemes = (item: any) => {
 const getSchemeQty = (scheme: any) =>
   toNumber(scheme?.scheme_qty ?? scheme?.qty_scheme ?? scheme?.qty);
 
+/**
+ * What to call a scheme, whichever engine granted it.
+ *
+ * `display_name` is the server's answer and covers both: it falls back to the
+ * v2 scheme's own name when there is no legacy one. The rest are for older
+ * responses that predate it — without them a v2 giveaway rendered as a bare
+ * "Scheme 1", which is what the order details page used to show.
+ */
+const getSchemeName = (scheme: any, index: number) =>
+  scheme?.display_name ||
+  scheme?.scheme_name ||
+  scheme?.name ||
+  scheme?.scheme_v2_code ||
+  (scheme?.scheme_id ? `Scheme ${scheme.scheme_id}` : `Scheme ${index + 1}`);
+
+/** True when the engine proposed it rather than a person picking it. */
+const isEngineScheme = (scheme: any) =>
+  Boolean(scheme?.scheme_v2_id) && !scheme?.scheme_id;
+
+/**
+ * The giveaway item a scheme hands over — code and name.
+ *
+ * Matches the web's `getOrderItemSchemes`: the legacy `scheme_item_*` fields
+ * first, then the v2 `benefit_item_code`. Blank when neither is set, which is
+ * the case for a legacy row that only ever recorded a quantity.
+ */
+const getSchemeItem = (scheme: any) => ({
+  code: scheme?.scheme_item_code || scheme?.benefit_item_code || "",
+  name: scheme?.scheme_item_name || "",
+});
+
+/** "STATE DL" — why the scheme applied. Blank for a hand-picked one. */
+const getSchemeScope = (scheme: any) =>
+  [scheme?.scope_type, scheme?.scope_value].filter(Boolean).join(" ");
+
+/**
+ * The item codes of every combo PARENT on this order.
+ *
+ * Built by reading `combo_source_code` off the free halves, so a parent is
+ * badged only when its child is actually present — matching the web. A parent
+ * whose half is missing is deliberately left unbadged rather than claiming a
+ * pairing the order does not contain.
+ */
+const getComboParentCodes = (items: any[]): Set<string> => {
+  const parents = new Set<string>();
+  (Array.isArray(items) ? items : []).forEach((item) => {
+    if (item?.is_auto_free && item?.combo_source_code) {
+      parents.add(String(item.combo_source_code));
+    }
+  });
+  return parents;
+};
+
 const normalizeStatusText = (value: unknown) =>
   String(value || "").trim().toLowerCase();
 
@@ -496,6 +549,14 @@ export default function OrderDetailsScreen() {
   const visibleItems =
     varietyGroups.find((g) => g.key === activeVariety)?.items ?? itemsList;
 
+  // Which paid lines are combo parents. Derived from the whole order, not the
+  // visible slice: a variety tab can show the parent while its free half sits
+  // under another tab, and the parent is still a combo either way.
+  const comboParentCodes = useMemo(
+    () => getComboParentCodes(itemsList as any[]),
+    [itemsList],
+  );
+
   const parsedOrderId = Number(Array.isArray(orderId) ? orderId[0] : orderId);
   const subtotalAmount = itemsList.reduce(
     (sum: number, item: any) => sum + toNumber(item?.total),
@@ -883,6 +944,29 @@ export default function OrderDetailsScreen() {
                         {!!item.item_code && (
                           <Text style={styles.itemHeaderCode}>{item.item_code}</Text>
                         )}
+                        {/* Both ends of a combo pair are badged, matching the
+                            web: the free half so it does not read as something
+                            the party is charged for, and the parent so the two
+                            are recognisable as one pack. A parent whose half is
+                            absent stays unbadged. */}
+                        {item.is_auto_free ? (
+                          <View style={styles.comboItemTag}>
+                            <Ionicons name="gift" size={10} color="#047857" />
+                            <Text style={styles.comboItemTagText}>
+                              Combo
+                              {item.combo_source_code
+                                ? ` · free half of ${item.combo_source_code}`
+                                : ""}
+                            </Text>
+                          </View>
+                        ) : comboParentCodes.has(String(item.item_code)) ? (
+                          <View style={styles.comboItemTag}>
+                            <Ionicons name="cube" size={10} color="#047857" />
+                            <Text style={styles.comboItemTagText}>
+                              Combo · free half listed below
+                            </Text>
+                          </View>
+                        ) : null}
                       </View>
                       {/* No warning icon: a rate below the price list is already
                           shown by the red Basic Price below, so the icon only
@@ -912,18 +996,125 @@ export default function OrderDetailsScreen() {
                           </View>
                         </View>
 
-                        {itemSchemes.map((scheme: any, sIndex: number) => (
-                          <View
-                            key={`${scheme.id ?? scheme.scheme_id ?? scheme.scheme_name}-${sIndex}`}
-                            style={styles.schemeBadge}
-                          >
-                            <Ionicons name="pricetag-outline" size={13} color="#7C3AED" />
-                            <Text style={styles.schemeBadgeText}>
-                              {scheme.scheme_name || scheme.scheme_id || `Scheme ${sIndex + 1}`}
-                              {getSchemeQty(scheme) > 0 ? ` - Qty: ${formatDisplayNumber(getSchemeQty(scheme))}` : ""}
-                            </Text>
-                          </View>
-                        ))}
+                        {/* The giveaways this line earned, INSIDE its card —
+                            a scheme belongs to the item that earned it, and
+                            listing it apart made the reader join the two up by
+                            hand. Collapsed by default so a long order stays
+                            scannable; expanding shows the same grid the item
+                            itself uses. */}
+                        {itemSchemes.map((scheme: any, sIndex: number) => {
+                          const schemeKey = `${key}-scheme-${sIndex}`;
+                          const schemeExpanded = !!expandedItems[schemeKey];
+                          const benefit = getSchemeItem(scheme);
+                          const scope = getSchemeScope(scheme);
+                          const schemeQty = getSchemeQty(scheme);
+                          return (
+                            <View key={schemeKey} style={styles.schemeCard}>
+                              <TouchableOpacity
+                                style={styles.schemeCardHeader}
+                                activeOpacity={0.7}
+                                onPress={() => toggleItem(schemeKey)}
+                                accessibilityRole="button"
+                                accessibilityState={{ expanded: schemeExpanded }}
+                                accessibilityLabel={`Scheme ${getSchemeName(scheme, sIndex)}`}
+                              >
+                                <View style={styles.schemeCardIcon}>
+                                  <Ionicons
+                                    name="pricetag"
+                                    size={13}
+                                    color="#7C3AED"
+                                  />
+                                </View>
+                                <View style={styles.schemeCardTitleWrap}>
+                                  <Text
+                                    style={styles.schemeCardTitle}
+                                    numberOfLines={1}
+                                  >
+                                    {benefit.name ||
+                                      benefit.code ||
+                                      getSchemeName(scheme, sIndex)}
+                                  </Text>
+                                  <Text
+                                    style={styles.schemeCardSubtitle}
+                                    numberOfLines={1}
+                                  >
+                                    {getSchemeName(scheme, sIndex)}
+                                    {schemeQty > 0
+                                      ? ` · Qty ${formatDisplayNumber(schemeQty)}`
+                                      : ""}
+                                  </Text>
+                                </View>
+                                {isEngineScheme(scheme) ? (
+                                  <View style={styles.schemeAutoTag}>
+                                    <Text style={styles.schemeAutoTagText}>
+                                      AUTO
+                                    </Text>
+                                  </View>
+                                ) : null}
+                                <View style={styles.schemeCardTag}>
+                                  <Text style={styles.schemeCardTagText}>
+                                    Scheme
+                                  </Text>
+                                </View>
+                                <Ionicons
+                                  name={
+                                    schemeExpanded
+                                      ? "chevron-up"
+                                      : "chevron-down"
+                                  }
+                                  size={ms(16)}
+                                  color="#7C3AED"
+                                />
+                              </TouchableOpacity>
+
+                              {schemeExpanded && (
+                                <View style={styles.schemeCardBody}>
+                                  <View style={styles.gridWrap}>
+                                    <View style={styles.gridCol}>
+                                      <GridCell
+                                        label="Scheme"
+                                        value={getSchemeName(scheme, sIndex)}
+                                      />
+                                      <GridCell
+                                        label="Free Item"
+                                        value={benefit.code || "—"}
+                                      />
+                                      <GridCell
+                                        label="Free Qty"
+                                        value={formatDisplayNumber(schemeQty)}
+                                        accent
+                                      />
+                                    </View>
+                                    <View style={styles.gridColDivider} />
+                                    <View style={styles.gridCol}>
+                                      <GridCell
+                                        label="Applies Via"
+                                        value={scope || "—"}
+                                      />
+                                      {/* The unit the scheme was WRITTEN in.
+                                          A "1 BOX" benefit ships as pieces, so
+                                          the two are not interchangeable. */}
+                                      <GridCell
+                                        label="As Written"
+                                        value={
+                                          scheme?.benefit_uom
+                                            ? `${formatDisplayNumber(
+                                                toNumber(scheme.benefit_qty),
+                                              )} ${scheme.benefit_uom}`
+                                            : "—"
+                                        }
+                                      />
+                                      <GridCell label="Amount" value="₹0.00" bold />
+                                    </View>
+                                  </View>
+                                  <Text style={styles.schemeCardNote}>
+                                    Free with {item.item_name}
+                                  </Text>
+                                </View>
+                              )}
+                            </View>
+                          );
+                        })}
                       </View>
                     )}
                   </View>
@@ -1009,9 +1200,11 @@ export default function OrderDetailsScreen() {
           />
         </View>
       )}
+
     </StateWrapper>
   );
 }
+
 
 /* ---------------- Components ---------------- */
 
@@ -1579,23 +1772,99 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     marginTop: 4,
   },
-  schemeBadge: {
+  // Marks a giveaway the engine proposed, so it reads differently from one a
+  // person chose. Outline, so it qualifies the badge rather than competing.
+  // A giveaway, nested inside the card of the item that earned it. Indented
+  // and tinted so it reads as belonging to that item rather than as an order
+  // line of its own — it has no price, no boxes and no ltrs.
+  schemeCard: {
+    marginTop: 8,
+    marginLeft: 10,
+    backgroundColor: "#FAF8FF",
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#EDE9FE",
+    overflow: "hidden",
+  },
+  schemeCardHeader: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#F5F3FF",
-    borderRadius: 8,
-    paddingVertical: 5,
+    gap: 8,
+    paddingVertical: 9,
     paddingHorizontal: 10,
-    alignSelf: "flex-start",
-    marginTop: 6,
-    gap: 5,
-    borderWidth: 1,
-    borderColor: "#DDD6FE",
   },
-  schemeBadgeText: {
-    fontSize: 12,
-    fontWeight: "600",
+  schemeCardIcon: {
+    width: 26,
+    height: 26,
+    borderRadius: 8,
+    backgroundColor: "#F5F3FF",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  schemeCardTitleWrap: { flex: 1, minWidth: 0 },
+  schemeCardTitle: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#0F172A",
+  },
+  schemeCardSubtitle: {
+    fontSize: 11,
+    color: "#64748B",
+    marginTop: 1,
+  },
+  schemeCardTag: {
+    backgroundColor: "#EEF2FF",
+    borderRadius: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  schemeCardTagText: {
+    fontSize: 10,
+    fontWeight: "800",
+    color: "#4338CA",
+  },
+  schemeCardBody: {
+    borderTopWidth: 1,
+    borderTopColor: "#EDE9FE",
+    paddingHorizontal: 10,
+    paddingTop: 8,
+    paddingBottom: 10,
+  },
+  schemeCardNote: {
+    fontSize: 11,
+    color: "#64748B",
+    marginTop: 6,
+    fontStyle: "italic",
+  },
+  comboItemTag: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    alignSelf: "flex-start",
+    backgroundColor: "#ECFDF5",
+    borderRadius: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    marginTop: 4,
+  },
+  comboItemTagText: {
+    fontSize: 10,
+    fontWeight: "800",
+    color: "#047857",
+    letterSpacing: 0.3,
+  },
+  schemeAutoTag: {
+    borderWidth: 1,
+    borderColor: "#7C3AED",
+    borderRadius: 5,
+    paddingHorizontal: 4,
+    paddingVertical: 1,
+  },
+  schemeAutoTagText: {
+    fontSize: 9,
+    fontWeight: "800",
     color: "#7C3AED",
+    letterSpacing: 0.3,
   },
 
   // ===== Fixed bottom action bar =====

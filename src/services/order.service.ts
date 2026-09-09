@@ -345,7 +345,87 @@ export const dispatchService = {
  },
 };
 
+/** One draft order line, as the v2 preview endpoint wants it. */
+export interface SchemePreviewLine {
+  item_code: string;
+  item_name?: string;
+  category: string;
+  sub_group?: string;
+  variety?: string;
+  brand?: string;
+  item_type?: string;
+  qty: number;
+  pcs?: number;
+  boxes?: number;
+  ltrs?: number;
+  /** True for a combo's free half, so the engine does not count it as a trigger. */
+  is_auto_free?: boolean;
+  /** The combo parent's item_code, pairing this line back to it. */
+  combo_source_code?: string;
+}
+
+/** One giveaway the engine proposes. Mirrors SchemeProposal.as_dict(). */
+export interface SchemeProposal {
+  /** Index into the `lines` array that was SENT — order must stay stable. */
+  line_index: number;
+  trigger_item_code: string;
+  scheme_id: number;
+  scheme_code: string;
+  scheme_name: string;
+  benefit_id: number | null;
+  benefit_item_code: string;
+  /** Resolved server-side; blank when the product is unknown, show the code. */
+  benefit_item_name: string;
+  free_uom: string;
+  /** In free_uom — what the user reads. */
+  qty: string;
+  /** qty x the giveaway's pack factor — what SAP ships. */
+  qty_pieces: string;
+  qualifying_qty: string;
+  scope_type: string;
+  scope_value: string;
+  priority: number;
+  stackable: boolean;
+  /** True when the scheme states no rule and the qty is still the user's to type. */
+  qty_is_user_supplied: boolean;
+}
+
+export interface SchemePreviewResponse {
+  success: boolean;
+  context?: {
+    card_code: string;
+    category: string;
+    state_code: string;
+    main_group: string;
+  };
+  proposals: SchemeProposal[];
+}
+
 export const schemeService = {
+  /**
+   * Dry-run the v2 engine over the current draft order.
+   *
+   * Nothing is written; the salesperson picks no scheme. Combo free halves must
+   * be included in `lines` — that is what lets a scheme whose trigger is
+   * `applies_to: FREE_LINE` see the giveaway half and stack on it.
+   *
+   * The endpoint runs STRICT category matching: the party category, the line
+   * category and the scheme's own category must all be present and identical.
+   * A blank anywhere silently drops the scheme, so a line with no category
+   * gets no proposals and no error.
+   */
+  previewSchemes: async (payload: {
+    card_code: string;
+    category: string;
+    lines: SchemePreviewLine[];
+  }): Promise<SchemePreviewResponse> => {
+    const res = await api.post("/orders/v2/schemes/preview/", payload);
+    return {
+      success: Boolean(res?.success),
+      context: res?.context,
+      proposals: Array.isArray(res?.proposals) ? res.proposals : [],
+    };
+  },
  getSchemes: async (stateCode?: string | null): Promise<{ scheme_id: number; scheme_name: string }[]> => {
  console.log("Fetching schemes for state code:", stateCode);
  const endpoint = stateCode ? `/orders/schemes/?state_code=${stateCode}` : "";

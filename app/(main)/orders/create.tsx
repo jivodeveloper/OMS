@@ -44,7 +44,19 @@ import {
   schemeService,
   PartyAddress,
   CreateOrderPayload,
+  type SchemePreviewLine,
 } from "@/src/services/order.service";
+import {
+  buildComboFreeItems,
+  getComboCompanion,
+  withoutAutoFreeItems,
+  type ComboPartyProduct,
+} from "@/src/features/orders/comboLines";
+import {
+  formatProposalQty,
+  proposalToSchemeEntry,
+  useSchemePreview,
+} from "@/src/features/orders/useSchemePreview";
 import { useRouter, useNavigation, useLocalSearchParams, useFocusEffect } from "expo-router";
 
 interface ItemRow {
@@ -622,6 +634,83 @@ export function OrderEntryScreen({
   const [allSchemes, setAllSchemes] = useState<{ label: string; value: string }[]>([]);
   const isFocOrder = isFocMode || loadedIsFocOrder;
   const shouldAllowSchemes = !isFocOrder;
+
+  // ── v2 scheme engine ──────────────────────────────────────────────────────
+  // The engine reads the whole draft order and proposes free goods; the user
+  // picks nothing. The combo free halves are included deliberately — a scheme
+  // whose trigger is `applies_to: FREE_LINE` earns off the giveaway half, and
+  // leaving it out would silently under-propose.
+  //
+  // The line order must match what the payload sends, because a proposal comes
+  // back keyed by `line_index` into exactly this array.
+  const schemePreviewLines = useMemo<SchemePreviewLine[]>(() => {
+    const paid = orderItems
+      .filter((item) => item.itemCode)
+      .map((item) => ({
+        item_code: String(item.itemCode),
+        item_name: String(item.itemName ?? ""),
+        category: String(item.category ?? ""),
+        brand: String(item.brand ?? ""),
+        variety: String(item.variety ?? ""),
+        item_type: String(item.type ?? ""),
+        // Same inversion the payload uses: `qty` is pieces, `boxes` is boxes.
+        qty: Number(item.boxes) || 0,
+        pcs: Number(item.pcs) || 0,
+        boxes: Number(item.qty) || 0,
+        ltrs: Number(item.ltrs) || 0,
+        is_auto_free: false,
+        combo_source_code: "",
+      }));
+    const free = buildComboFreeItems(
+      orderItems,
+      partyProducts as ComboPartyProduct[],
+    ) as unknown as SchemePreviewLine[];
+    return [...paid, ...free];
+  }, [orderItems, partyProducts]);
+
+  // Parsed inline rather than via parsePartyValue: that helper is a `const`
+  // declared further down, so calling it here would hit its temporal dead zone.
+  const previewParty = useMemo(() => {
+    const [cardCode, rawCategory] = String(partyName || "").split("||");
+    return {
+      cardCode: String(cardCode || "").trim(),
+      category: String(rawCategory || "").trim().toUpperCase(),
+    };
+  }, [partyName]);
+
+  // Free-goods tallies for the section header. Derived like everything else
+  // about a giveaway, so they cannot drift from the rows actually rendered.
+  const comboCount = useMemo(
+    () =>
+      orderItems.filter((item) =>
+        getComboCompanion(item, partyProducts as ComboPartyProduct[]),
+      ).length,
+    [orderItems, partyProducts],
+  );
+
+  const { proposalsByLine } = useSchemePreview({
+    cardCode: previewParty.cardCode,
+    category: previewParty.category,
+    lines: schemePreviewLines,
+    // FOC orders give everything away already; a giveaway on top is meaningless.
+    enabled: shouldAllowSchemes,
+  });
+
+  // Both scheme kinds count: the engine's proposals and whatever the user
+  // picked by hand.
+  const schemeCount = useMemo(() => {
+    const engine = Object.values(proposalsByLine).reduce(
+      (sum, list) => sum + list.length,
+      0,
+    );
+    const manual = orderItems.reduce(
+      (sum, item) => sum + getConfirmedSchemes(item).length,
+      0,
+    );
+    return engine + manual;
+  }, [proposalsByLine, orderItems]);
+
+  const freeGoodsCount = comboCount + schemeCount;
   const isBeverageUser = userCategories.includes("BEVERAGES") || userCategory === "BEVERAGES";
   // ── Templates States ──────────────────────────────────────────────────────
   const [templateParties, setTemplateParties] = useState<{ label: string; value: string }[]>([]);
@@ -1240,7 +1329,12 @@ export function OrderEntryScreen({
       }
 
       // Pre-fill confirmed order items exactly as saved in the order.
-      const items: OrderItemType[] = (order.items || []).map((item: any, index: number) => {
+      //
+      // The combo free halves are dropped here and re-derived from their
+      // parents instead (see comboLines.ts). Loading the SAVED child as well
+      // would post it twice on the next save: once from the rehydrated row and
+      // once from the derivation.
+      const items: OrderItemType[] = withoutAutoFreeItems(order.items || []).map((item: any, index: number) => {
         const itemSchemes = getApiItemSchemes(item);
         const firstScheme = itemSchemes[0];
 
@@ -2459,9 +2553,16 @@ export function OrderEntryScreen({
         remarks: String(comment ?? ""),
         is_foc: isFocOrder,
         ...(shouldShowPoNumber ? { po_number: String(poNumber ?? "") } : {}),
-        items: orderItems.map((item) => {
+        items: orderItems.map((item, itemIndex) => {
           const schemes = getConfirmedSchemes(item);
           const firstScheme = schemes[0];
+          // The engine's giveaways ride on the PARENT line, never as items of
+          // their own: the SAP push fans a scheme entry out into its own
+          // zero-priced line, so emitting it here as well would ship it twice.
+          // (A combo half is the opposite — a real item. See comboLines.ts.)
+          const engineSchemes = (proposalsByLine[itemIndex] ?? []).map(
+            proposalToSchemeEntry,
+          );
           return {
             item_code: String(item.itemCode ?? ""),
             item_name: String(item.itemName ?? ""),
@@ -2474,11 +2575,20 @@ export function OrderEntryScreen({
             scheme_name: firstScheme?.schemeName ? String(firstScheme.schemeName) : null,
             is_scheme_visible: schemes.length > 0,
             scheme_qty: firstScheme?.scheme ? Number(firstScheme.schemeQty) || 0 : 0,
-            schemes: schemes.map((scheme) => ({
-              scheme_id: scheme.scheme ? Number(scheme.scheme) : null,
-              scheme_name: scheme.schemeName ? String(scheme.schemeName) : null,
-              scheme_qty: Number(scheme.schemeQty) || 0,
-            })),
+            // Legacy entries are mapped field by field because OrderItemScheme
+            // is camelCase-only and carries no v2 fields to preserve. Engine
+            // entries are appended WHOLE — the backend qualifies a v2 entry on
+            // `scheme_v2_id` alone, so rebuilding one field by field would drop
+            // it and the giveaway would vanish with no error.
+            schemes: (
+              schemes.map((scheme) => ({
+                scheme_id: scheme.scheme ? Number(scheme.scheme) : null,
+                scheme_name: scheme.schemeName
+                  ? String(scheme.schemeName)
+                  : null,
+                scheme_qty: Number(scheme.schemeQty) || 0,
+              })) as Record<string, unknown>[]
+            ).concat(engineSchemes),
             pcs: Number(item.pcs) || 0,
             boxes: Number(item.qty) || 0,
             ltrs: Number(item.ltrs) || 0,
@@ -2487,7 +2597,11 @@ export function OrderEntryScreen({
             tax_rate: Number(item.taxRate) || 0,
             price_list_basic: Number(item.priceListBasic) || 0,
           };
-        }),
+        })
+          // A combo posts as TWO rows: the priced parent above, and its free
+          // half here. The server expands nothing — it stores what it is sent —
+          // so omitting these would drop the giveaway entirely.
+          .concat(buildComboFreeItems(orderItems, partyProducts) as never[]),
       };
       console.log("Final payload for submission:", JSON.stringify(payload, null, 2));
       if (isEditMode) {
@@ -2625,9 +2739,16 @@ export function OrderEntryScreen({
         remarks: String(comment ?? ""),
         is_foc: isFocOrder,
         ...(shouldShowPoNumber ? { po_number: String(poNumber ?? "") } : {}),
-        items: orderItems.map((item) => {
+        items: orderItems.map((item, itemIndex) => {
           const schemes = getConfirmedSchemes(item);
           const firstScheme = schemes[0];
+          // The engine's giveaways ride on the PARENT line, never as items of
+          // their own: the SAP push fans a scheme entry out into its own
+          // zero-priced line, so emitting it here as well would ship it twice.
+          // (A combo half is the opposite — a real item. See comboLines.ts.)
+          const engineSchemes = (proposalsByLine[itemIndex] ?? []).map(
+            proposalToSchemeEntry,
+          );
           return {
             item_code: String(item.itemCode ?? ""),
             item_name: String(item.itemName ?? ""),
@@ -2640,11 +2761,20 @@ export function OrderEntryScreen({
             scheme_name: firstScheme?.schemeName ? String(firstScheme.schemeName) : null,
             is_scheme_visible: schemes.length > 0,
             scheme_qty: firstScheme?.scheme ? Number(firstScheme.schemeQty) || 0 : 0,
-            schemes: schemes.map((scheme) => ({
-              scheme_id: scheme.scheme ? Number(scheme.scheme) : null,
-              scheme_name: scheme.schemeName ? String(scheme.schemeName) : null,
-              scheme_qty: Number(scheme.schemeQty) || 0,
-            })),
+            // Legacy entries are mapped field by field because OrderItemScheme
+            // is camelCase-only and carries no v2 fields to preserve. Engine
+            // entries are appended WHOLE — the backend qualifies a v2 entry on
+            // `scheme_v2_id` alone, so rebuilding one field by field would drop
+            // it and the giveaway would vanish with no error.
+            schemes: (
+              schemes.map((scheme) => ({
+                scheme_id: scheme.scheme ? Number(scheme.scheme) : null,
+                scheme_name: scheme.schemeName
+                  ? String(scheme.schemeName)
+                  : null,
+                scheme_qty: Number(scheme.schemeQty) || 0,
+              })) as Record<string, unknown>[]
+            ).concat(engineSchemes),
             pcs: Number(item.pcs) || 0,
             boxes: Number(item.qty) || 0,
             ltrs: Number(item.ltrs) || 0,
@@ -2669,7 +2799,10 @@ export function OrderEntryScreen({
                 Number(row.boxes) > 0,
             )
             .map(mapUnconfirmedRowToDraftItem),
-        ),
+        )
+          // The free halves of any confirmed combo, so reopening the draft
+          // shows the same lines the order would post.
+          .concat(buildComboFreeItems(orderItems, partyProducts) as never[]),
       };
 
       // Only update in place when resuming an existing draft.
@@ -3590,7 +3723,40 @@ export function OrderEntryScreen({
                 </Text>
               </View>
 
-              {orderItems.map((item, index) => (
+              {/* Free goods total, so the user sees what is being given away
+                  without opening every card. Counts both kinds: the combo
+                  halves and whatever the engine proposed. */}
+              {freeGoodsCount > 0 ? (
+                <View style={styles.freeGoodsSummary}>
+                  <Ionicons
+                    name="gift-outline"
+                    size={14}
+                    color={COLORS.primary}
+                  />
+                  <Text style={styles.freeGoodsSummaryText}>
+                    {freeGoodsCount} free {freeGoodsCount === 1 ? "line" : "lines"}
+                    {comboCount > 0 ? `  ·  ${comboCount} combo` : ""}
+                    {schemeCount > 0 ? `  ·  ${schemeCount} scheme` : ""}
+                  </Text>
+                </View>
+              ) : null}
+
+              {orderItems.map((item, index) => {
+                // Derived, never stored — recomputed from the item and the
+                // party-product mapping on every render, so changing the
+                // parent's quantity rewrites it and deleting the parent takes
+                // it with them. No edit or delete controls for the same
+                // reason: it follows the parent, so you change it by changing
+                // the parent.
+                const comboLine = getComboCompanion(
+                  item,
+                  partyProducts as ComboPartyProduct[],
+                );
+                // Proposals are keyed by the line's position in the array sent
+                // to the engine, and the paid rows lead that array in this same
+                // order — so the confirmed item at `index` is line `index`.
+                const proposals = proposalsByLine[index] ?? [];
+                return (
                 <View key={item.id} style={styles.itemCard}>
                   <View style={styles.itemHeader}>
                     <Text style={styles.itemName}>
@@ -3622,11 +3788,6 @@ export function OrderEntryScreen({
                   <Text style={styles.itemCategory}>
                     {item.category} | {item.brand} | {item.variety}
                   </Text>
-                  {getConfirmedSchemes(item).map((scheme, index) => (
-                    <Text key={`${scheme.scheme ?? scheme.schemeName}-${index}`} style={styles.itemCategory}>
-                      Scheme {index + 1}: {scheme.schemeName || scheme.scheme} | Qty Scheme: {scheme.schemeQty || 0}
-                    </Text>
-                  ))}
                   <View style={styles.itemDetails}>
                     <Text style={styles.itemDetail}>Boxes: {item.qty}</Text>
                     <Text style={styles.itemDetail}>Pcs/Case: {item.pcs}</Text>
@@ -3646,8 +3807,102 @@ export function OrderEntryScreen({
                       ₹{item.total.toFixed(2)}
                     </Text>
                   </View>
+
+                  {getConfirmedSchemes(item).map((scheme, schemeIndex) => (
+                    <View
+                      key={`legacy-${scheme.scheme ?? scheme.schemeName}-${schemeIndex}`}
+                      style={styles.schemeLine}
+                    >
+                      <View style={styles.comboLineHeader}>
+                        <View style={styles.schemeBadge}>
+                          <Text style={styles.schemeBadgeText}>SCHEME</Text>
+                        </View>
+                        <Text style={styles.comboLineName} numberOfLines={2}>
+                          {scheme.schemeName || scheme.scheme || "Scheme"}
+                        </Text>
+                      </View>
+                      <Text style={styles.comboLineNote}>Added manually</Text>
+                      <View style={styles.itemPriceRow}>
+                        <Text style={styles.itemDetail}>
+                          Qty: {scheme.schemeQty || 0}
+                        </Text>
+                        <Text style={styles.comboLineAmount}>₹0.00</Text>
+                      </View>
+                    </View>
+                  ))}
+
+                  {proposals.map((proposal) => (
+                    <View
+                      key={`${proposal.scheme_id}-${proposal.benefit_id}`}
+                      style={styles.schemeLine}
+                    >
+                      <View style={styles.comboLineHeader}>
+                        <View style={styles.schemeBadge}>
+                          <Text style={styles.schemeBadgeText}>SCHEME</Text>
+                        </View>
+                        {/* Nobody picked this one — the engine proposed it off
+                            the quantities entered. Marked so a user can tell it
+                            apart from a scheme they chose themselves. */}
+                        <View style={styles.autoBadge}>
+                          <Text style={styles.autoBadgeText}>AUTO</Text>
+                        </View>
+                        <Text style={styles.comboLineName} numberOfLines={2}>
+                          {proposal.benefit_item_name || proposal.benefit_item_code}
+                        </Text>
+                      </View>
+                      <Text style={styles.comboLineNote}>
+                        {proposal.scheme_name}
+                        {proposal.scheme_code ? ` (${proposal.scheme_code})` : ""}
+                      </Text>
+                      {/* Why this applied — the first question anyone asks
+                          about an unexpected giveaway. */}
+                      {proposal.scope_type ? (
+                        <Text style={styles.schemeMeta}>
+                          Applies via {proposal.scope_type}
+                          {proposal.scope_value ? ` ${proposal.scope_value}` : ""}
+                          {Number(proposal.qualifying_qty) > 0
+                            ? `  ·  on ${proposal.qualifying_qty} qualifying`
+                            : ""}
+                        </Text>
+                      ) : null}
+                      {proposal.benefit_item_name &&
+                      proposal.benefit_item_code ? (
+                        <Text style={styles.schemeMeta}>
+                          Item {proposal.benefit_item_code}
+                        </Text>
+                      ) : null}
+                      <View style={styles.itemPriceRow}>
+                        <Text style={styles.itemDetailBold}>
+                          Free: {formatProposalQty(proposal)}
+                        </Text>
+                        <Text style={styles.comboLineAmount}>₹0.00</Text>
+                      </View>
+                    </View>
+                  ))}
+
+                  {comboLine ? (
+                    <View style={styles.comboLine}>
+                      <View style={styles.comboLineHeader}>
+                        <View style={styles.comboBadge}>
+                          <Text style={styles.comboBadgeText}>COMBO</Text>
+                        </View>
+                        <Text style={styles.comboLineName} numberOfLines={2}>
+                          {comboLine.itemName}
+                        </Text>
+                      </View>
+                      <Text style={styles.comboLineNote}>{comboLine.note}</Text>
+                      <View style={styles.itemPriceRow}>
+                        <Text style={styles.itemDetail}>
+                          Boxes: {comboLine.qty}
+                          {comboLine.pcs > 0 ? `  |  Pcs: ${comboLine.pcs}` : ""}
+                        </Text>
+                        <Text style={styles.comboLineAmount}>₹0.00</Text>
+                      </View>
+                    </View>
+                  ) : null}
                 </View>
-              ))}
+                );
+              })}
 
               {/* ── FIX 5: Three-tier totals ─────────────────────────────── */}
               {itemRows.length === 0 && (
@@ -4241,6 +4496,115 @@ const styles = StyleSheet.create({
     marginTop: SPACING.sm,
   },
   emptySubtext: { fontSize: 13, color: COLORS.border, marginTop: SPACING.xs },
+  // ── Combo free half ───────────────────────────────────────────────────
+  // Indented and dashed so it reads as belonging to the card above rather
+  // than as an item in its own right — it carries no controls and no price.
+  comboLine: {
+    marginTop: SPACING.sm,
+    marginLeft: SPACING.md,
+    paddingTop: SPACING.sm,
+    paddingLeft: SPACING.sm,
+    borderLeftWidth: 2,
+    borderLeftColor: COLORS.success,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.borderLight,
+    borderStyle: "dashed",
+  },
+  comboLineHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  comboBadge: {
+    backgroundColor: COLORS.successLight,
+    borderRadius: RADIUS.sm,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  comboBadgeText: {
+    fontSize: 10,
+    fontWeight: "800",
+    color: COLORS.success,
+    letterSpacing: 0.4,
+  },
+  comboLineName: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: "600",
+    color: COLORS.text,
+  },
+  comboLineNote: {
+    fontSize: 11,
+    color: COLORS.textSecondary,
+    marginTop: 2,
+    marginBottom: 4,
+  },
+  comboLineAmount: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: COLORS.textSecondary,
+  },
+  // An engine proposal. Same indented, control-free shape as the combo half —
+  // both are giveaways the user does not edit — but blue, so a scheme is
+  // distinguishable from a combo at a glance.
+  schemeLine: {
+    marginTop: SPACING.sm,
+    marginLeft: SPACING.md,
+    paddingTop: SPACING.sm,
+    paddingLeft: SPACING.sm,
+    borderLeftWidth: 2,
+    borderLeftColor: COLORS.primary,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.borderLight,
+    borderStyle: "dashed",
+  },
+  schemeBadge: {
+    backgroundColor: COLORS.primaryLight,
+    borderRadius: RADIUS.sm,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  schemeBadgeText: {
+    fontSize: 10,
+    fontWeight: "800",
+    color: COLORS.primary,
+    letterSpacing: 0.4,
+  },
+  // Outline rather than filled: it qualifies the SCHEME badge beside it
+  // instead of competing with it.
+  autoBadge: {
+    borderWidth: 1,
+    borderColor: COLORS.primary,
+    borderRadius: RADIUS.sm,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+  },
+  autoBadgeText: {
+    fontSize: 9,
+    fontWeight: "700",
+    color: COLORS.primary,
+    letterSpacing: 0.3,
+  },
+  schemeMeta: {
+    fontSize: 11,
+    color: COLORS.textSecondary,
+    marginBottom: 2,
+  },
+  freeGoodsSummary: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: COLORS.primaryLighter,
+    borderRadius: RADIUS.sm,
+    paddingHorizontal: SPACING.sm,
+    paddingVertical: 6,
+    marginBottom: SPACING.sm,
+  },
+  freeGoodsSummaryText: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: COLORS.primary,
+  },
   itemCard: {
     backgroundColor: COLORS.background,
     borderRadius: RADIUS.md,
