@@ -208,21 +208,32 @@ export async function captureWithCamera(): Promise<PickedFile[]> {
   return file ? [file] : [];
 }
 
-/** Photo library. Multi-select, since a cheque may need front and back. */
+/**
+ * Photo library. Multi-select, since a cheque may need front and back.
+ *
+ * NO PERMISSION IS REQUESTED, and none is declared.
+ *
+ * `launchImageLibraryAsync` opens the Android Photo Picker
+ * (ActivityResultContracts.PickVisualMedia, see expo-image-picker's
+ * ImageLibraryContract.kt), a system dialog that returns ONLY the files the
+ * user chose. The app never gains access to the wider photo library, so
+ * READ_MEDIA_IMAGES is neither needed nor permitted: Google Play's Photo and
+ * Video Permissions policy reserves it for apps whose core purpose is browsing
+ * or managing media, and attaching the occasional cheque image does not
+ * qualify. Play rejected version code 9 on exactly this ground.
+ *
+ * Calling requestMediaLibraryPermissionsAsync() here is what USED to force the
+ * permission into the merged manifest. It is gone deliberately — re-adding it
+ * would both fail (the permission is stripped by tools:node="remove") and get
+ * the release blocked again.
+ *
+ * Older devices need nothing extra either: PickVisualMedia falls back to
+ * ACTION_GET_CONTENT below Android 13, which is also permission-less.
+ */
 export async function pickFromGallery(): Promise<PickedFile[]> {
   const ImagePicker = loadImagePicker();
   if (!ImagePicker) {
     warnMissingModule("camera/gallery");
-    return [];
-  }
-  const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-  if (!permission.granted) {
-    appAlert(
-      "Photos permission needed",
-      permission.canAskAgain
-        ? "Allow access to your photos to attach an existing image."
-        : "Photo access is blocked. Enable it in Settings › OMSAPP › Photos.",
-    );
     return [];
   }
 

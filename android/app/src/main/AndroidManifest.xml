@@ -1,15 +1,31 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
   <uses-permission android:name="android.permission.INTERNET"/>
   <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
-  <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>
   <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
   <uses-permission android:name="android.permission.VIBRATE"/>
-  <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>
-  <!-- Payment attachments: photograph a cheque / deposit slip, or pick one.
-       READ_MEDIA_IMAGES is the Android 13+ replacement for
-       READ_EXTERNAL_STORAGE, which is ignored from API 33 onwards. -->
+  <!-- Photographing a cheque / deposit slip. This is a real camera capture,
+       so the permission genuinely applies and Play accepts it. -->
   <uses-permission android:name="android.permission.CAMERA"/>
-  <uses-permission android:name="android.permission.READ_MEDIA_IMAGES"/>
+
+  <!-- Broad media access is DELIBERATELY ABSENT.
+       Picking an existing image goes through the Android Photo Picker
+       (ActivityResultContracts.PickVisualMedia, used by expo-image-picker 17),
+       which hands back only the chosen file and needs no permission at all.
+       Google Play's Photo and Video Permissions policy reserves
+       READ_MEDIA_IMAGES for apps whose core purpose is browsing or managing
+       media; an app that merely attaches the occasional screenshot does not
+       qualify, and a written justification is not accepted.
+
+       expo-image-picker, expo-image and expo-file-system each declare
+       READ_EXTERNAL_STORAGE / WRITE_EXTERNAL_STORAGE in their own manifests,
+       so removing ours is not enough — these tools:node="remove" entries strip
+       them from the MERGED manifest, which is what Play actually inspects.
+       Verify with: aapt dump permissions <apk> -->
+  <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" tools:node="remove"/>
+  <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" tools:node="remove"/>
+  <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" tools:node="remove"/>
+  <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" tools:node="remove"/>
   <!-- Declared optional so the app still installs on camera-less devices. -->
   <uses-feature android:name="android.hardware.camera" android:required="false"/>
   <queries>
