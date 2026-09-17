@@ -102,6 +102,32 @@ export const ASSIGNABLE_PAGES: AppPage[] = [
       "backdate/edit-request",
     ],
   },
+  {
+    // Production Orders — SAP plans them, OMS approves them.
+    //
+    // There is no "create" screen to grant, and there never will be: a planner
+    // raises the order in SAP B1 and the sync finds it, so this key means
+    // "watch the list", not "own the documents".
+    key: "Production_Order",
+    label: "Production Orders",
+    screens: [
+      "production/tracking",
+      "production/tracking-details",
+      "production/tracking-progress",
+    ],
+  },
+  {
+    // Opens the approval desk. NOT sufficient to decide any given order — the
+    // server also requires the holder to be that stage's effective user, so
+    // this grant shows the queue and nothing more.
+    key: "Production_Order_Approval",
+    label: "Production Order Approval",
+    screens: [
+      "production/tracking",
+      "production/tracking-details",
+      "production/tracking-progress",
+    ],
+  },
 ];
 
 /**
@@ -130,6 +156,7 @@ const ALL_PAYMENT_ACTIONS = Object.values(PAYMENT_ACTIONS);
  * `BackDate_Create`. See the note in `constants/permissions.ts`.
  */
 const ALL_BACKDATE_ACTIONS = ["BackDate", "BackDate_Approval"];
+const ALL_PRODUCTION_ACTIONS = ["Production_Order", "Production_Order_Approval"];
 
 export type PaymentAction =
   (typeof PAYMENT_ACTIONS)[keyof typeof PAYMENT_ACTIONS];
@@ -223,6 +250,14 @@ export const SCREEN_KEYS: Record<string, string[]> = {
   // (that is how a SAP refusal gets corrected), so both keys admit here. The
   // server decides per request via `can_edit`; this only opens the screen.
   "backdate/edit-request": ALL_BACKDATE_ACTIONS,
+
+  // Production Orders — two keys, spelled as the backend registry issues them.
+  // Watching and deciding are unrelated jobs, so neither key implies the other.
+  // One tracking screen serves both, showing what the viewer is entitled to.
+  "production/tracking": ALL_PRODUCTION_ACTIONS,
+  // Reached from a card, a deep link or a push — never from the drawer.
+  "production/tracking-details": ALL_PRODUCTION_ACTIONS,
+  "production/tracking-progress": ALL_PRODUCTION_ACTIONS,
 };
 
 /**
@@ -309,6 +344,52 @@ export const canAccessScreen = (
   const held = rolesOf(user?.role, user?.roles);
   return allowed.some((r) => held.includes(r));
 };
+
+// ---------------------------------------------------------------------------
+// Order creator + approver
+// ---------------------------------------------------------------------------
+
+/** The creator's own order list (non-admins see only the orders they raised). */
+export const MY_ORDERS_SCREEN = "orders/ordertracking";
+
+/** Every order-approval list, one per approving role. */
+export const ORDER_APPROVAL_SCREENS = [
+  "orders/orderlist",
+  "approver/pending_approval",
+  "orders/auditorapproval",
+];
+
+/**
+ * A user who both raises orders AND approves them (e.g. billing, or a manager
+ * who also holds the approver role). They need their own orders and the
+ * approval queue as two separate, clearly named pages — one footer tab can
+ * only reach one of them. Admins are excluded: they see every order already.
+ */
+export const isOrderCreatorApprover = (
+  user: User | null | undefined,
+): boolean =>
+  !isAdmin(user) &&
+  canAccessScreen(MY_ORDERS_SCREEN, user) &&
+  ORDER_APPROVAL_SCREENS.some((screen) => canAccessScreen(screen, user));
+
+const CREATOR_APPROVER_LABELS: Record<string, string> = {
+  "orders/ordertracking": "My Orders",
+  "orders/orderlist": "Billing Approvals",
+  "approver/pending_approval": "Order Approvals",
+  "orders/auditorapproval": "Auditor Approvals",
+};
+
+/**
+ * Sidebar / header name for an order list. Creator-approvers get names that
+ * say whose orders they are ("My Orders" vs "... Approvals"); everyone else
+ * keeps the screen's usual title.
+ */
+export const orderScreenTitle = (
+  screen: string,
+  user: User | null | undefined,
+  fallback: string,
+): string =>
+  (isOrderCreatorApprover(user) && CREATOR_APPROVER_LABELS[screen]) || fallback;
 
 export type AppRoute = { screen: string; route: string };
 

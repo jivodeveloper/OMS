@@ -8,6 +8,7 @@ import React, {
 import { Alert, AppState } from "react-native";
 import * as Notifications from "expo-notifications";
 import { router } from "expo-router";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { storage } from "../utils/storage";
 import { authService, User, LoginRequest } from "../services/auth.service";
 import { notificationService } from "../services/notification.service";
@@ -27,7 +28,7 @@ import {
   type OMSNotificationData,
 } from "../utils/notificationRouting";
 import { suppressPendingNotification } from "../utils/notificationGate";
-import { bindCacheToUser, refreshLiveData, resetCache } from "../cache";
+import { bindCacheToUser, refreshAllData, refreshLiveData, resetCache } from "../cache";
 import {
   api,
   ensureFreshAccessToken,
@@ -73,6 +74,22 @@ const normalizeUser = (user: User): User => {
       ? user.permissions.filter(Boolean)
       : undefined,
   };
+};
+
+// Daily soft refresh at 23:00 (local time). Cached data is thrown away once a
+// day; the last run is remembered so a device that was closed or backgrounded
+// at 23:00 refreshes the next time the app is opened. Tokens are never touched
+// — the user stays logged in.
+const DAILY_REFRESH_HOUR = 23;
+const DAILY_REFRESH_CHECK_MS = 60 * 1000;
+const LAST_FULL_REFRESH_KEY = "oms.lastFullRefreshAt";
+
+/** The most recent 23:00 that is not in the future. */
+const lastDailyRefreshSlot = (now = new Date()): number => {
+  const slot = new Date(now);
+  slot.setHours(DAILY_REFRESH_HOUR, 0, 0, 0);
+  if (slot.getTime() > now.getTime()) slot.setDate(slot.getDate() - 1);
+  return slot.getTime();
 };
 
 const getFieldErrorMessage = (errors: any): string | null => {
@@ -158,6 +175,83 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     });
     return () => subscription.remove();
   }, []);
+
+  // Daily soft refresh at 23:00 — NEVER logs the user out. Admin changes
+  // (party items, rates, schemes, UI labels, permissions) otherwise only showed
+  // after a fresh login because cached payloads are served
+  // stale-while-revalidate. Once the 23:00 slot has passed since the last run,
+  // drop every cached payload, reload labels and the profile, and let mounted
+  // screens refetch. Checked every minute while the app is open and on every
+  // return to the foreground; JS cannot run while the app is closed, so a
+  // device that was asleep at 23:00 catches up the moment it is opened.
+  //
+  // Nothing here can end the session: no token refresh is forced, clearing the
+  // cache never touches the token keys, and both reloads swallow failures.
+  const lastFullRefreshAt = useRef(0);
+  useEffect(() => {
+    if (!user?.id) return;
+    let cancelled = false;
+    let running = false;
+
+    const runFullRefresh = async () => {
+      if (running) return;
+      running = true;
+      lastFullRefreshAt.current = Date.now();
+      try {
+        await AsyncStorage.setItem(
+          LAST_FULL_REFRESH_KEY,
+          String(lastFullRefreshAt.current),
+        );
+      } catch {
+        /* best-effort */
+      }
+      try {
+        await refreshAllData();
+        void uiConfigService.load(true);
+        void refreshUser();
+      } catch (error) {
+        console.log("Daily refresh failed:", error);
+      } finally {
+        running = false;
+      }
+    };
+
+    const maybeRefresh = () => {
+      if (cancelled || AppState.currentState !== "active") return;
+      if (lastFullRefreshAt.current < lastDailyRefreshSlot()) {
+        void runFullRefresh();
+      }
+    };
+
+    void (async () => {
+      try {
+        const stored = Number(await AsyncStorage.getItem(LAST_FULL_REFRESH_KEY));
+        lastFullRefreshAt.current = Number.isFinite(stored) ? stored : 0;
+      } catch {
+        lastFullRefreshAt.current = 0;
+      }
+      if (!lastFullRefreshAt.current) {
+        // First run on this device: start the clock, don't wipe now.
+        lastFullRefreshAt.current = Date.now();
+        void AsyncStorage.setItem(
+          LAST_FULL_REFRESH_KEY,
+          String(lastFullRefreshAt.current),
+        ).catch(() => undefined);
+      }
+      maybeRefresh();
+    })();
+
+    const timer = setInterval(maybeRefresh, DAILY_REFRESH_CHECK_MS);
+    const subscription = AppState.addEventListener("change", (next) => {
+      if (next === "active") maybeRefresh();
+    });
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+      subscription.remove();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
 
   const checkAuth = async () => {
     try {

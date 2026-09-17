@@ -31,7 +31,29 @@ type DateGroup = "Today" | "Yesterday" | "Older";
 // Which backend a card came from — drives read/mark-read + navigation routing.
 type NotificationSource = "orders" | "framework";
 // Coarse module for the optional module filter.
-type NotificationModule = "orders" | "payments" | "deposits" | "other";
+type NotificationModule =
+  | "orders"
+  | "payments"
+  | "deposits"
+  | "backdate"
+  | "production"
+  | "other";
+
+/**
+ * The module labels the backend actually sends
+ * (`notifications/serializers.py::_ENTITY_MODULE`).
+ *
+ * Anything absent here falls to "other" — which is correct for a module this
+ * inbox has no opinion about, and wrong the moment one ships. BackDate and
+ * Production both reached users grouped under "other" until this list caught
+ * up with them.
+ */
+const KNOWN_MODULES: NotificationModule[] = [
+  "payments",
+  "deposits",
+  "backdate",
+  "production",
+];
 
 type NotificationMeta = {
   title: string;
@@ -159,13 +181,20 @@ const getFrameworkMeta = (item: FrameworkNotification): NotificationMeta => {
     return { title: item.title || "Approved", icon: "checkmark-circle", color: "#16A34A", iconBg: "#E7F8ED" };
   if (item.module === "deposits")
     return { title: item.title || "Deposit update", icon: "wallet-outline", color: "#0EA5E9", iconBg: "#E0F2FE" };
+  if (item.module === "backdate")
+    return { title: item.title || "BackDate update", icon: "time-outline", color: "#0891B2", iconBg: "#E0F7FA" };
+  if (item.module === "production")
+    return { title: item.title || "Production update", icon: "cube-outline", color: "#7C3AED", iconBg: "#F1E9FF" };
   return { title: item.title || "Payment update", icon: "cash-outline", color: "#7C3AED", iconBg: "#F1E9FF" };
 };
 
 const toFrameworkCard = (item: FrameworkNotification): NotificationCard => {
   const meta = getFrameworkMeta(item);
-  const mod: NotificationModule =
-    item.module === "payments" || item.module === "deposits" ? item.module : "other";
+  const mod: NotificationModule = KNOWN_MODULES.includes(
+    item.module as NotificationModule,
+  )
+    ? (item.module as NotificationModule)
+    : "other";
   return {
     key: `framework:${item.id}`,
     id: item.id,
@@ -192,6 +221,8 @@ const MODULE_FILTERS: { key: NotificationModule | "all"; label: string }[] = [
   { key: "orders", label: "Orders" },
   { key: "payments", label: "Payments" },
   { key: "deposits", label: "Deposits" },
+  { key: "backdate", label: "BackDate" },
+  { key: "production", label: "Production" },
 ];
 
 const GROUP_ORDER: DateGroup[] = ["Today", "Yesterday", "Older"];

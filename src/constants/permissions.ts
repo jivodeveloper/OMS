@@ -59,6 +59,16 @@ export const PERMISSION_KEYS = {
   // current stage's effective user.
   BACKDATE: "BackDate",
   BACKDATE_APPROVAL: "BackDate_Approval",
+
+  // Production Orders (PRDO) — SAP plans them, OMS approves them.
+  //
+  // `Production_Order` means WATCH, not own: nobody in OMS raises a production
+  // order, so there is no create key and no create screen. It is the pair to
+  // `Production_Order_Approval`, which opens the approval desk and is likewise
+  // NOT sufficient to decide a given order — the server also requires the
+  // caller to be the current stage's effective user.
+  PRODUCTION_ORDER: "Production_Order",
+  PRODUCTION_ORDER_APPROVAL: "Production_Order_Approval",
 } as const;
 
 /**

@@ -44,6 +44,10 @@ export const DEPOSIT_DETAILS_ROUTE = "/(main)/payments/deposit-details" as const
 // (BackDateTrackingScreen.openDetails). Keyed by { id, from }.
 export const BACKDATE_DETAILS_ROUTE =
   "/(main)/backdate/tracking-details" as const;
+// Production Order detail: the SAME screen the tracking cards open on
+// "View Details" (ProductionTrackingScreen.openDetails). Keyed by { id, from }.
+export const PRODUCTION_DETAILS_ROUTE =
+  "/(main)/production/tracking-details" as const;
 
 /**
  * Map a backend `entity_type` (Django model name) to the exact mobile detail
@@ -77,6 +81,17 @@ const ENTITY_ROUTES: Record<
   // on — see BackDateDetailsScreen.
   backdate: {
     pathname: BACKDATE_DETAILS_ROUTE,
+    params: (id, from) => ({ id, ...(from ? { from } : {}) }),
+  },
+  // `productionorder` — one word, no underscore. Verified against
+  // ContentType.objects.get_for_model(ProductionOrder), not guessed: a wrong
+  // key here fails silently, landing a tapped push in the inbox instead of the
+  // order it was about.
+  //
+  // As with backdate, no `actionable` param: a notification cannot know it, and
+  // the details screen asks the approval queue rather than assuming either way.
+  productionorder: {
+    pathname: PRODUCTION_DETAILS_ROUTE,
     params: (id, from) => ({ id, ...(from ? { from } : {}) }),
   },
 };

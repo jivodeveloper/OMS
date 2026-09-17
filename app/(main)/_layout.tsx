@@ -20,6 +20,7 @@ import { frameworkNotificationService } from "@/src/services/frameworkNotificati
 import { storage } from "@/src/utils/storage";
 import {
   canAccessScreen,
+  orderScreenTitle,
   isPaymentsOnlyUser,
 } from "@/src/constants/pages";
 import {
@@ -319,6 +320,11 @@ export default function MainLayout() {
    * and grants, so once payments screens moved to action permissions the two
    * disagreed: the sidebar listed pages the guard then refused.
    */
+  // Order lists get clearer names for users who both create and approve
+  // ("My Orders" vs "... Approvals"); others keep the usual titles.
+  const orderTitle = (screen: string, fallback: string) =>
+    orderScreenTitle(screen, user, fallback);
+
   const isVisible = (screen: string) => {
     if (!userRole && screen === "dashboard") return true;
     return canAccessScreen(screen, user);
@@ -594,8 +600,8 @@ export default function MainLayout() {
         <Drawer.Screen
           name="orders/orderlist"
           options={{
-            drawerLabel: ({ color }) => renderDrawerLabel("Order List", color),
-            title: "Order List",
+            drawerLabel: ({ color }) => renderDrawerLabel(orderTitle("orders/orderlist", "Order List"), color),
+            title: orderTitle("orders/orderlist", "Order List"),
             drawerIcon: ({ color }) => (
               <Ionicons name="document-text-outline" size={22} color={color} />
             ),
@@ -785,6 +791,40 @@ export default function MainLayout() {
             drawerItemStyle: hiddenStyle,
           }}
         />
+
+        {/* ── Production Orders ─────────────────────────────────────────
+            One drawer entry, not two: SAP is the point of origin, so there
+            is nothing to create and the single list serves watcher and
+            approver alike. */}
+        <Drawer.Screen
+          name="production/tracking"
+          options={{
+            drawerLabel: ({ color }) =>
+              renderDrawerLabel("Production Orders", color),
+            title: "Production Orders",
+            drawerIcon: ({ color }) => (
+              <Ionicons name="cube-outline" size={22} color={color} />
+            ),
+            drawerItemStyle: isVisible("production/tracking")
+              ? visibleStyle
+              : hiddenStyle,
+          }}
+        />
+        <Drawer.Screen
+          name="production/tracking-details"
+          options={{
+            title: "Production Order",
+            // Reached from a tracking card or a push, never from the drawer.
+            drawerItemStyle: hiddenStyle,
+          }}
+        />
+        <Drawer.Screen
+          name="production/tracking-progress"
+          options={{
+            title: "Production Progress",
+            drawerItemStyle: hiddenStyle,
+          }}
+        />
         <Drawer.Screen
           name="reports/daily-report"
           options={{
@@ -947,8 +987,8 @@ export default function MainLayout() {
         <Drawer.Screen
           name="orders/ordertracking"
           options={{
-            drawerLabel: ({ color }) => renderDrawerLabel("Order Tracking", color),
-            title: "Order Tracking",
+            drawerLabel: ({ color }) => renderDrawerLabel(orderTitle("orders/ordertracking", "Order Tracking"), color),
+            title: orderTitle("orders/ordertracking", "Order Tracking"),
             drawerIcon: ({ color }) => (
               <Ionicons name="locate-outline" size={22} color={color} />
             ),
@@ -961,8 +1001,8 @@ export default function MainLayout() {
           name="approver/pending_approval"
           options={{
             drawerLabel: ({ color }) =>
-              renderDrawerLabel("Pending Approvals", color),
-            title: "Pending Approvals",
+              renderDrawerLabel(orderTitle("approver/pending_approval", "Pending Approvals"), color),
+            title: orderTitle("approver/pending_approval", "Pending Approvals"),
             drawerIcon: ({ color }) => (
               <Ionicons name="checkmark-done-outline" size={22} color={color} />
             ),
@@ -975,8 +1015,8 @@ export default function MainLayout() {
           name="orders/auditorapproval"
           options={{
             drawerLabel: ({ color }) =>
-              renderDrawerLabel("Auditor Approvals", color),
-            title: "Auditor Approvals",
+              renderDrawerLabel(orderTitle("orders/auditorapproval", "Auditor Approvals"), color),
+            title: orderTitle("orders/auditorapproval", "Auditor Approvals"),
             drawerIcon: ({ color }) => (
               <Ionicons name="checkmark-done-outline" size={22} color={color} />
             ),

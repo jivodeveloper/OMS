@@ -464,6 +464,14 @@ export default function DailyReportScreen() {
     });
   };
 
+  const openOrderProgress = (orderId: number) => {
+    keepFiltersRef.current = true;
+    router.push({
+      pathname: "/orders/orderprogress",
+      params: { orderId, from: "reports/daily-report" },
+    });
+  };
+
   const renderOrder = ({ item, index }: { item: OrderItemList; index: number }) => (
     <TouchableOpacity
       style={styles.orderCard}
@@ -511,7 +519,16 @@ export default function DailyReportScreen() {
         <Text style={styles.amountValue}>Rs {formatAmount(item.total_amount)}</Text>
       </View>
 
+      {/* Same order on every card list: Progress left, Details right. */}
       <View style={styles.actionRow}>
+        <TouchableOpacity
+          style={[styles.actionBtn, styles.progressBtn]}
+          onPress={() => openOrderProgress(item.id)}
+          activeOpacity={0.85}
+        >
+          <Ionicons name="git-branch-outline" size={18} color={COLORS.textLight} />
+          <Text style={styles.actionBtnText}>View Progress</Text>
+        </TouchableOpacity>
         <TouchableOpacity
           style={styles.actionBtn}
           onPress={() => openOrderDetails(item.id)}
@@ -1311,6 +1328,7 @@ const styles = StyleSheet.create({
   },
   actionRow: {
     flexDirection: "row",
+    gap: 10,
     marginTop: 16,
   },
   actionBtn: {
@@ -1322,6 +1340,9 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderRadius: 10,
     backgroundColor: COLORS.primary,
+  },
+  progressBtn: {
+    backgroundColor: "#4CAF50",
   },
   actionBtnText: {
     color: COLORS.textLight,

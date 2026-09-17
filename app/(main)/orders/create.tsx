@@ -45,6 +45,7 @@ import {
   PartyAddress,
   CreateOrderPayload,
   type SchemePreviewLine,
+  type SchemeProposal,
 } from "@/src/services/order.service";
 import {
   buildComboFreeItems,
@@ -535,6 +536,14 @@ export function OrderEntryScreen({
   // PO is available to anyone on the order-create page (not billing-only); the
   // admin `enabled` flag decides whether it shows.
   const shouldShowPoNumber = poField.enabled;
+  // Admin switch for the manual "Schemes" box on each item. Turn it off from
+  // UI Labels (`manual_scheme_box`) when the scheme mapping should be the only
+  // source of schemes, so a line doesn't end up with two.
+  const manualSchemeBox = field("manual_scheme_box", {
+    label: "Schemes",
+    enabled: true,
+    required: false,
+  });
 
   const [loading, setLoading] = useState(false);
   const [successModal, setSuccessModal] = useState(false);
@@ -695,6 +704,107 @@ export function OrderEntryScreen({
     // FOC orders give everything away already; a giveaway on top is meaningless.
     enabled: shouldAllowSchemes,
   });
+
+  // ── Auto schemes for items still being edited ─────────────────────────────
+  // A second preview that also includes the unconfirmed rows, so the user can
+  // see what the scheme mapping already gives an item BEFORE confirming it —
+  // and doesn't pick the same scheme again by hand. Confirmed items lead the
+  // array (order-wide thresholds still count), draft rows follow, combo free
+  // halves go last so they never shift a draft row's index. Display only: the
+  // payload keeps using `proposalsByLine` above.
+  const draftPreview = useMemo(() => {
+    const paid = schemePreviewLines.filter((line) => !line.is_auto_free);
+    const free = schemePreviewLines.filter((line) => line.is_auto_free);
+    const lineIndexByRowId: Record<number, number> = {};
+    const drafts: SchemePreviewLine[] = [];
+    itemRows.forEach((row) => {
+      if (!row.selectedProduct || !(Number(row.boxes) > 0)) return;
+      const product = partyProducts.find(
+        (p: any) => String(p.item_code) === String(row.selectedProduct),
+      );
+      lineIndexByRowId[row.id] = paid.length + drafts.length;
+      drafts.push({
+        item_code: String(row.selectedProduct),
+        item_name: String(product?.item_name ?? ""),
+        category: String(row.selectedCategory ?? product?.category ?? ""),
+        brand: String(row.selectedBrand ?? product?.brand ?? ""),
+        variety: String(row.selectedVariety ?? product?.sub_group ?? ""),
+        item_type: String(row.selectedType ?? ""),
+        // Same inversion as the confirmed lines: row.boxes holds total pcs,
+        // row.qty holds the box count.
+        qty: Number(row.boxes) || 0,
+        pcs: Number(row.pcs) || 0,
+        boxes: Number(row.qty) || 0,
+        ltrs: Number(row.ltrs) || 0,
+        is_auto_free: false,
+        combo_source_code: "",
+      } as SchemePreviewLine);
+    });
+    return {
+      lines: drafts.length ? [...paid, ...drafts, ...free] : [],
+      lineIndexByRowId,
+    };
+  }, [schemePreviewLines, itemRows, partyProducts]);
+
+  const { proposalsByLine: draftProposalsByLine, loading: draftProposalsLoading } =
+    useSchemePreview({
+      cardCode: previewParty.cardCode,
+      category: previewParty.category,
+      lines: draftPreview.lines,
+      enabled: shouldAllowSchemes && draftPreview.lines.length > 0,
+    });
+
+  const getRowAutoProposals = (rowId: number): SchemeProposal[] => {
+    const index = draftPreview.lineIndexByRowId[rowId];
+    return index === undefined ? [] : draftProposalsByLine[index] ?? [];
+  };
+
+  /** One engine-proposed scheme, as shown on confirmed items and draft rows. */
+  const renderAutoProposal = (proposal: SchemeProposal) => (
+    <View
+      key={`${proposal.scheme_id}-${proposal.benefit_id}`}
+      style={styles.schemeLine}
+    >
+      <View style={styles.comboLineHeader}>
+        <View style={styles.schemeBadge}>
+          <Text style={styles.schemeBadgeText}>SCHEME</Text>
+        </View>
+        {/* Nobody picked this one — the engine proposed it off the quantities
+            entered. Marked so a user can tell it apart from a scheme they
+            chose themselves. */}
+        <View style={styles.autoBadge}>
+          <Text style={styles.autoBadgeText}>AUTO</Text>
+        </View>
+        <Text style={styles.comboLineName} numberOfLines={2}>
+          {proposal.benefit_item_name || proposal.benefit_item_code}
+        </Text>
+      </View>
+      <Text style={styles.comboLineNote}>
+        {proposal.scheme_name}
+        {proposal.scheme_code ? ` (${proposal.scheme_code})` : ""}
+      </Text>
+      {/* Why this applied — the first question anyone asks about an
+          unexpected giveaway. */}
+      {proposal.scope_type ? (
+        <Text style={styles.schemeMeta}>
+          Applies via {proposal.scope_type}
+          {proposal.scope_value ? ` ${proposal.scope_value}` : ""}
+          {Number(proposal.qualifying_qty) > 0
+            ? `  ·  on ${proposal.qualifying_qty} qualifying`
+            : ""}
+        </Text>
+      ) : null}
+      {proposal.benefit_item_name && proposal.benefit_item_code ? (
+        <Text style={styles.schemeMeta}>Item {proposal.benefit_item_code}</Text>
+      ) : null}
+      <View style={styles.itemPriceRow}>
+        <Text style={styles.itemDetailBold}>
+          Free: {formatProposalQty(proposal)}
+        </Text>
+        <Text style={styles.comboLineAmount}>₹0.00</Text>
+      </View>
+    </View>
+  );
 
   // Both scheme kinds count: the engine's proposals and whatever the user
   // picked by hand.
@@ -3583,12 +3693,12 @@ export function OrderEntryScreen({
                     </View>
                   </View>
 
-                  {shouldAllowSchemes && row.selectedProduct && (
+                  {shouldAllowSchemes && manualSchemeBox.enabled && row.selectedProduct && (
                     <View style={styles.schemeBox}>
                       <View style={styles.schemeHeaderRow}>
                         <View style={styles.schemeHeaderTitle}>
                           <Ionicons name="gift-outline" size={16} color={COLORS.primary} />
-                          <Text style={styles.schemeTitleText}>Schemes</Text>
+                          <Text style={styles.schemeTitleText}>{manualSchemeBox.label}</Text>
                         </View>
                         <TouchableOpacity
                           activeOpacity={0.85}
@@ -3601,6 +3711,14 @@ export function OrderEntryScreen({
                           ]} />
                         </TouchableOpacity>
                       </View>
+
+                      {getRowAutoProposals(row.id).length > 0 && (
+                        <Text style={styles.schemeBoxHint}>
+                          This item already gets {getRowAutoProposals(row.id).length} auto
+                          scheme{getRowAutoProposals(row.id).length === 1 ? "" : "s"} (shown
+                          below). Add a scheme here only if it is an extra one.
+                        </Text>
+                      )}
 
                       {row.isScheme && getRowSchemeSelections(row).map((selection, index) => (
                         <View key={selection.id} style={styles.schemeRow}>
@@ -3652,6 +3770,32 @@ export function OrderEntryScreen({
                           <Ionicons name="add-circle-outline" size={16} color={COLORS.primary} />
                           <Text style={styles.addSchemeBtnText}>Add More Scheme</Text>
                         </TouchableOpacity>
+                      )}
+                    </View>
+                  )}
+
+                  {/* Schemes the mapping attaches on its own — shown before
+                      Confirm so the user knows what the item already gets,
+                      whether or not the manual Schemes box is enabled. */}
+                  {shouldAllowSchemes && row.selectedProduct && Number(row.boxes) > 0 && (
+                    <View style={styles.autoSchemeSection}>
+                      <View style={styles.schemeHeaderTitle}>
+                        <Ionicons name="sparkles-outline" size={16} color={COLORS.primary} />
+                        <Text style={styles.schemeTitleText}>Auto schemes</Text>
+                      </View>
+                      {getRowAutoProposals(row.id).length > 0 ? (
+                        <>
+                          <Text style={styles.schemeBoxHint}>
+                            Added automatically when you confirm this item.
+                          </Text>
+                          {getRowAutoProposals(row.id).map(renderAutoProposal)}
+                        </>
+                      ) : (
+                        <Text style={styles.schemeBoxHint}>
+                          {draftProposalsLoading
+                            ? "Checking schemes…"
+                            : "No auto scheme for this item at this quantity."}
+                        </Text>
                       )}
                     </View>
                   )}
@@ -3831,54 +3975,7 @@ export function OrderEntryScreen({
                     </View>
                   ))}
 
-                  {proposals.map((proposal) => (
-                    <View
-                      key={`${proposal.scheme_id}-${proposal.benefit_id}`}
-                      style={styles.schemeLine}
-                    >
-                      <View style={styles.comboLineHeader}>
-                        <View style={styles.schemeBadge}>
-                          <Text style={styles.schemeBadgeText}>SCHEME</Text>
-                        </View>
-                        {/* Nobody picked this one — the engine proposed it off
-                            the quantities entered. Marked so a user can tell it
-                            apart from a scheme they chose themselves. */}
-                        <View style={styles.autoBadge}>
-                          <Text style={styles.autoBadgeText}>AUTO</Text>
-                        </View>
-                        <Text style={styles.comboLineName} numberOfLines={2}>
-                          {proposal.benefit_item_name || proposal.benefit_item_code}
-                        </Text>
-                      </View>
-                      <Text style={styles.comboLineNote}>
-                        {proposal.scheme_name}
-                        {proposal.scheme_code ? ` (${proposal.scheme_code})` : ""}
-                      </Text>
-                      {/* Why this applied — the first question anyone asks
-                          about an unexpected giveaway. */}
-                      {proposal.scope_type ? (
-                        <Text style={styles.schemeMeta}>
-                          Applies via {proposal.scope_type}
-                          {proposal.scope_value ? ` ${proposal.scope_value}` : ""}
-                          {Number(proposal.qualifying_qty) > 0
-                            ? `  ·  on ${proposal.qualifying_qty} qualifying`
-                            : ""}
-                        </Text>
-                      ) : null}
-                      {proposal.benefit_item_name &&
-                      proposal.benefit_item_code ? (
-                        <Text style={styles.schemeMeta}>
-                          Item {proposal.benefit_item_code}
-                        </Text>
-                      ) : null}
-                      <View style={styles.itemPriceRow}>
-                        <Text style={styles.itemDetailBold}>
-                          Free: {formatProposalQty(proposal)}
-                        </Text>
-                        <Text style={styles.comboLineAmount}>₹0.00</Text>
-                      </View>
-                    </View>
-                  ))}
+                  {proposals.map(renderAutoProposal)}
 
                   {comboLine ? (
                     <View style={styles.comboLine}>
@@ -4351,6 +4448,19 @@ const styles = StyleSheet.create({
   },
   schemeBox: {
     backgroundColor: COLORS.primaryLighter,
+    borderWidth: 1,
+    borderColor: COLORS.borderLight,
+    borderRadius: RADIUS.md,
+    padding: SPACING.sm,
+    marginBottom: SPACING.sm,
+  },
+  schemeBoxHint: {
+    fontSize: 12,
+    color: COLORS.textSecondary,
+    marginTop: 2,
+    marginBottom: SPACING.xs,
+  },
+  autoSchemeSection: {
     borderWidth: 1,
     borderColor: COLORS.borderLight,
     borderRadius: RADIUS.md,

@@ -819,20 +819,8 @@ export default function OrderTrackingScreen() {
         <Text style={styles.amountValue}>₹{item.total_amount}</Text>
       </View>
       {/* Actions */}
+      {/* Same order on every card list: Progress left, Details right. */}
       <View style={styles.actionRow}>
-        <TouchableOpacity
-          style={[styles.actionBtn, styles.detailsBtn]}
-          onPress={() => {
-            router.push({
-              pathname: "/orders/orderdetails",
-              params: { orderId: item.id, from: "orders/ordertracking" },
-            });
-          }}
-        >
-          <Ionicons name="eye-outline" size={18} color="#fff" />
-          <Text style={styles.actionBtnText}>View Details</Text>
-        </TouchableOpacity>
-
         <TouchableOpacity
           style={[styles.actionBtn, styles.progressBtn]}
           onPress={() => {
@@ -844,6 +832,19 @@ export default function OrderTrackingScreen() {
         >
           <Ionicons name="git-branch-outline" size={18} color="#fff" />
           <Text style={styles.actionBtnText}>View Progress</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.actionBtn, styles.detailsBtn]}
+          onPress={() => {
+            router.push({
+              pathname: "/orders/orderdetails",
+              params: { orderId: item.id, from: "orders/ordertracking" },
+            });
+          }}
+        >
+          <Ionicons name="eye-outline" size={18} color="#fff" />
+          <Text style={styles.actionBtnText}>View Details</Text>
         </TouchableOpacity>
       </View>
 

@@ -18,7 +18,12 @@ import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router } from "expo-router";
 import { useAuth } from "@/src/context/AuthContext";
-import { resolveWorkQueueRoute } from "@/src/constants/pages";
+import {
+  MY_ORDERS_SCREEN,
+  ORDER_APPROVAL_SCREENS,
+  isOrderCreatorApprover,
+  resolveWorkQueueRoute,
+} from "@/src/constants/pages";
 import { COLORS } from "@/src/constants/theme";
 import { orderService } from "@/src/services/order.service";
 import { storage } from "@/src/utils/storage";
@@ -47,6 +52,7 @@ const ACCENTS: Record<string, string> = {
   // every other approval surface in the drawer uses.
   "backdate/create": "#0891B2",
   "backdate/tracking": "#16A34A",
+  "production/tracking": "#7C3AED",
   "approver/pending_approval": "#16A34A",
   "orders/auditorapproval": "#16A34A",
 };
@@ -57,10 +63,7 @@ const ACCENTS: Record<string, string> = {
 // role's order screen is listed here.
 const BOTTOM_BAR_ROUTES = new Set<string>([
   "dashboard", // Home
-  "orders/orderlist", // Orders (billing)
-  "orders/ordertracking", // Orders (manager)
-  "approver/pending_approval", // Orders (approver)
-  "orders/auditorapproval", // Orders (auditor)
+  // The four order lists are NOT listed here — see ORDER_LIST_ROUTES below.
   "orders/create", // Create
   "orders/drafts", // Drafts (feature hidden — kept for future re-enable)
   "reports/daily-report", // Reports
@@ -77,6 +80,15 @@ const BOTTOM_BAR_ROUTES = new Set<string>([
   // was unreachable — hidden from the drawer as "already in the footer" while
   // no footer tab actually went there. They are excluded dynamically below,
   // by the screen the footer really resolves to for THIS user.
+]);
+
+// The role-specific order lists. The footer's Orders tab reaches exactly ONE of
+// them, so for most users they stay out of the drawer. A user who both creates
+// and approves orders holds two (their own orders + an approval queue); the one
+// the footer doesn't reach is shown here, so both are always reachable.
+const ORDER_LIST_ROUTES = new Set<string>([
+  MY_ORDERS_SCREEN,
+  ...ORDER_APPROVAL_SCREENS,
 ]);
 
 /** Routes grouped after the primary block get a divider before them. */
@@ -162,6 +174,7 @@ export default function CustomDrawer(props: DrawerContentComponentProps) {
   // keeps five icons), but hiding is harmless in that case: a user without
   // orders access never had that drawer item to begin with.
   const footerTrackingScreen = resolveWorkQueueRoute(user).screen;
+  const showOrderListsInDrawer = isOrderCreatorApprover(user);
 
   // Only render routes that are visible for this role (the navigator hides the
   // rest via `drawerItemStyle: { display: 'none' }`) and that expose an icon.
@@ -175,6 +188,8 @@ export default function CustomDrawer(props: DrawerContentComponentProps) {
         // Pages that already live in the bottom bar are hidden here so the same
         // page isn't offered in two places.
         !BOTTOM_BAR_ROUTES.has(route.name) &&
+        // Order lists only for creator-approvers (the footer covers the rest).
+        (showOrderListsInDrawer || !ORDER_LIST_ROUTES.has(route.name)) &&
         // ...and the one tracking screen the footer's second tab reaches.
         route.name !== footerTrackingScreen &&
         (options.drawerItemStyle as any)?.display !== "none" &&

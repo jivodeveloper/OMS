@@ -1118,56 +1118,37 @@ export default function BillingOrderList() {
         <Text style={styles.amountValue}>₹{item.total_amount}</Text>
       </View>
 
-      {/* Actionable while billing hasn't decided yet — so pending orders keep
-          Approve/Reject in the "All" view, and decided ones don't. */}
-      {(activeTab === "pending" ||
-        (activeTab === "all" && !getBillingDecisionSummary(item))) && (
-        <>
-          <View style={styles.actionRow}>
-            <TouchableOpacity
-              style={[styles.actionBtn, styles.rejectBtn]}
-              onPress={() => openRejectModal(item.id)}
-              disabled={actionLoading !== null}
-            >
-              {actionLoading?.id === item.id && actionLoading.type === "reject" ? (
-                <ActivityIndicator size="small" color="#fff" />
-              ) : (
-                <>
-                  <Ionicons name="close-circle-outline" size={18} color="#fff" />
-                  <Text style={styles.actionBtnText}>Reject</Text>
-                </>
-              )}
-            </TouchableOpacity>
+      {/* Same pair as the tracking cards: green Progress, blue Details.
+          Approve / Reject are done from the details page's action bar. */}
+      <View style={styles.actionRow}>
+        <TouchableOpacity
+          style={[styles.actionBtn, styles.progressBtn]}
+          onPress={() =>
+            router.push({
+              pathname: "/orders/orderprogress",
+              params: { orderId: item.id, from: "orders/orderlist" },
+            })
+          }
+          activeOpacity={0.85}
+        >
+          <Ionicons name="git-branch-outline" size={18} color="#fff" />
+          <Text style={styles.actionBtnText}>View Progress</Text>
+        </TouchableOpacity>
 
-            <TouchableOpacity
-              style={[styles.actionBtn, styles.approveBtn]}
-              onPress={() =>
-                // Approve now opens the order for review first — billing can
-                // inspect (and optionally edit) the items and then confirm the
-                // approval from the details page's action bar.
-                router.push({
-                  pathname: "/orders/orderdetails",
-                  params: {
-                    orderId: item.id,
-                    from: "orders/orderlist",
-                    sourceTab: activeTab,
-                  },
-                })
-              }
-              disabled={actionLoading !== null}
-            >
-              {actionLoading?.id === item.id && actionLoading.type === "approve" ? (
-                <ActivityIndicator size="small" color="#fff" />
-              ) : (
-                <>
-                  <Ionicons name="checkmark-circle-outline" size={18} color="#fff" />
-                  <Text style={styles.actionBtnText}>Approve</Text>
-                </>
-              )}
-            </TouchableOpacity>
-          </View>
-        </>
-      )}
+        <TouchableOpacity
+          style={[styles.actionBtn, styles.detailsBtn]}
+          onPress={() =>
+            router.push({
+              pathname: "/orders/orderdetails",
+              params: { orderId: item.id, from: "orders/orderlist", sourceTab: activeTab },
+            })
+          }
+          activeOpacity={0.85}
+        >
+          <Ionicons name="eye-outline" size={18} color="#fff" />
+          <Text style={styles.actionBtnText}>View Details</Text>
+        </TouchableOpacity>
+      </View>
 
       </TouchableOpacity>
     );
@@ -2092,6 +2073,12 @@ const styles = StyleSheet.create({
     gap: 6,
   },
 
+  progressBtn: {
+    backgroundColor: "#4CAF50",
+  },
+  detailsBtn: {
+    backgroundColor: COLORS.primary,
+  },
   approveBtn: {
     backgroundColor: COLORS.success,
   },

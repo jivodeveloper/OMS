@@ -57,6 +57,13 @@ export const refreshLiveData = () =>
 export const refreshPartyProducts = () =>
   invalidateQueries([CacheKeys.partyProducts]);
 
+/**
+ * Drop EVERY cached API payload for the signed-in user and wake mounted screens
+ * so they refetch. Every cache key is an endpoint path, so "/" matches them all.
+ * Auth tokens live outside the cache namespace — the session is untouched.
+ */
+export const refreshAllData = () => invalidateQueries(["/"]);
+
 /** Called on sign-in so one user can never read another's cached data. */
 export const bindCacheToUser = (userId: string | number | null | undefined) =>
   setCacheScope(userId);
