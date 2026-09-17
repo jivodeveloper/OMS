@@ -40,6 +40,10 @@ export const PAYMENT_DETAILS_ROUTE = "/(main)/approval/approval-details" as cons
 // "View Details" (PaymentTrackingScreen.openDetails / PaymentHomeScreen.
 // openDetail). Keyed by { id, from }.
 export const DEPOSIT_DETAILS_ROUTE = "/(main)/payments/deposit-details" as const;
+// BackDate detail: the SAME screen the tracking cards open on "View Details"
+// (BackDateTrackingScreen.openDetails). Keyed by { id, from }.
+export const BACKDATE_DETAILS_ROUTE =
+  "/(main)/backdate/tracking-details" as const;
 
 /**
  * Map a backend `entity_type` (Django model name) to the exact mobile detail
@@ -61,6 +65,18 @@ const ENTITY_ROUTES: Record<
   },
   bankdeposit: {
     pathname: DEPOSIT_DETAILS_ROUTE,
+    params: (id, from) => ({ id, ...(from ? { from } : {}) }),
+  },
+  // `backdate` is the backend's content_type.model for BackDate — verified
+  // against ContentType.objects.get_for_model(BackDate), not guessed.
+  //
+  // No `actionable` param: the list passes that when it opens the screen, but
+  // a notification cannot know it. The details screen treats its absence as
+  // "ask the approval queue" rather than assuming either way, so a tapped push
+  // still shows Approve/Reject when the request really is this user's to act
+  // on — see BackDateDetailsScreen.
+  backdate: {
+    pathname: BACKDATE_DETAILS_ROUTE,
     params: (id, from) => ({ id, ...(from ? { from } : {}) }),
   },
 };

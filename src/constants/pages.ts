@@ -72,6 +72,36 @@ export const ASSIGNABLE_PAGES: AppPage[] = [
   // under a label that promised a page an admin could no longer find — the
   // same screens Receive_Payment already opens. Approvers reach their work
   // through the tracking screens, gated by their action permissions.
+  {
+    // BackDate — raise a request for temporary back-posting rights in SAP.
+    // The grant opens the form AND the tracking list it feeds, plus the two
+    // screens a card leads to: granting the form alone would leave the
+    // requester unable to see what became of what they raised.
+    key: "BackDate",
+    label: "BackDate Request",
+    screens: [
+      "backdate/create",
+      "backdate/tracking",
+      "backdate/tracking-details",
+      "backdate/tracking-progress",
+      "backdate/edit-request",
+    ],
+  },
+  {
+    // Opens the approval desk. NOT sufficient to approve any given request —
+    // the server also requires the holder to be that stage's effective user,
+    // so this grant shows the queue and nothing more.
+    key: "BackDate_Approval",
+    label: "BackDate Approval",
+    screens: [
+      "backdate/tracking",
+      "backdate/tracking-details",
+      "backdate/tracking-progress",
+      // An approver edits to correct a request SAP refused, so the edit screen
+      // opens for them too. `can_edit` decides per request.
+      "backdate/edit-request",
+    ],
+  },
 ];
 
 /**
@@ -92,6 +122,14 @@ export const PAYMENT_ACTIONS = {
 
 /** Every action key, for screens any payments involvement should open. */
 const ALL_PAYMENT_ACTIONS = Object.values(PAYMENT_ACTIONS);
+
+/**
+ * BackDate's two keys, for the screens either side opens.
+ *
+ * Spelled as the backend registry issues them — `BackDate`, not
+ * `BackDate_Create`. See the note in `constants/permissions.ts`.
+ */
+const ALL_BACKDATE_ACTIONS = ["BackDate", "BackDate_Approval"];
 
 export type PaymentAction =
   (typeof PAYMENT_ACTIONS)[keyof typeof PAYMENT_ACTIONS];
@@ -171,6 +209,20 @@ export const SCREEN_KEYS: Record<string, string[]> = {
   "payments/tracking-details": ALL_PAYMENT_ACTIONS,
   "payments/tracking-progress": ALL_PAYMENT_ACTIONS,
   "approval/approval-details": ALL_PAYMENT_ACTIONS,
+
+  // BackDate — two keys, spelled as the backend registry issues them.
+  // Raising and approving are unrelated jobs, so neither key implies the other.
+  "backdate/create": ["BackDate"],
+  // One tracking screen serves both sides, showing what the viewer is entitled
+  // to: a requester's own requests, an approver's queue, or both.
+  "backdate/tracking": ALL_BACKDATE_ACTIONS,
+  // Reached from a card, a deep link or a push — never from the drawer.
+  "backdate/tracking-details": ALL_BACKDATE_ACTIONS,
+  "backdate/tracking-progress": ALL_BACKDATE_ACTIONS,
+  // Editing is open to the requester AND to the approver holding the request
+  // (that is how a SAP refusal gets corrected), so both keys admit here. The
+  // server decides per request via `can_edit`; this only opens the screen.
+  "backdate/edit-request": ALL_BACKDATE_ACTIONS,
 };
 
 /**

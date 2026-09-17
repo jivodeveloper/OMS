@@ -44,6 +44,21 @@ export const PERMISSION_KEYS = {
   DEPOSIT_CREATE: "Deposit_Create",
   DEPOSIT_APPROVE: "Deposit_Approve",
   PAYMENTS_DASHBOARD: "Payments_Dashboard",
+
+  // BackDate (BKDT) — temporary back-posting rights in SAP.
+  //
+  // NOTE THE SPELLING. Every other key here reads `Module_Action`, but these
+  // two are `BackDate` and `BackDate_Approval` because that is what the
+  // backend registry issues and what the web app's routeAccess gates on. A
+  // grant is stored once in `User.extra_pages` and read by both clients, so
+  // inventing `BackDate_Create` here would gate the screen on a key nobody can
+  // ever hold.
+  //
+  // `BackDate_Approval` opens the approval desk; it is NOT sufficient to
+  // approve a given request — the server also requires the caller to be the
+  // current stage's effective user.
+  BACKDATE: "BackDate",
+  BACKDATE_APPROVAL: "BackDate_Approval",
 } as const;
 
 /**

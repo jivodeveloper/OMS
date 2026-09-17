@@ -117,16 +117,18 @@ android {
         release {
             // Credentials are read from android/keystore.properties, which is
             // gitignored. Never hardcode signing secrets in this file.
+            //
+            // NOTHING IS THROWN HERE. `signingConfigs` is evaluated at
+            // CONFIGURATION time, for every invocation — so throwing in this
+            // block failed `assembleDebug` too, and no developer could build
+            // the app at all without release credentials they have no reason
+            // to hold. The check now runs against the actual task graph
+            // below, where it can tell a release build from a debug one.
             if (keystorePropertiesFile.exists()) {
                 storeFile file(keystoreProperties['storeFile'])
                 storePassword keystoreProperties['storePassword']
                 keyAlias keystoreProperties['keyAlias']
                 keyPassword keystoreProperties['keyPassword']
-            } else {
-                throw new GradleException(
-                    "Release signing is not configured. Create android/keystore.properties " +
-                    "defining storeFile, storePassword, keyAlias and keyPassword."
-                )
             }
         }
     }
@@ -210,3 +212,25 @@ dependencies {
 }
 
 apply plugin: 'com.google.gms.google-services'
+/**
+ * Release signing must be configured — but only when a release is actually
+ * being built.
+ *
+ * This check used to live inside `signingConfigs.release`, which Gradle
+ * evaluates at CONFIGURATION time on every invocation. The result was that
+ * `assembleDebug` threw "Release signing is not configured" and nobody could
+ * build the app at all without production credentials they have no reason to
+ * hold. Deferring to the task graph keeps the guard exactly as strict for
+ * release builds and silent for every other one.
+ */
+gradle.taskGraph.whenReady { graph ->
+    def buildingRelease = graph.allTasks.any { task ->
+        task.project == project && task.name ==~ /(?i).*(assemble|bundle|install)Release.*/
+    }
+    if (buildingRelease && !rootProject.file("keystore.properties").exists()) {
+        throw new GradleException(
+            "Release signing is not configured. Create android/keystore.properties " +
+            "defining storeFile, storePassword, keyAlias and keyPassword."
+        )
+    }
+}

@@ -350,7 +350,11 @@ export default function MainLayout() {
             route.name === "payments/tracking-details" ||
             route.name === "payments/deposit-details" ||
             route.name === "payments/tracking-progress" ||
-            route.name === "approval/approval-details";
+            route.name === "approval/approval-details" ||
+            // BackDate's detail screen publishes an Edit action the same way,
+            // so it opts out of the blanket "no header actions for admin" rule
+            // too — without this an admin sees no Edit pencil at all.
+            route.name === "backdate/tracking-details";
           // Approval Details carries an Edit action next to the bell.
           const isApprovalDetails = route.name === "approval/approval-details";
 
@@ -727,6 +731,57 @@ export default function MainLayout() {
           options={{
             title: "Payment Progress",
             // Reached from a tracking card, never from the drawer itself.
+            drawerItemStyle: hiddenStyle,
+          }}
+        />
+        {/* ── BackDate ──────────────────────────────────────────────── */}
+        <Drawer.Screen
+          name="backdate/create"
+          options={{
+            drawerLabel: ({ color }) =>
+              renderDrawerLabel("BackDate Request", color),
+            title: "BackDate Request",
+            drawerIcon: ({ color }) => (
+              <Ionicons name="time-outline" size={22} color={color} />
+            ),
+            drawerItemStyle: isVisible("backdate/create")
+              ? visibleStyle
+              : hiddenStyle,
+          }}
+        />
+        <Drawer.Screen
+          name="backdate/tracking"
+          options={{
+            drawerLabel: ({ color }) =>
+              renderDrawerLabel("BackDate Tracking", color),
+            title: "BackDate Tracking",
+            drawerIcon: ({ color }) => (
+              <Ionicons name="reader-outline" size={22} color={color} />
+            ),
+            drawerItemStyle: isVisible("backdate/tracking")
+              ? visibleStyle
+              : hiddenStyle,
+          }}
+        />
+        <Drawer.Screen
+          name="backdate/tracking-details"
+          options={{
+            title: "BackDate Request",
+            // Reached from a tracking card or a push, never from the drawer.
+            drawerItemStyle: hiddenStyle,
+          }}
+        />
+        <Drawer.Screen
+          name="backdate/tracking-progress"
+          options={{
+            title: "BackDate Progress",
+            drawerItemStyle: hiddenStyle,
+          }}
+        />
+        <Drawer.Screen
+          name="backdate/edit-request"
+          options={{
+            title: "Edit BackDate Request",
             drawerItemStyle: hiddenStyle,
           }}
         />

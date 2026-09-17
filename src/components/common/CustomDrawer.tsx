@@ -43,6 +43,10 @@ const ACCENTS: Record<string, string> = {
   "users/allUsers": "#2563EB",
   "users/pagePermissions": "#16A34A",
   "users/addScheme": "#F59E0B",
+  // BackDate: cyan for raising, green for the approval desk — the same green
+  // every other approval surface in the drawer uses.
+  "backdate/create": "#0891B2",
+  "backdate/tracking": "#16A34A",
   "approver/pending_approval": "#16A34A",
   "orders/auditorapproval": "#16A34A",
 };
