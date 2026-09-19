@@ -79,11 +79,26 @@ export interface ApprovalPayment {
   bankName?: string;
   chequeDate?: string;
   /**
-   * OUR account for this line, resolved from the admin mapping.
+   * WHERE THIS MONEY WAS RECEIVED, snapshotted when the receipt was raised.
    *
-   * Deliberately separate from `bankName`: one is the payer's bank, the other
-   * is where we deposit. Showing them under one heading was what made the
-   * cheque flow confusing.
+   * Present for EVERY method, and deliberately separate from `bankName`: one
+   * is the payer's bank, this is the account of ours the money landed in.
+   * Showing them under one heading was what made the cheque flow confusing.
+   *
+   * Null on receipts raised before the account picker existed.
+   */
+  receivingAccount?: {
+    name: string;
+    glAccount: string;
+    accountNumber: string;
+    branch: string;
+  } | null;
+  /**
+   * LEGACY. OUR account for this line, resolved from the admin mapping.
+   *
+   * Superseded by `receivingAccount` above, which records what was actually
+   * chosen rather than what the mapping resolves to now. Kept while receipts
+   * raised before the picker are still in circulation.
    */
   depositAccount?: {
     bankName: string;
@@ -144,6 +159,15 @@ export interface ApprovalDetail {
   attachments: ApprovalAttachment[];
   /** Server-decided: what the viewer may do. Drives the action bar. */
   canDecide: boolean;
+  /**
+   * The action to offer is a SAP RETRY rather than a first approval.
+   *
+   * Straight from the server (`permissions.can_retry_sap`). Deliberately not
+   * derived from the status here: PENDING_ERROR means SAP refused and a retry
+   * is safe, but a SAP TIMEOUT looks similar and must NOT be retried, because
+   * the document may already exist there.
+   */
+  canRetrySap: boolean;
   canEdit: boolean;
   canResubmit: boolean;
   /** Why it was sent back, so the creator can fix it. Empty when not rejected. */

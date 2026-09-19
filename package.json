@@ -9,7 +9,8 @@
     "ios": "expo run:ios",
     "web": "expo start --web",
     "lint": "expo lint",
-    "postinstall": "node scripts/patch-android-cmake.js"
+    "postinstall": "node scripts/patch-android-cmake.js",
+    "test": "node --test \"src/**/*.test.ts\""
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",

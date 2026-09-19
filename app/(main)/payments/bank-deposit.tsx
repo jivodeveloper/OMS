@@ -16,6 +16,11 @@ import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { COLORS, RADIUS, SPACING } from "@/src/constants/theme";
+import {
+  receiptMatchesDepositType,
+  selectionAfterTypeChange,
+  type DepositType,
+} from "@/src/features/payments/depositFilter";
 import { appAlert } from "@/src/components/common/AppDialog";
 import Dropdown from "@/src/components/common/DropdownProps";
 import ScreenGuard from "@/src/components/common/ScreenGuard";
@@ -268,6 +273,17 @@ function BankDepositScreen() {
   const visiblePayments = useMemo(() => {
     const term = search.trim().toLowerCase();
     return payments.filter((payment) => {
+      // THE DEPOSIT TYPE DECIDES WHAT IS ON OFFER. Cash shows every receipt
+      // holding cash — including one that also carries a cheque, since the
+      // cheque is recorded rather than counted. Cheque shows only receipts
+      // with no cash in them, because carrying cash into a deposit that banks
+      // none would strand it outside SAP.
+      //
+      // This used to be ignored entirely: the type was collected, stored and
+      // sent, but every receipt was listed whatever it said.
+      if (!receiptMatchesDepositType(payment.methods, depositType as DepositType)) {
+        return false;
+      }
       if (
         partyFilter &&
         partyFilter !== "all" &&
@@ -281,7 +297,34 @@ function BankDepositScreen() {
         payment.receipt_no.toLowerCase().includes(term)
       );
     });
-  }, [payments, search, partyFilter]);
+  }, [payments, search, partyFilter, depositType]);
+
+  // Changing the type must not leave a receipt ticked but hidden — the banner
+  // would count a row the list no longer shows, and the deposit would carry a
+  // tender its type says it does not.
+  useEffect(() => {
+    setSelectedIds((previous) => {
+      const kept = selectionAfterTypeChange(
+        payments, previous, depositType as DepositType);
+      return kept.length === previous.length ? previous : kept;
+    });
+  }, [depositType, payments]);
+
+  /**
+   * Switching to CHEQUE releases any amount already typed.
+   *
+   * A cheque deposit banks no cash, so its amount must be zero — and the
+   * amount fields are hidden for it. A figure typed under "Cash" would survive
+   * the switch, exceed the now-zero collected amount, and silently disable
+   * Submit with the explanatory banner hidden along with the fields: a dead
+   * button and nothing on screen saying why.
+   */
+  useEffect(() => {
+    if (depositType !== "cheque") return;
+    setDepositTouched(false);
+    setDepositAmount("");
+    setShortfallReason("");
+  }, [depositType]);
 
   const selectedPayments = payments.filter((payment) =>
     selectedIds.includes(String(payment.id)),
@@ -359,19 +402,6 @@ function BankDepositScreen() {
     0,
   );
 
-  /**
-   * What the selection is worth AS A DEPOSIT — cash + cheque only.
-   *
-   * Deliberately NOT `total_amount`: on a receipt that mixes methods that
-   * figure includes the UPI portion, which is already in the bank and is not
-   * being carried anywhere. Using it asked the user to deposit ₹200 for a
-   * receipt where only ₹100 was ever in hand.
-   */
-  const totalSelected = selectedPayments.reduce(
-    (sum, p) => sum + sumMethod(p, "CASH") + sumMethod(p, "CHEQUE"),
-    0,
-  );
-
   /** Everything available to bank for this company, not just the selection. */
   const availableBalance = useMemo(
     () => ({
@@ -381,9 +411,24 @@ function BankDepositScreen() {
     [payments],
   );
 
-  // "Collected" is always the sum of the selection; "deposited" is what the user
-  // says they banked. Until they edit it, the two track each other.
-  const collectedAmount = totalSelected;
+  /**
+   * "Collected" is the CASH in the selection — never the cheques.
+   *
+   * This used to be cash + cheque, and it made both figures below meaningless.
+   * A cheque was already banked by its own receipt and is already in SAP, so
+   * adding its value here produced a total matching neither the SAP document
+   * nor the notes in the employee's hand — and the shortfall was then measured
+   * against that inflated number.
+   *
+   * The server computes the same figure (`services.cash_total_for_receipts`)
+   * and rejects a deposit whose `collected_amount` disagrees, so this is not
+   * merely cosmetic: summing cheques here makes the deposit unsubmittable.
+   *
+   * "Deposited" is the cash the user says they actually paid in, which may be
+   * less — the AP team sometimes spends part of a collection on the way — and
+   * that figure IS the SAP posting. Until they edit it, the two track.
+   */
+  const collectedAmount = totalCash;
   const depositedAmount = depositTouched
     ? Number(depositAmount) || 0
     : collectedAmount;
@@ -436,6 +481,14 @@ function BankDepositScreen() {
   const canPickBankAccount = canPickDepositedBy && !!depositedBy;
   const canPickDepositType = canPickBankAccount && !!bankAccount;
   const headerComplete = canPickDepositType && !!depositType;
+  /**
+   * A deposit that moves no money, only paper.
+   *
+   * Read off the TYPE rather than off `collectedAmount === 0`, so the amount
+   * fields do not vanish the moment a cash deposit is emptied of its selection
+   * — that would look like a bug rather than a state.
+   */
+  const isChequeDeposit = depositType === "cheque";
 
   // Submit gating, in the same order as the fields so the disabled button always
   // reflects the FIRST thing still outstanding.
@@ -446,7 +499,20 @@ function BankDepositScreen() {
     !bankAccount ||
     !depositType ||
     !selectedIds.length ||
-    depositedAmount <= 0 ||
+    // `< 0`, not `<= 0`. ZERO IS A VALID DEPOSIT in two real cases, and
+    // rejecting it here made both unsubmittable:
+    //
+    //   a CHEQUE deposit banks no cash at all — every cheque was already
+    //   posted to SAP by its own receipt, and this deposit records the day
+    //   the paper was handed in;
+    //
+    //   a CASH deposit can be short by its whole amount, if the AP team spent
+    //   the lot before reaching the bank. `reasonMissing` below already
+    //   demands an explanation for that, which is the right gate for it.
+    //
+    // Only a negative is nonsense, and the server's
+    // `bank_deposit_amount_positive` check agrees (it is `>= 0`).
+    depositedAmount < 0 ||
     isOver ||
     reasonMissing ||
     saving ||
@@ -502,10 +568,11 @@ function BankDepositScreen() {
         deposit_date: depositDate,
         deposited_by: depositedBy ? Number(depositedBy) : null,
         bank_key: String(bankAccount),
-        deposit_type: String(depositType).toUpperCase() as
-          | "CASH"
-          | "CHEQUE"
-          | "MIXED",
+        // The server re-derives this from the cash in the selection and
+        // ignores what we send (`services.derive_deposit_type`), because the
+        // old free choice was routinely wrong — most deposits tagged MIXED
+        // held pure cash. Sent anyway so a draft round-trips unchanged.
+        deposit_type: String(depositType).toUpperCase() as "CASH" | "CHEQUE",
         collected_amount: String(collectedAmount),
         deposit_amount: String(depositedAmount),
         shortfall_reason: isShort ? shortfallReason.trim() : "",
@@ -699,18 +766,67 @@ function BankDepositScreen() {
               <Text style={styles.sectionTitle}>DEPOSIT INFORMATION</Text>
             </View>
 
+            {/* Company is the FIRST field and every other one cascades off it
+                — depositors, bank accounts and the receipt list are all
+                fetched per company. An empty dropdown here therefore looks
+                like the whole screen is broken, so it has to say WHY it is
+                empty rather than just offering nothing.
+
+                It said nothing at all before: a slow or failed
+                `/payments/companies/` left "Select company..." over an empty
+                list, with the error swallowed. The receive-payment screen has
+                always reported this properly; this is the same treatment, plus
+                a retry, because an error with no way back leaves the user
+                stuck on a screen they cannot start. */}
             <View style={styles.field}>
               <Dropdown
                 label="Company"
+                // Rendered in a MODAL, not inline. The default mode draws the
+                // option list as an absolutely-positioned view inside this
+                // Surface, where it is clipped by the card and the ScrollView
+                // around it — the list opens but its options are not visible.
+                // `orders/create.tsx` already uses modal mode for every
+                // dropdown sitting in a scroll container, for this reason.
+                mode="modal"
                 data={companies.options}
                 value={company}
                 onChange={setCompany}
-                placeholder="Select company..."
+                placeholder={
+                  companies.loading
+                    ? "Loading companies..."
+                    : companies.error
+                      ? "Could not load companies"
+                      : companies.options.length === 0
+                        ? "No companies configured"
+                        : "Select company..."
+                }
+                disabled={companies.loading || companies.options.length === 0}
                 searchable={false}
                 leftIcon="business-outline"
                 iconColor={COLORS.textSecondary}
                 required
               />
+              {companies.error ? (
+                <TouchableOpacity
+                  onPress={companies.reload}
+                  activeOpacity={0.7}
+                  style={styles.fieldErrorRow}
+                >
+                  <Ionicons
+                    name="refresh"
+                    size={12}
+                    color={COLORS.error}
+                  />
+                  <Text style={styles.fieldErrorText}>
+                    {companies.error} Tap to retry.
+                  </Text>
+                </TouchableOpacity>
+              ) : !companies.loading && companies.options.length === 0 ? (
+                <Text style={styles.fieldHint}>
+                  No company is mapped to a SAP database yet. Ask an
+                  administrator to configure one.
+                </Text>
+              ) : null}
             </View>
 
             {/* Deposit Date — web uses a native date input, native uses the
@@ -789,6 +905,7 @@ function BankDepositScreen() {
             <View style={styles.field}>
               <Dropdown
                 label="Deposited By"
+                mode="modal"   // see Company above
                 data={depositors.options}
                 value={depositedBy}
                 onChange={setDepositedBy}
@@ -807,6 +924,7 @@ function BankDepositScreen() {
             <View style={styles.field}>
               <Dropdown
                 label="Bank Account"
+                mode="modal"   // see Company above
                 data={bankAccounts.options}
                 value={bankAccount}
                 onChange={setBankAccount}
@@ -825,6 +943,7 @@ function BankDepositScreen() {
             <View style={styles.field}>
               <Dropdown
                 label="Deposit Type"
+                mode="modal"   // see Company above
                 data={DEPOSIT_TYPE_OPTIONS}
                 value={depositType}
                 onChange={setDepositType}
@@ -1030,6 +1149,29 @@ function BankDepositScreen() {
               ) : null}
             </View>
 
+            {/* A CHEQUE deposit has no amounts to show or edit. Both figures
+                count cash, and it banks none: every cheque in it was posted to
+                SAP by its own receipt, so this deposit records the DAY the
+                paper was handed in and nothing else. Rendering "₹0 collected"
+                beside an editable "₹0 deposited" would invite someone to type
+                the cheque total into a field that must stay zero. */}
+            {isChequeDeposit ? (
+              <View style={styles.diffBanner}>
+                <Ionicons
+                  name="information-circle"
+                  size={16}
+                  color={COLORS.warning}
+                />
+                <Text style={styles.diffText}>
+                  This deposit banks no cash, so there is no amount to enter.
+                  The {selectedIds.length} cheque
+                  {selectedIds.length === 1 ? "" : "s"} selected reached the
+                  bank when their receipts posted to SAP — this records the day
+                  you handed them in.
+                </Text>
+              </View>
+            ) : (
+            <>
             {/* Row: collected (read-only, derived) · deposit (editable) */}
             <View style={styles.amountRow}>
               <View style={styles.amountCol}>
@@ -1073,9 +1215,11 @@ function BankDepositScreen() {
                   }
                   left={<TextInput.Affix text="₹" textStyle={styles.affix} />}
                 />
-                <Text style={styles.fieldHint}>Editable — what you banked</Text>
+                <Text style={styles.fieldHint}>Editable — cash you banked</Text>
               </View>
             </View>
+            </>
+            )}
 
             {/* ── Conditional validation UI ── */}
             {isShort ? (
@@ -1560,6 +1704,18 @@ const styles = StyleSheet.create({
     color: COLORS.textMuted,
     marginTop: SPACING.xs,
     marginLeft: 2,
+  },
+  fieldErrorRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    marginTop: SPACING.xs,
+    marginLeft: 2,
+  },
+  fieldErrorText: {
+    flex: 1,
+    fontSize: 10,
+    color: COLORS.error,
   },
   // ── Difference banners ──
   diffBanner: {

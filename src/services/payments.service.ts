@@ -91,11 +91,44 @@ export interface BankAccount {
   label: string;
 }
 
+/**
+ * One CASH G/L account the company may receive cash into — a drawer, a till.
+ *
+ * Fewer fields than a bank account, and that is the point: a drawer has no
+ * house bank, no account number and no IFSC, so those columns do not apply
+ * rather than being unknown. `key` IS the G/L account for cash; for a bank it
+ * is `BANKCODE:GL` (see `BankAccount`).
+ *
+ * Served by `/payments/cash-accounts/`, live from SAP — the postable children
+ * of the configured cash node — so a drawer frozen in SAP disappears from the
+ * picker with no app release.
+ */
+export interface CashAccount {
+  gl_account: string;
+  account_name: string;
+  key: string;
+  label: string;
+}
+
 export type PaymentMethodKind = "CASH" | "UPI" | "CHEQUE";
 
 export interface MethodPayload {
   method: PaymentMethodKind;
   amount: string;
+  /**
+   * WHICH ACCOUNT OF OURS RECEIVES THIS MONEY — the user's choice.
+   *
+   * A cash account's key is its G/L (`"1105001"`); a bank account's is
+   * `BANKCODE:GL` (`"INB:1104106"`). The server resolves it against SAP,
+   * refuses a key that is not valid for the company, and SNAPSHOTS the
+   * resolved account onto the line so the posting stays correct even if the
+   * account is later renamed or retired.
+   *
+   * Optional on the wire only for backward compatibility: builds released
+   * before this picker existed send no key and the server falls back to the
+   * old admin mapping. This client always sends one.
+   */
+  account_key?: string;
   upi_reference?: string;
   cheque_number?: string;
   bank_name?: string;
@@ -135,6 +168,87 @@ export interface CreateReceiptPayload {
   remarks?: string;
   methods: MethodPayload[];
   allocations?: AllocationPayload[];
+}
+
+/**
+ * WHICH BUSINESS WORKFLOW a document belongs to.
+ *
+ * Payments runs two separate workflows through one backend module — receipts
+ * (RCP-...) and deposits (DEP-...) — and they must never be conflated. The
+ * server states this explicitly on every document rather than leaving the
+ * client to infer it from a number prefix, which would be wrong the first time
+ * a number is entered by hand.
+ */
+export type PaymentDocumentKind = "RECEIPT" | "DEPOSIT";
+
+/** One rung of the approval ladder, as the server reports it. */
+export interface ApprovalStage {
+  sequence: number;
+  name: string;
+  /**
+   * APPROVED — someone decided it (read from the append-only history).
+   * CURRENT  — the document is waiting here now.
+   * PENDING  — not reached yet.
+   */
+  state: "APPROVED" | "CURRENT" | "PENDING";
+  /** Who must act here TODAY, resolved live by the server (replacements included). */
+  approver: string;
+  approver_name: string;
+  /** Who actually decided it. Empty until they do. */
+  decided_by: string;
+  decided_at: string | null;
+}
+
+/**
+ * Where a document stands in its approval.
+ *
+ * Shared by receipts and deposits: the two are separate WORKFLOWS but the
+ * shape of "where is it" is identical, and one type keeps the two detail
+ * screens from drifting apart.
+ *
+ * `stages` is present on DETAIL responses only — building it costs the server
+ * a history read per document, so lists carry `stage_label` instead.
+ */
+export interface DocumentApproval {
+  id: number;
+  status: string;
+  document_kind: PaymentDocumentKind;
+  current_stage: number | null;
+  current_stage_sequence: number | null;
+  total_stage: number;
+  stage_label: string;
+  stages?: ApprovalStage[];
+  current_approver?: string;
+  current_approver_name?: string;
+  /** Populated only while the document stands rejected. */
+  rejection_reason?: string;
+  rejected_by?: string;
+  rejected_at?: string | null;
+}
+
+/**
+ * What the CALLER may do with this document, decided server-side.
+ *
+ * Present on detail responses only. The client cannot derive these: they
+ * depend on which stage the document is parked at, who that stage resolves to
+ * today, and the document's SAP state — so working them out locally would mean
+ * two authorities that can disagree, and the client's would be the wrong one.
+ */
+export interface DocumentPermissions {
+  can_decide: boolean;
+  /**
+   * The action to offer is a SAP RETRY rather than a first approval: SAP
+   * refused the posting and this user may try again. Narrower than
+   * `can_decide`, which stays true as well.
+   *
+   * Deliberately server-decided. A client that showed Retry by testing
+   * `status === "PENDING_ERROR"` would offer it after a SAP TIMEOUT too, where
+   * a second post could pay the same money twice.
+   */
+  can_retry_sap?: boolean;
+  can_verify?: boolean;
+  can_edit: boolean;
+  can_resubmit: boolean;
 }
 
 /**
@@ -233,7 +347,22 @@ export interface PaymentReceipt {
     /** The CUSTOMER's bank on a cheque — not one of ours. */
     bank_name?: string;
     cheque_date?: string | null;
-    /** OUR account for this line, resolved from the admin mapping. */
+    /**
+     * OUR account for this line, AS IT WAS WHEN THE MONEY WAS RECEIVED.
+     *
+     * Snapshotted by the server from the account the user picked, which is why
+     * it is safe to display on an old receipt: renaming or retiring the
+     * account later does not rewrite where this money actually went. Blank on
+     * receipts raised before the picker existed — those resolve through the
+     * legacy admin mapping at posting time instead.
+     */
+    account_key?: string;
+    gl_account?: string;
+    bank_code?: string;
+    receiving_bank_name?: string;
+    account_number?: string;
+    branch?: string;
+    /** Legacy: OUR account for this line, resolved from the admin mapping. */
     deposit_account?: {
       bank_name: string;
       gl_account: string;
@@ -266,30 +395,8 @@ export interface PaymentReceipt {
     download_url: string;
     created_at: string;
   }[];
-  approval: {
-    id: number;
-    status: string;
-    current_level: number;
-    total_levels: number;
-    level_label: string;
-    round_number?: number;
-    /** Populated only while the latest round stands rejected. */
-    rejection_reason?: string;
-    rejected_by?: string;
-    rejected_at?: string | null;
-  } | null;
-  /**
-   * What the CALLER may do with this document, decided server-side.
-   *
-   * Present on the detail endpoint only. The client cannot derive these: the
-   * rules depend on the approval ladder and forbid self-approval, so working
-   * them out locally would mean two authorities that can disagree.
-   */
-  permissions?: {
-    can_decide: boolean;
-    can_edit: boolean;
-    can_resubmit: boolean;
-  };
+  approval: DocumentApproval | null;
+  permissions?: DocumentPermissions;
 }
 
 /**
@@ -328,7 +435,9 @@ export interface CreateDepositPayload {
   deposited_by?: number | null;
   /** SAP house bank account key ("CODE:GL"). The backend resolves the G/L. */
   bank_key: string;
-  deposit_type: "CASH" | "CHEQUE" | "MIXED";
+  // MIXED was removed: a deposit counts CASH only, so a cheque riding
+  // along is recorded rather than counted. The server derives this.
+  deposit_type: "CASH" | "CHEQUE";
   collected_amount: string;
   deposit_amount: string;
   shortfall_reason?: string;
@@ -356,7 +465,9 @@ export interface BankDeposit {
    */
   source_gl_account: string | null;
   bank_account_name: string;
-  deposit_type: "CASH" | "CHEQUE" | "MIXED";
+  // MIXED was removed: a deposit counts CASH only, so a cheque riding
+  // along is recorded rather than counted. The server derives this.
+  deposit_type: "CASH" | "CHEQUE";
   collected_amount: string;
   deposit_amount: string;
   shortfall: string;
@@ -403,6 +514,15 @@ export interface BankDeposit {
     payment_date: string;
     /** When the receipt reached SAP. Null until it posts. */
     receipt_posted_at: string | null;
+    /**
+     * The SAP document the RECEIPT is recorded under.
+     *
+     * A deposit posts its CASH share only — a cheque reached the bank when its
+     * own receipt posted, so it lives under this number rather than the
+     * deposit's. Null until that receipt posts.
+     */
+    receipt_sap_doc_num: number | null;
+    receipt_sap_doc_entry: number | null;
     receipt_status: string;
     receipt_total: string;
     receipt_remarks: string;
@@ -418,23 +538,8 @@ export interface BankDeposit {
     }[];
     amount: string;
   }[];
-  approval: {
-    id: number;
-    status: string;
-    current_level: number;
-    total_levels: number;
-    level_label: string;
-  } | null;
-  /**
-   * What the CALLER may do with this deposit. Same shape and same server
-   * helper as a receipt, so both detail screens gate their action bar
-   * identically. Present on the detail endpoint only.
-   */
-  permissions?: {
-    can_decide: boolean;
-    can_edit: boolean;
-    can_resubmit: boolean;
-  };
+  approval: DocumentApproval | null;
+  permissions?: DocumentPermissions;
 }
 
 /**
@@ -588,8 +693,26 @@ export const paymentsService = {
 
   getBankAccounts: async (company?: Company): Promise<BankAccount[]> => {
     const suffix = company ? `?company=${company}` : "";
+    // `/payments/banks/` and `/payments/bank-accounts/` are the SAME view under
+    // two names; this one is already in use, so it stays.
     const res = await api.get(`/payments/banks/${suffix}`);
     return rows<BankAccount>(res);
+  },
+
+  /**
+   * The CASH accounts this company may receive cash into.
+   *
+   * The cash counterpart of `getBankAccounts`, and the reason the two are
+   * separate calls rather than one filtered list: they are different kinds of
+   * account with different shapes, and offering a bank account for a cash
+   * receipt — or a drawer for a UPI transfer — is exactly the mistake the
+   * picker exists to prevent. The server decides which accounts qualify; the
+   * app only asks.
+   */
+  getCashAccounts: async (company?: Company): Promise<CashAccount[]> => {
+    const suffix = company ? `?company=${company}` : "";
+    const res = await api.get(`/payments/cash-accounts/${suffix}`);
+    return rows<CashAccount>(res);
   },
 
   // ---- Receipts --------------------------------------------------------
@@ -617,6 +740,54 @@ export const paymentsService = {
   submitReceipt: async (id: number): Promise<PaymentReceipt> => {
     const res = await api.post(`/payments/receipts/${id}/submit/`, {});
     return unwrap<PaymentReceipt>(res);
+  },
+
+  /**
+   * Approve, reject or withdraw a RECEIPT.
+   *
+   * Posted to payments' OWN endpoints, keyed on the DOCUMENT id. These replaced
+   * the generic `/approvals/requests/{id}/act/`: the old engine no longer holds
+   * payments approvals at all, and its request ids no longer exist, so the old
+   * call now acts on nothing.
+   *
+   * THE RESPONSE IS THE DECIDED DOCUMENT, AND IT ALREADY REFLECTS SAP. A final
+   * approval posts to SAP before the response is built, so the returned status
+   * is the real outcome — POSTED, or PENDING_ERROR when SAP refused. The caller
+   * must read it rather than announcing success: telling an approver "approved"
+   * over a SAP failure sends them away believing the money moved.
+   *
+   * Errors are meaningful and distinct: 403 this user may not act, 409 the
+   * document moved on (someone else decided it first).
+   */
+  decideReceipt: async (
+    id: number,
+    decision: "approve" | "reject" | "cancel",
+    remarks = "",
+  ): Promise<PaymentReceipt> => {
+    const res = await api.post(`/payments/receipts/${id}/${decision}/`, {
+      remarks,
+    });
+    return unwrap<PaymentReceipt>(res);
+  },
+
+  /**
+   * Approve, reject or withdraw a DEPOSIT.
+   *
+   * A separate endpoint from the receipt one on purpose — deposits are a
+   * separate business workflow with their own stages and their own approvers,
+   * and a shared endpoint keyed on a bare id could act on the wrong document
+   * the first time a receipt and a deposit shared a primary key. See
+   * `decideReceipt` for the response and error contract, which is identical.
+   */
+  decideDeposit: async (
+    id: number,
+    decision: "approve" | "reject" | "cancel",
+    remarks = "",
+  ): Promise<BankDeposit> => {
+    const res = await api.post(`/payments/deposits/${id}/${decision}/`, {
+      remarks,
+    });
+    return unwrap<BankDeposit>(res);
   },
 
   /**

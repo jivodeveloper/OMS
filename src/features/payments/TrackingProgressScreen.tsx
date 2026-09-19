@@ -11,12 +11,10 @@ import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams } from "expo-router";
 
 import { fs, ms, sp } from "@/src/utils/responsive";
-import approvalsService, {
-  type ApiApprovalDetail,
-  type ApiApprovalAssignee,
-} from "@/src/services/approvals.service";
+import { approvalMatchesKind, buildLadder } from "./approvalLadder";
 import paymentsService, {
   type BankDeposit,
+  type DocumentApproval,
   type PaymentReceipt,
   type StatusHistoryRow,
 } from "@/src/services/payments.service";
@@ -151,11 +149,26 @@ interface StageRemark {
 export default function TrackingProgressScreen() {
   const params = useLocalSearchParams<{ id?: string; kind?: string }>();
   const id = Number(params.id);
-  const kind = (params.kind as TrackingKind) || "PAYMENT";
+  /**
+   * THE DOCUMENT TYPE IS REQUIRED, NOT ASSUMED.
+   *
+   * This route carries a bare numeric id, and receipts and deposits have
+   * overlapping ids — receipt 7 and deposit 7 both exist. Defaulting to
+   * "PAYMENT" when the parameter was missing meant a deposit link that lost
+   * its `kind` silently fetched a RECEIPT with the deposit's id and rendered
+   * somebody else's money under the wrong number. Every in-app route into this
+   * screen passes `kind`; a link that does not is malformed, and saying so is
+   * the only safe answer.
+   */
+  const rawKind = String(params.kind || "").toUpperCase();
+  const kind: TrackingKind | null =
+    rawKind === "PAYMENT" || rawKind === "DEPOSIT"
+      ? (rawKind as TrackingKind)
+      : null;
   const isPayment = kind === "PAYMENT";
 
   const [doc, setDoc] = useState<PaymentReceipt | BankDeposit | null>(null);
-  const [approval, setApproval] = useState<ApiApprovalDetail | null>(null);
+  const [approval, setApproval] = useState<DocumentApproval | null>(null);
   // The business timeline. Every remark anyone has left lives here with the
   // username that left it; the document itself only carries the creator's.
   const [history, setHistory] = useState<StatusHistoryRow[]>([]);
@@ -169,6 +182,14 @@ export default function TrackingProgressScreen() {
       setLoading(false);
       return;
     }
+    if (!kind) {
+      setError(
+        "This link does not say whether it is a payment or a deposit, so it " +
+          "cannot be opened safely. Open the entry from its tracking list.",
+      );
+      setLoading(false);
+      return;
+    }
     setError("");
     try {
       const document = isPayment
@@ -176,18 +197,21 @@ export default function TrackingProgressScreen() {
         : await paymentsService.getDeposit(id);
       setDoc(document);
 
-      // The approval id comes off the document, so a document with no chain yet
-      // still renders its header card rather than erroring.
-      const approvalId = document.approval?.id;
-      if (approvalId) {
-        try {
-          setApproval(await approvalsService.detail(approvalId));
-        } catch {
-          setApproval(null);
-        }
-      } else {
+      // THE LADDER RIDES ON THE DOCUMENT. It used to be fetched separately
+      // from `/approvals/requests/{id}/`, the generic engine payments no
+      // longer uses — the id on the document is now a payments flow id, so
+      // that call fetched nothing and the ladder rendered empty.
+      // BELT AND BRACES. The server states which business workflow the
+      // document belongs to; if it disagrees with the route we were opened
+      // on, something upstream is cross-wired and drawing the ladder anyway
+      // would show a deposit's approvers under a receipt's number.
+      if (!approvalMatchesKind(document.approval, isPayment ? "RECEIPT" : "DEPOSIT")) {
+        setError("This entry does not match the link it was opened from.");
+        setDoc(null);
         setApproval(null);
+        return;
       }
+      setApproval(document.approval ?? null);
 
       // Non-fatal on purpose: the timeline still renders from the document and
       // the approval chain, so a history outage costs the remarks, not the
@@ -214,7 +238,7 @@ export default function TrackingProgressScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [id, isPayment]);
+  }, [id, isPayment, kind]);
 
   useEffect(() => {
     void load();
@@ -539,7 +563,7 @@ function DetailRow({
  */
 function buildStages(
   doc: PaymentReceipt | BankDeposit | null,
-  approval: ApiApprovalDetail | null,
+  approval: DocumentApproval | null,
   isPayment: boolean,
   history: StatusHistoryRow[] = [],
 ): Stage[] {
@@ -563,6 +587,30 @@ function buildStages(
         at: formatDateTime(row.created_at),
         action: row.action_display,
       }));
+
+  /**
+   * Every remark left AT one rung of the ladder.
+   *
+   * Scoped by the stage number the server stamps on each history row, so a
+   * retry at the final stage attaches its note to that stage rather than to
+   * whichever rung happens to be drawn first.
+   */
+  const remarksAtStage = (sequence: number): StageRemark[] | undefined => {
+    const rows = history
+      .filter(
+        (row) =>
+          row.level === sequence &&
+          (row.action === "APPROVED" || row.action === "REJECTED") &&
+          !!row.reason?.trim(),
+      )
+      .map((row) => ({
+        by: row.changed_by_username || row.performed_by || "System",
+        text: row.reason.trim(),
+        at: formatDateTime(row.created_at),
+        action: row.action_display,
+      }));
+    return rows.length ? rows : undefined;
+  };
 
   /** Drop repeats of a note already shown, comparing on text alone. */
   const withoutDuplicates = (list: StageRemark[]) => {
@@ -675,113 +723,22 @@ function buildStages(
     });
   }
 
-  if (approval) {
-    const rejected = approval.status === "REJECTED";
-    // Only the newest round is drawn: earlier rounds belong to a superseded
-    // attempt and would make the ladder read as more rungs than exist.
-    const round = approval.round_number ?? 1;
-    const actions = (approval.actions || []).filter(
-      (a) => (a.round_number ?? 1) === round,
-    );
-
-    const ladder =
-      approval.levels?.length
-        ? approval.levels
-        : Array.from({ length: approval.total_levels || 0 }, (_, i) => ({
-            position: i + 1,
-            sequence: i + 1,
-            name: `Level ${i + 1}`,
-            role: "",
-            // Synthesized from `total_levels` when the server sends no ladder,
-            // so the rungs exist but their assignees are unknown — an empty
-            // list, not a list of names we would have to invent.
-            approvers: [] as ApiApprovalAssignee[],
-          }));
-
+  const ladder = buildLadder(approval);
+  if (ladder.length) {
     ladder.forEach((rung) => {
-      const acted = actions.filter(
-        (a) => a.level === rung.position && a.action !== "SUBMIT",
-      );
-      const decision = acted[acted.length - 1];
-      const isRejectedHere = decision?.action === "REJECT";
-      const isDone = !!decision && decision.action === "APPROVE";
-      const isCurrent =
-        !decision && !rejected && approval.current_level === rung.position &&
-        approval.status === "PENDING";
-
-      const state: StageState = isRejectedHere
-        ? "REJECTED"
-        : isDone
-          ? "DONE"
-          : isCurrent
-            ? "CURRENT"
-            : "FUTURE";
-
-      // Who is assigned to this rung, straight from the ladder the server
-      // returns on every fetch — so adding or removing an approver, or
-      // changing how many rungs there are, shows up without an app release.
-      const assigned = rung.approvers ?? [];
-      const approvers = decision
-        ? [
-            {
-              // The person who actually decided. `approver_name` is the
-              // display name; the username identifies them unambiguously.
-              name:
-                decision.approver_name ||
-                decision.approver_username ||
-                "—",
-              username: decision.approver_username || undefined,
-              state: (isRejectedHere ? "REJECTED" : "APPROVED") as
-                | "APPROVED"
-                | "REJECTED",
-            },
-          ]
-        : assigned.map((person) => ({
-            name: person.name || person.username,
-            // Hidden when it would just repeat the name.
-            username:
-              person.username && person.username !== person.name
-                ? person.username
-                : undefined,
-            state: "PENDING" as const,
-          }));
-
       stages.push({
-        key: `level-${rung.position}`,
-        title: rung.name || `Level ${rung.position}`,
-        badge: isRejectedHere
-          ? "Rejected"
-          : isDone
-            ? "Approved"
-            : isCurrent
-              ? "Awaiting action"
-              : "Pending",
-        state,
-        action: decision
-          ? isRejectedHere
-            ? "Rejected"
-            : "Approved"
-          : isCurrent
-            ? "Awaiting action"
-            : "Not started",
-        approvers,
-        stageLabel: ordinalLevel(rung.position),
-        timestamp: decision ? formatDateTime(decision.acted_at) : undefined,
-        // Scoped to THIS rung: the approval detail names the approver, which
-        // the history's level field cannot be relied on to do for older rows.
-        remarks: decision?.remarks?.trim()
-          ? [
-              {
-                by:
-                  decision.approver_name ||
-                  decision.approver_username ||
-                  "—",
-                text: decision.remarks.trim(),
-                at: formatDateTime(decision.acted_at),
-                action: isRejectedHere ? "Rejected" : "Approved",
-              },
-            ]
-          : undefined,
+        key: rung.key,
+        title: rung.title,
+        badge: rung.badge,
+        state: rung.state,
+        action: rung.action,
+        approvers: rung.approvers,
+        stageLabel: ordinalLevel(rung.sequence),
+        timestamp: rung.decidedAt ? formatDateTime(rung.decidedAt) : undefined,
+        // Remarks come from the document's own history, scoped to THIS rung
+        // by the stage number the server stamps on each row. The ladder
+        // reports position and assignment; it does not carry free text.
+        remarks: remarksAtStage(rung.sequence),
       });
     });
   } else if (doc.status !== "CANCELLED" && doc.status !== "REJECTED") {

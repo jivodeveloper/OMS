@@ -131,11 +131,46 @@ function PaymentAccordion({
             </>
           ) : null}
 
-          {/* ── Where WE bank it ──
+          {/* ── Where WE received it ──
               A separate block with its own heading, because the customer's
-              bank and our deposit account are different things and reading
-              them as one list is what caused the confusion. */}
-          {payment.depositAccount ? (
+              bank and the account of ours the money landed in are different
+              things, and reading them as one list is what caused the
+              confusion.
+
+              This is the account the collector CHOSE, snapshotted when the
+              receipt was raised — so an approver is looking at where the money
+              actually went, not at where today's configuration would send it.
+              Shown for every method. */}
+          {payment.receivingAccount ? (
+            <View style={styles.depositBlock}>
+              <Text style={styles.subHeading}>Receiving Account</Text>
+              <DetailRow
+                label={payment.type === "Cash" ? "Cash Account" : "Bank"}
+                value={payment.receivingAccount.name || "—"}
+              />
+              <DetailRow
+                label="GL Account"
+                value={payment.receivingAccount.glAccount || "—"}
+              />
+              {payment.receivingAccount.accountNumber ? (
+                <DetailRow
+                  label="Account Number"
+                  value={payment.receivingAccount.accountNumber}
+                />
+              ) : null}
+              {payment.receivingAccount.branch ? (
+                <DetailRow
+                  label="Branch"
+                  value={payment.receivingAccount.branch}
+                />
+              ) : null}
+            </View>
+          ) : null}
+
+          {/* LEGACY, for receipts raised before the picker: the account the
+              admin mapping resolved. Only shown when there is no snapshot, so
+              a modern receipt never displays both. */}
+          {!payment.receivingAccount && payment.depositAccount ? (
             <View style={styles.depositBlock}>
               <Text style={styles.subHeading}>SAP Posting</Text>
               <DetailRow

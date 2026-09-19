@@ -28,6 +28,8 @@ import PaymentSuccessDialog, {
 } from "@/src/features/payments/components/PaymentSuccessDialog";
 import {
   messageFrom,
+  useBankAccounts,
+  useCashAccounts,
   useCompanies,
   useCollectionPersons,
   useOpenInvoices,
@@ -35,13 +37,13 @@ import {
 } from "@/src/features/payments/usePaymentMasters";
 import usePaymentPermissions from "@/src/features/payments/usePaymentPermissions";
 import paymentsService, {
-  type PaymentMethodKind,
   type SapBranch,
   type Company,
   type CreateReceiptPayload,
 } from "@/src/services/payments.service";
 import { PARTY_SOURCE } from "./_lib/constants";
 import { validateCashBreakdown } from "./_lib/validation";
+import { buildMethodPayload } from "@/src/features/payments/methodPayload";
 import type { PaymentMethodEntry, ReceivePaymentForm } from "./_lib/types";
 
 // Android needs this opt-in for LayoutAnimation to run at all.
@@ -85,6 +87,7 @@ const createMethod = (): PaymentMethodEntry => {
     bankName: "",
     chequeDate: "",
     attachments: [],
+    accountKey: "",
   };
 };
 
@@ -240,6 +243,12 @@ function ReceivePaymentScreen() {
   //   unticked -> only parties with open invoices (you are paying one off)
   //   ticked   -> every party (an advance is not invoice-linked)
   const parties = useParties(selectedCompany, "", !form.isAdvance);
+
+  // The receiving-account lists. Both are company-scoped and both come from
+  // SAP, so they are loaded alongside the other masters rather than when a
+  // method is chosen — switching method then costs nothing.
+  const cashAccountList = useCashAccounts(selectedCompany);
+  const bankAccountList = useBankAccounts(selectedCompany);
   const invoices = useOpenInvoices(selectedCompany, form.party);
   const permissions = usePaymentPermissions();
 
@@ -297,6 +306,11 @@ function ReceivePaymentScreen() {
                 quantity: String(d.quantity),
               })),
               notesExpanded: (m.denominations ?? []).length > 0,
+              // Restore the account this line was raised against. Blank on
+              // receipts from before the picker existed — those keep the
+              // server's legacy resolution rather than being given an account
+              // nobody chose.
+              accountKey: m.account_key ?? "",
               chequeNumber: m.cheque_number ?? "",
               bankName: m.bank_name ?? "",
               chequeDate: m.cheque_date ?? "",
@@ -433,11 +447,23 @@ function ReceivePaymentScreen() {
     (entry) => (Number(entry.amount) || 0) > 0,
   );
 
+  // ...and a receiving account. Blocked here as well as on the server so the
+  // collector is asked while the money is still in front of them, rather than
+  // being told after they have walked away.
+  //
+  // The server still ACCEPTS a receipt with no key — builds released before
+  // this picker existed send none — so this is the client choosing to always
+  // supply one, not a rule it is enforcing on anyone else.
+  const allMethodsHaveAccount = form.methods.every((entry) =>
+    Boolean(entry.accountKey),
+  );
+
   // Submit is gated on EVERY card, not just the open one — a collapsed card can
   // still hold an unbalanced breakdown.
   const submitBlocked =
     !headerComplete ||
     !allMethodsHaveAmount ||
+    !allMethodsHaveAccount ||
     saving ||
     // Creating needs the grant; editing does not — the server has already
     // decided the caller may edit THIS receipt, and re-testing a create
@@ -462,34 +488,7 @@ function ReceivePaymentScreen() {
     setSaving(true);
     try {
       const selectedParty = parties.data.find((p) => p.card_code === form.party);
-      const methods = form.methods.map((entry) => {
-        const base = {
-          method: entry.method.toUpperCase() as PaymentMethodKind,
-          amount: String(Number(entry.amount) || 0),
-        };
-        if (entry.method === "cash") {
-          return {
-            ...base,
-            denominations: entry.noteRows
-              .filter((row) => row.denomination && Number(row.quantity) > 0)
-              .map((row) => ({
-                denomination: Number(row.denomination),
-                quantity: Number(row.quantity),
-              })),
-          };
-        }
-        if (entry.method === "cheque") {
-          return {
-            ...base,
-            cheque_number: entry.chequeNumber,
-            bank_name: entry.bankName,
-            cheque_date: entry.chequeDate || undefined,
-          };
-        }
-        // UPI / bank transfer / NEFT / RTGS. The bank is NOT sent: the backend
-        // resolves it from the administrator's payment-method mapping.
-        return { ...base, upi_reference: entry.reference || "" };
-      });
+      const methods = form.methods.map(buildMethodPayload);
 
       const totalAmount = form.methods.reduce(
         (sum, entry) => sum + (Number(entry.amount) || 0),
@@ -966,6 +965,27 @@ function ReceivePaymentScreen() {
               onToggle={() => toggleMethod(form.methods[0].id)}
               onChange={(patch) => updateMethod(form.methods[0].id, patch)}
               onRemove={() => undefined}
+              cashAccounts={{
+                options: cashAccountList.options,
+                loading: cashAccountList.loading,
+                error: cashAccountList.error
+                  ? "Unable to load receiving accounts. Pull down to try again."
+                  : undefined,
+              }}
+              bankAccounts={{
+                options: bankAccountList.options,
+                loading: bankAccountList.loading,
+                error: bankAccountList.error
+                  ? "Unable to load receiving accounts. Pull down to try again."
+                  : undefined,
+              }}
+              // Shown exactly when the account is the thing standing in the
+              // way — the rest of the line is complete and this is not. It
+              // cannot wait for a Submit press: the button is disabled while
+              // the account is missing, so the press never comes.
+              showErrors={
+                headerComplete && allMethodsHaveAmount && !allMethodsHaveAccount
+              }
             />
           ) : null}
 

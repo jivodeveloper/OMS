@@ -21,10 +21,21 @@ export interface DepositablePayment {
   chequeDetail?: string;
 }
 
+/**
+ * Two kinds of deposit, not three.
+ *
+ * "Mixed" was removed because a deposit's arithmetic counts CASH ONLY — a
+ * cheque reached the bank when its own receipt posted to SAP, so the deposit
+ * records the day it was handed in rather than its value. Once the two stopped
+ * being added together, "both tenders" stopped being a kind of deposit: a
+ * cheque riding along on a cash deposit is recorded, not counted.
+ *
+ * A receipt carrying both therefore belongs in a CASH deposit. See
+ * `src/features/payments/depositFilter.ts` for the matching rule.
+ */
 export const DEPOSIT_TYPE_OPTIONS = [
   { label: "Cash", value: "cash" },
-  { label: "Cheque", value: "cheque" },
-  { label: "Mixed (Cash + Cheque)", value: "mixed" },
+  { label: "Cheque (record only)", value: "cheque" },
 ];
 
 export const BANK_ACCOUNT_OPTIONS = [

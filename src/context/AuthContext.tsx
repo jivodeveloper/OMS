@@ -30,6 +30,11 @@ import {
 import { suppressPendingNotification } from "../utils/notificationGate";
 import { bindCacheToUser, refreshAllData, refreshLiveData, resetCache } from "../cache";
 import {
+  fullRefreshIsDue,
+  LAST_FULL_REFRESH_KEY,
+  REFRESH_CHECK_MS,
+} from "../cache/refreshSchedule";
+import {
   api,
   ensureFreshAccessToken,
   isAccessTokenExpired,
@@ -76,21 +81,22 @@ const normalizeUser = (user: User): User => {
   };
 };
 
-// Daily soft refresh at 23:00 (local time). Cached data is thrown away once a
-// day; the last run is remembered so a device that was closed or backgrounded
-// at 23:00 refreshes the next time the app is opened. Tokens are never touched
-// — the user stays logged in.
-const DAILY_REFRESH_HOUR = 23;
-const DAILY_REFRESH_CHECK_MS = 60 * 1000;
-const LAST_FULL_REFRESH_KEY = "oms.lastFullRefreshAt";
-
-/** The most recent 23:00 that is not in the future. */
-const lastDailyRefreshSlot = (now = new Date()): number => {
-  const slot = new Date(now);
-  slot.setHours(DAILY_REFRESH_HOUR, 0, 0, 0);
-  if (slot.getTime() > now.getTime()) slot.setDate(slot.getDate() - 1);
-  return slot.getTime();
-};
+// The periodic soft refresh: every 10 minutes, cached data is thrown away and
+// read again, so nobody works from a stale party list, scheme, branch or
+// permission for longer than that.
+//
+// The schedule itself — the interval, the check cadence and the "is one due?"
+// rule — lives in `src/cache/refreshSchedule.ts`, free of React so it can be
+// asserted directly. This file owns the timer, the foreground listener and the
+// reload.
+//
+// It replaced a once-a-day wipe at 23:00, which it subsumes entirely: data
+// that is never more than ten minutes old is never a day old either, and
+// keeping both would have meant two timers racing to do the same work.
+//
+// TOKENS ARE NEVER TOUCHED. No token refresh is forced, clearing the cache
+// does not touch the token keys, and every reload swallows its failures — so a
+// refresh can fail, repeatedly, without ending the session.
 
 const getFieldErrorMessage = (errors: any): string | null => {
   if (!errors || typeof errors !== "object") return null;
@@ -176,14 +182,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     return () => subscription.remove();
   }, []);
 
-  // Daily soft refresh at 23:00 — NEVER logs the user out. Admin changes
+  // Soft refresh every 10 minutes — NEVER logs the user out. Admin changes
   // (party items, rates, schemes, UI labels, permissions) otherwise only showed
-  // after a fresh login because cached payloads are served
-  // stale-while-revalidate. Once the 23:00 slot has passed since the last run,
-  // drop every cached payload, reload labels and the profile, and let mounted
-  // screens refetch. Checked every minute while the app is open and on every
-  // return to the foreground; JS cannot run while the app is closed, so a
-  // device that was asleep at 23:00 catches up the moment it is opened.
+  // after a fresh login, because cached payloads are served
+  // stale-while-revalidate and a long-lived session never re-read them. Once
+  // the interval has elapsed, drop every cached payload, reload labels and the
+  // profile, and let mounted screens refetch. Checked every minute while the
+  // app is open and on every return to the foreground; JS cannot run while the
+  // app is closed, so a device that was asleep or closed catches up the moment
+  // it is opened.
   //
   // Nothing here can end the session: no token refresh is forced, clearing the
   // cache never touches the token keys, and both reloads swallow failures.
@@ -210,15 +217,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
         void uiConfigService.load(true);
         void refreshUser();
       } catch (error) {
-        console.log("Daily refresh failed:", error);
+        console.log("Periodic refresh failed:", error);
       } finally {
         running = false;
       }
     };
 
     const maybeRefresh = () => {
+      // Only while the app is in front of someone. A background tick would
+      // spend the user's data on screens nobody is looking at, and the
+      // foreground listener below makes it unnecessary: whatever was missed
+      // while backgrounded is caught the instant the app returns.
       if (cancelled || AppState.currentState !== "active") return;
-      if (lastFullRefreshAt.current < lastDailyRefreshSlot()) {
+      if (fullRefreshIsDue(lastFullRefreshAt.current)) {
         void runFullRefresh();
       }
     };
@@ -231,17 +242,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
         lastFullRefreshAt.current = 0;
       }
       if (!lastFullRefreshAt.current) {
-        // First run on this device: start the clock, don't wipe now.
+        // First run on this device: start the clock, don't wipe now. There is
+        // nothing stale to throw away yet, and a wipe here would make the
+        // first screen after login slower for no reason.
         lastFullRefreshAt.current = Date.now();
         void AsyncStorage.setItem(
           LAST_FULL_REFRESH_KEY,
           String(lastFullRefreshAt.current),
         ).catch(() => undefined);
       }
+      // A cold start after a long gap reads its cache off the disk, so it can
+      // open on data hours old. `maybeRefresh` compares against the STORED
+      // timestamp, which is what makes that case refresh immediately rather
+      // than waiting out an interval that already elapsed while closed.
       maybeRefresh();
     })();
 
-    const timer = setInterval(maybeRefresh, DAILY_REFRESH_CHECK_MS);
+    const timer = setInterval(maybeRefresh, REFRESH_CHECK_MS);
     const subscription = AppState.addEventListener("change", (next) => {
       if (next === "active") maybeRefresh();
     });
@@ -250,7 +267,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
       clearInterval(timer);
       subscription.remove();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id]);
 
   const checkAuth = async () => {

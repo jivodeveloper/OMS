@@ -8,6 +8,17 @@ interface ApprovalBottomBarProps {
   onReject: () => void;
   onApprove: () => void;
   disabled?: boolean;
+  /**
+   * Label the approve action as a SAP RETRY rather than a first approval.
+   *
+   * Passed straight from the server's `permissions.can_retry_sap`, never
+   * worked out here. The two are genuinely different acts to the person
+   * holding the document — one decides it, the other re-attempts a posting SAP
+   * already refused — and a client that guessed from the status alone would
+   * also offer Retry after a SAP TIMEOUT, where a second post can pay the same
+   * money twice.
+   */
+  retry?: boolean;
 }
 
 /** Sticky reject/approve bar — two equal-width outlined buttons. */
@@ -15,7 +26,9 @@ function ApprovalBottomBar({
   onReject,
   onApprove,
   disabled = false,
+  retry = false,
 }: ApprovalBottomBarProps) {
+  const approveLabel = retry ? "Retry SAP Posting" : "Approve";
   return (
     <View style={styles.bar}>
       <Pressable
@@ -28,6 +41,7 @@ function ApprovalBottomBar({
         onPress={onReject}
         disabled={disabled}
         accessibilityRole="button"
+        accessibilityLabel="Reject"
       >
         <Ionicons name="close-circle-outline" size={18} color={COLORS.error} />
         <Text style={styles.rejectText}>Reject</Text>
@@ -43,9 +57,14 @@ function ApprovalBottomBar({
         onPress={onApprove}
         disabled={disabled}
         accessibilityRole="button"
+        accessibilityLabel={approveLabel}
       >
-        <Ionicons name="checkmark-circle-outline" size={18} color={COLORS.success} />
-        <Text style={styles.approveText}>Approve</Text>
+        <Ionicons
+          name={retry ? "refresh-circle-outline" : "checkmark-circle-outline"}
+          size={18}
+          color={COLORS.success}
+        />
+        <Text style={styles.approveText}>{approveLabel}</Text>
       </Pressable>
     </View>
   );

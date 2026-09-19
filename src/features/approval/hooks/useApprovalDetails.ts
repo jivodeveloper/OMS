@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import approvalsService from "@/src/services/approvals.service";
 import paymentsService, {
   type StatusHistoryRow,
   type PaymentReceipt,
@@ -145,6 +144,26 @@ function toApprovalDetail(receipt: PaymentReceipt): ApprovalDetail {
       id: String(m.id),
       type: methodLabel(m.method) as ApprovalPayment["type"],
       amount: money(m.amount),
+      /**
+       * WHERE THIS MONEY WAS RECEIVED, as recorded at the time.
+       *
+       * The server snapshots the account the collector picked, so this is what
+       * was true when the money came in — not what the configuration says
+       * today. That is the whole reason the snapshot exists, and it is why
+       * this is read from the line rather than resolved again now.
+       *
+       * Shown for every method, because an approver deciding where money went
+       * needs it as much for cash as for a transfer. Blank on receipts raised
+       * before the picker existed; the UI simply omits the row.
+       */
+      receivingAccount: m.receiving_bank_name || m.gl_account
+        ? {
+            name: m.receiving_bank_name || "",
+            glAccount: m.gl_account || "",
+            accountNumber: m.account_number || "",
+            branch: m.branch || "",
+          }
+        : null,
     };
     if (m.method === "CASH") {
       return {
@@ -263,6 +282,9 @@ function toApprovalDetail(receipt: PaymentReceipt): ApprovalDetail {
     payments,
     attachments,
     canDecide: receipt.permissions?.can_decide ?? false,
+    // Whether the action to offer is a SAP RETRY. Server-decided; see
+    // DocumentPermissions.can_retry_sap.
+    canRetrySap: receipt.permissions?.can_retry_sap ?? false,
     canEdit: receipt.permissions?.can_edit ?? false,
     canResubmit: receipt.permissions?.can_resubmit ?? false,
     rejectionReason: receipt.approval?.rejection_reason ?? "",
@@ -411,17 +433,24 @@ export function useApprovalDetails(
     (nextDecision: ApprovalDecision, remarks: string) => {
       setDecision(nextDecision);
 
-      if (!approvalId) {
+      const receiptId = Number(documentId);
+      if (!approvalId || !Number.isFinite(receiptId)) {
         setStage("none");
         setError("This entry has no open approval to act on.");
         return;
       }
 
       setStage("loading");
-      approvalsService
-        .act(
-          approvalId,
-          nextDecision === "approve" ? "APPROVE" : "REJECT",
+      // Payments' OWN endpoint, keyed on the RECEIPT id.
+      //
+      // This replaced `approvalsService.act(approvalId, ...)`, which posted to
+      // the generic `/approvals/requests/{id}/act/`. That engine no longer
+      // holds payments approvals, and the id carried here is now a payments
+      // flow id, so the old call acted on nothing at all.
+      paymentsService
+        .decideReceipt(
+          receiptId,
+          nextDecision === "approve" ? "approve" : "reject",
           remarks,
         )
         .then(async () => {

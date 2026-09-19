@@ -511,7 +511,11 @@ export default function ApprovalDetailsScreen() {
           disabled={verifySubmitting}
         />
       ) : detail.canDecide ? (
-        <ApprovalBottomBar onReject={openReject} onApprove={openApprove} />
+        <ApprovalBottomBar
+          onReject={openReject}
+          onApprove={openApprove}
+          retry={detail.canRetrySap}
+        />
       ) : null}
 
       {/* ── Decision flow: confirm → loading → success ── */}

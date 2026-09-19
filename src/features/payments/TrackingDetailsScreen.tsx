@@ -305,7 +305,7 @@ export default function TrackingDetailsScreen() {
         <View>
           <Text style={styles.totalBannerLabel}>Total Amount</Text>
           <Text style={styles.totalBannerSub}>
-            {approval ? approval.level_label : "Not submitted"}
+            {approval ? approval.stage_label : "Not submitted"}
           </Text>
         </View>
         <Text style={styles.totalBannerValue}>{formatMoney(total ?? 0)}</Text>

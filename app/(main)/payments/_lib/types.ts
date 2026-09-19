@@ -41,6 +41,20 @@ export interface PaymentMethodEntry {
   reference: string;
   /** Every method except cash — proof of payment. */
   attachments: AttachmentStub[];
+  /**
+   * WHICH ACCOUNT OF OURS RECEIVES THIS LINE'S MONEY.
+   *
+   * PER LINE, not per receipt: one receipt can be part cash into a drawer and
+   * part UPI into a bank, and each line is posted to the account it names. A
+   * single receipt-level key would silently push one line's money into the
+   * other's account.
+   *
+   * The value is the server's `key` — a cash account's G/L (`"1105001"`) or a
+   * bank's `BANKCODE:GL` (`"INB:1104106"`). It is CLEARED when the method
+   * changes, because a drawer is not a valid destination for a transfer and a
+   * house bank is not one for cash.
+   */
+  accountKey: string;
 }
 
 export interface ReceivePaymentForm {

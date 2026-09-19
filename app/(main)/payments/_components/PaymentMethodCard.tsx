@@ -16,8 +16,19 @@ import {
 } from "../_lib/constants";
 import { TRANSFER_METHODS, UPI_REFERENCE_MAX } from "../_lib/constants";
 import { validateCashBreakdown } from "../_lib/validation";
+import {
+  accountKindFor,
+  methodChangePatch,
+} from "@/src/features/payments/methodPayload";
 import type { AttachmentStub, CashNoteRow, PaymentMethodEntry } from "../_lib/types";
 import type { PickedFile } from "../_lib/pickAttachment";
+
+/** The receiving-account lists, as the screen loads them. */
+export interface AccountOptions {
+  options: { label: string; value: string }[];
+  loading: boolean;
+  error?: string;
+}
 
 interface PaymentMethodCardProps {
   entry: PaymentMethodEntry;
@@ -27,6 +38,12 @@ interface PaymentMethodCardProps {
   onToggle: () => void;
   onChange: (patch: Partial<PaymentMethodEntry>) => void;
   onRemove: () => void;
+  /** CASH drawers — `/payments/cash-accounts/`. */
+  cashAccounts: AccountOptions;
+  /** House banks — `/payments/banks/`. Shared by UPI and CHEQUE. */
+  bankAccounts: AccountOptions;
+  /** Set once the user has tried to submit, so errors appear then. */
+  showErrors?: boolean;
 }
 
 export default function PaymentMethodCard({
@@ -37,7 +54,19 @@ export default function PaymentMethodCard({
   onToggle,
   onChange,
   onRemove,
+  cashAccounts,
+  bankAccounts,
+  showErrors = false,
 }: PaymentMethodCardProps) {
+  // WHICH LIST THIS LINE PICKS FROM. Cash is received into a drawer; UPI and
+  // cheque are received into a house bank. SAP draws no distinction between
+  // the latter two — the same bank legitimately receives both — so they share
+  // one list, which is also what the server accepts for them.
+  const isCash = accountKindFor(entry.method) === "CASH";
+  const accounts = isCash ? cashAccounts : bankAccounts;
+  const accountLabel = isCash ? "Receiving Cash Account" : "Receiving Bank Account";
+  const accountError =
+    showErrors && !entry.accountKey ? "Please select a receiving account." : undefined;
   const [showDatePicker, setShowDatePicker] = React.useState(false);
   const meta = methodMeta(entry.method);
   const amount = Number(entry.amount) || 0;
@@ -134,7 +163,10 @@ export default function PaymentMethodCard({
               label="Payment Method"
               data={PAYMENT_METHOD_OPTIONS}
               value={entry.method}
-              onChange={(value: PaymentMethodType) => onChange({ method: value })}
+              onChange={(value: PaymentMethodType) =>
+                // The account goes with the method — see `methodChangePatch`.
+                onChange(methodChangePatch(entry.method, value))
+              }
               placeholder="Select method..."
               searchable={false}
               leftIcon={meta.icon}
@@ -169,10 +201,10 @@ export default function PaymentMethodCard({
             />
           ) : null}
 
-          {/* ── UPI / Bank transfer / NEFT / RTGS ──
-              No bank field: an administrator maps each of these to a SAP house
-              bank account once, and the backend resolves the G/L. Asking a
-              collector to pick one would be asking them to know SAP. */}
+          {/* ── UPI ──
+              The account this money is received INTO is chosen below, in
+              "Receiving Bank Account", like every other method. Only the
+              payer's own reference is specific to a transfer. */}
           {isTransfer ? (
             <FormField
               // Optional: the UTR is not always to hand when the receipt is
@@ -300,6 +332,50 @@ export default function PaymentMethodCard({
             </>
           ) : null}
 
+          {/* ── Receiving account ──────────────────────────────────────
+              WHICH ACCOUNT OF OURS THIS MONEY LANDS IN. Asked for every
+              method, and asked of the person who took the money, because they
+              are the one who knows which drawer or which bank it went to.
+
+              It replaces an administrator's per-method mapping, which could
+              only ever give one answer per company and silently posted every
+              cash receipt to the same drawer. What is chosen here is
+              snapshotted on the server, so the posting stays correct even
+              after the account is renamed or retired.
+
+              NOT the same as "Customer Cheque Bank" above: that is the bank
+              the payer's cheque is drawn on. */}
+          <View style={styles.field}>
+            {accounts.error ? (
+              <Text style={styles.accountError}>{accounts.error}</Text>
+            ) : null}
+            <Dropdown
+              label={accountLabel}
+              data={accounts.options}
+              value={entry.accountKey || null}
+              onChange={(value: string) => onChange({ accountKey: value })}
+              placeholder={
+                accounts.loading
+                  ? "Loading accounts..."
+                  : accounts.error
+                    ? "Unavailable"
+                    : accounts.options.length
+                      ? "Select receiving account..."
+                      : isCash
+                        ? "No cash accounts available"
+                        : "No receiving accounts available"
+              }
+              // The list can be long and is company-specific, so it is
+              // searchable — the same treatment the party picker gets.
+              searchable
+              leftIcon={isCash ? "cash" : "bank"}
+              iconColor={COLORS.textSecondary}
+              disabled={accounts.loading || !accounts.options.length}
+              error={accountError}
+              required
+            />
+          </View>
+
           {supportsAttachment ? (
             <AttachmentPicker
               label={
@@ -343,6 +419,11 @@ export default function PaymentMethodCard({
 }
 
 const styles = StyleSheet.create({
+  accountError: {
+    color: COLORS.error,
+    fontSize: 12,
+    marginBottom: 4,
+  },
   card: {
     backgroundColor: COLORS.surface,
     borderRadius: RADIUS.lg,

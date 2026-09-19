@@ -332,7 +332,7 @@ const receiptToRow = (r: PaymentReceipt): TrackRow => ({
   date: r.created_at,
   createdBy: r.created_by_name || "—",
   company: r.company,
-  level: r.approval?.level_label ?? "",
+  level: r.approval?.stage_label ?? "",
   approvalId: r.approval?.id ?? null,
   // The balance owed when the invoice was picked. Older receipts stored 0, so
   // the strip hides itself rather than showing a false comparison.
@@ -376,7 +376,7 @@ const depositToRow = (d: BankDeposit): TrackRow => ({
   date: d.created_at,
   createdBy: d.created_by_name || "—",
   company: d.company,
-  level: d.approval?.level_label ?? "",
+  level: d.approval?.stage_label ?? "",
   approvalId: d.approval?.id ?? null,
   // A deposit banks receipts rather than settling an invoice, so there is no
   // invoice figure to compare against.

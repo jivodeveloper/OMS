@@ -17,6 +17,7 @@ import { useIsFocused } from "@react-navigation/native";
 import { setHeaderEditHandler } from "@/src/utils/headerEdit";
 import ApprovalBottomBar from "@/src/features/approval/components/ApprovalBottomBar";
 import SapInfoCard from "@/src/features/payments/components/SapInfoCard";
+import TenderRecordCard from "@/src/features/payments/components/TenderRecordCard";
 import AttachmentList from "@/src/features/approval/components/AttachmentList";
 import EditHistoryCard from "@/src/features/payments/components/EditHistoryCard";
 import AttachmentViewer from "@/src/features/approval/components/AttachmentViewer";
@@ -27,7 +28,6 @@ import ApprovalLoadingDialog from "@/src/features/approval/components/dialogs/Ap
 import ApprovalSuccessDialog from "@/src/features/approval/components/dialogs/ApprovalSuccessDialog";
 import SapErrorDialog from "@/src/features/approval/components/dialogs/SapErrorDialog";
 import { showToast } from "@/src/components/common/Toast";
-import approvalsService from "@/src/services/approvals.service";
 
 import { handoverDays } from "@/src/features/payments/handoverSpan";
 import { COLORS } from "@/src/constants/theme";
@@ -172,18 +172,21 @@ export default function DepositDetailsScreen() {
     void load();
   }, [load, refreshAt]);
 
-  /** Post the decision, then leave for the tracking list with fresh data. */
+  /** Post the decision and re-read the deposit; `handleDone` decides where next. */
   const act = useCallback(
     async (which: "approve" | "reject", note: string) => {
-      const approvalId = deposit?.approval?.id;
-      if (!approvalId) return;
+      if (!deposit?.approval?.id) return;
       setDecision(which);
       setStage("loading");
       setBusy(true);
       try {
-        await approvalsService.act(
-          approvalId,
-          which === "approve" ? "APPROVE" : "REJECT",
+        // The DEPOSIT endpoint, keyed on the deposit id — deposits are their
+        // own business workflow with their own stages and approvers. This
+        // replaced `approvalsService.act`, which posted to the retired generic
+        // engine and would now act on nothing.
+        await paymentsService.decideDeposit(
+          id,
+          which === "approve" ? "approve" : "reject",
           note,
         );
 
@@ -289,6 +292,35 @@ export default function DepositDetailsScreen() {
     } as never);
   }, []);
 
+  /**
+   * What "Done" does, which is not always "leave".
+   *
+   * The FINAL approval posts the deposit's CASH to SAP, so this page now
+   * carries what the approver could not see before they acted: the DocEntry,
+   * the DocNum, and — for a mixed deposit — the card saying which rupees this
+   * deposit posted and which were already in SAP under their own receipts.
+   * Bouncing to the tracking list would throw all of that away and make them
+   * find the row again to read it, so we stay and refetch instead.
+   *
+   * Only for an APPROVAL. `isFinal` is true of a final rejection too, but a
+   * rejected deposit never reaches SAP, so there is no posting to inspect and
+   * staying would strand the approver on a document they have finished with.
+   * An intermediate approval has nothing to show either — the deposit has just
+   * moved to the next rung, which is another queue's business.
+   *
+   * The refetch is `load`, not the re-read `act` already did: that one refreshes
+   * the deposit alone, and the history trail below it would still be missing the
+   * decision just taken.
+   */
+  const handleDone = useCallback(() => {
+    if (isFinal && decision === "approve") {
+      setStage("none");
+      void load("refresh");
+      return;
+    }
+    leaveAfterDecision();
+  }, [isFinal, decision, load, leaveAfterDecision]);
+
   if (loading) {
     return (
       <View style={styles.centered}>
@@ -322,6 +354,9 @@ export default function DepositDetailsScreen() {
   );
 
   const canDecide = !!deposit.permissions?.can_decide;
+  // Server-decided: a SAP posting this user may re-attempt, as opposed to a
+  // first approval. Never inferred from the status here.
+  const canRetrySap = !!deposit.permissions?.can_retry_sap;
 
   // What is physically in this deposit, counted from the receipts rather than
   // read off deposit_type. "MIXED" tells an approver nothing about what they
@@ -715,6 +750,14 @@ export default function DepositDetailsScreen() {
           require opening View Progress. */}
       <SapInfoCard doc={deposit} kind="deposit" style={styles.sapCard} />
 
+      {/* ── Where each tender is recorded ──
+          The SAP card above quotes ONE document number, which on a mixed
+          deposit covers only the cash. This accounts for the cheques, which
+          reached the bank under their own receipts — so an approver can see
+          that both halves are recorded, and where. Renders nothing when there
+          are no cheques to explain. */}
+      <TenderRecordCard deposit={deposit} style={styles.sapCard} />
+
       {/* ── Deposit slips and bank receipts ──
           The proof the money reached the bank. The API has always returned
           these; the deposit screens simply never rendered them, so an
@@ -898,6 +941,7 @@ export default function DepositDetailsScreen() {
             setStage("approve");
           }}
           disabled={busy}
+          retry={canRetrySap}
         />
       ) : null}
 
@@ -929,7 +973,7 @@ export default function DepositDetailsScreen() {
           hour: "2-digit",
           minute: "2-digit",
         })}
-        onDone={leaveAfterDecision}
+        onDone={handleDone}
       />
 
       {/* The approval succeeded; SAP refused the posting. Two different

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import paymentsService, {
   type BankAccount,
+  type CashAccount,
   type CollectionPerson,
   type Company,
   type CompanyOption,
@@ -182,6 +183,32 @@ export function useCollectionPersons(company: Company | null) {
 }
 
 /** Deposit target accounts for a company. */
+/**
+ * The CASH accounts this company may receive cash into.
+ *
+ * Deliberately a separate list from `useBankAccounts`, not a filter over one:
+ * a drawer and a house bank are different kinds of account, and the whole
+ * point of the picker is that a cash receipt cannot be pointed at a bank
+ * account or the other way round.
+ */
+export function useCashAccounts(company: Company | null) {
+  const list = useAsyncList<CashAccount>(
+    () => paymentsService.getCashAccounts(company ?? undefined),
+    [company],
+    !!company,
+  );
+  return {
+    ...list,
+    options: list.data.map<Option>((a) => ({
+      // The server composes the label ("1105001 - CASH SALE"); falling back to
+      // the account name keeps a row usable if it ever arrives without one.
+      label: a.label || a.account_name,
+      // For cash the key IS the G/L account — see CashAccount.
+      value: a.key,
+    })),
+  };
+}
+
 export function useBankAccounts(company: Company | null) {
   const list = useAsyncList<BankAccount>(
     () => paymentsService.getBankAccounts(company ?? undefined),
