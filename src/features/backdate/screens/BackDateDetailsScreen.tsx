@@ -14,7 +14,7 @@ import {
 
 import { showToast } from "@/src/components/common/Toast";
 import { setHeaderEditHandler } from "@/src/utils/headerEdit";
-import { COLORS } from "@/src/constants/theme";
+import { COLORS, RADIUS } from "@/src/constants/theme";
 import ApprovalBottomBar from "@/src/features/approval/components/ApprovalBottomBar";
 import ApprovalLoadingDialog from "@/src/features/approval/components/dialogs/ApprovalLoadingDialog";
 import ApproveDialog from "@/src/features/approval/components/dialogs/ApproveDialog";
@@ -76,6 +76,13 @@ export default function BackDateDetailsScreen() {
     id?: string;
     actionable?: string;
     from?: string;
+    /**
+     * Bumped by the edit screen on every save. The route and the id do not
+     * change, so without something that DOES change this screen is reused and
+     * redisplays the copy it already had — the user saves an edit and sees the
+     * old values.
+     */
+    refreshAt?: string;
   }>();
   const id = Number(params.id);
 
@@ -130,7 +137,9 @@ export default function BackDateDetailsScreen() {
 
   useEffect(() => {
     load();
-  }, [load]);
+    // `params.refreshAt` is what makes an edit's save land here as fresh data
+    // rather than the stale copy this screen was already showing.
+  }, [load, params.refreshAt]);
 
   const openEdit = useCallback(() => {
     router.push({
@@ -229,6 +238,21 @@ export default function BackDateDetailsScreen() {
   const tone = STATUS_COLOR[status];
   const sapTone = flow?.hana_status === "SUCCESS" ? SAP_OK : SAP_FAIL;
   const canDecide = actionable && !!flow?.current_stage;
+
+  /**
+   * Have the rights already expired?
+   *
+   * `time_limit` is when the SAP grant stops. A request can sit in a queue
+   * until its own expiry goes by, and approving it then calls `OPEN_BKDT` with
+   * an expiry already in the past — SAP accepts it, nobody sees a failure, and
+   * the requester simply finds they still cannot post.
+   *
+   * The server refuses that now (`flow._guard_not_expired`); this is the same
+   * fact shown BEFORE the approver spends a decision on it.
+   */
+  const expired =
+    !!request.time_limit && new Date(request.time_limit).getTime() < Date.now();
+  const blockedByExpiry = canDecide && expired;
   const isFinal = result?.flow_status === "APPROVED";
 
   return (
@@ -370,6 +394,11 @@ export default function BackDateDetailsScreen() {
               icon="alarm-outline"
               label="Rights Expire"
               value={formatInstant(request.time_limit)}
+              // IN THE SAME ROW as the date, not a banner elsewhere: the date
+              // and the fact it has passed are one piece of information, and
+              // separating them makes a reader check two places to learn one
+              // thing.
+              badge={expired ? "EXPIRED" : undefined}
               full
             />
           </View>
@@ -422,10 +451,39 @@ export default function BackDateDetailsScreen() {
 
       </ScrollView>
 
+      {/* FORCE THE UPDATE BEFORE THE APPROVAL.
+          Shown only to the person who could otherwise approve: to everyone
+          else the badge on the expiry row already says it, and a red banner
+          about an action they cannot take is noise. */}
+      {blockedByExpiry ? (
+        <View style={styles.expiryWarning}>
+          <Ionicons name="alert-circle" size={ms(18)} color={COLORS.error} />
+          <Text style={styles.expiryWarningText}>
+            These rights expired on {formatInstant(request.time_limit)}.
+            Approving now would send SAP a grant that is already over. Edit the
+            request to set a new expiry, then approve it.
+          </Text>
+        </View>
+      ) : null}
+
       {canDecide ? (
         <ApprovalBottomBar
           onReject={() => setStage("reject")}
-          onApprove={() => setStage("approve")}
+          // REJECT STAYS OPEN. Only approving is blocked — refusing an expired
+          // request is exactly what an approver should be able to do, and
+          // disabling the whole bar would strand it with no way out.
+          onApprove={() => {
+            if (blockedByExpiry) {
+              // The server refuses this too; catching it here saves the
+              // approver a round trip and a dialog that can only fail.
+              showToast(
+                "These rights have expired. Edit the request to set a new expiry before approving.",
+                "error",
+              );
+              return;
+            }
+            setStage("approve");
+          }}
         />
       ) : null}
 
@@ -495,6 +553,7 @@ function DetailField({
   full = false,
   sub,
   muted = false,
+  badge,
 }: {
   icon: keyof typeof Ionicons.glyphMap;
   label: string;
@@ -504,6 +563,14 @@ function DetailField({
   sub?: string;
   /** Greys the value for a step that has not happened yet. */
   muted?: boolean;
+  /**
+   * A short alert chip beside the value, in the SAME row.
+   *
+   * For a fact ABOUT the value rather than a second value — "EXPIRED" next to
+   * an expiry date. Putting it anywhere else would make a reader check two
+   * places to learn one thing.
+   */
+  badge?: string;
 }) {
   return (
     <View style={[styles.field, full ? styles.fieldFull : styles.fieldHalf]}>
@@ -514,7 +581,19 @@ function DetailField({
         style={styles.fieldIcon}
       />
       <View style={styles.fieldText}>
-        <Text style={styles.fieldLabel}>{label}</Text>
+        <View style={styles.fieldLabelRow}>
+          <Text style={styles.fieldLabel}>{label}</Text>
+          {badge ? (
+            <View style={styles.alertBadge}>
+              <Ionicons
+                name="alert-circle"
+                size={ms(11)}
+                color={COLORS.error}
+              />
+              <Text style={styles.alertBadgeText}>{badge}</Text>
+            </View>
+          ) : null}
+        </View>
         {tone === "badge" ? (
           <View style={styles.badge}>
             <Text style={styles.badgeText} numberOfLines={1}>
@@ -656,11 +735,49 @@ const styles = StyleSheet.create({
   fieldFull: { width: "100%" },
   fieldIcon: { marginTop: sp(2) },
   fieldText: { flex: 1, minWidth: 0 },
+  fieldLabelRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: sp(6),
+    marginBottom: sp(2),
+  },
   fieldLabel: {
     fontSize: fs(11),
     fontWeight: "500",
     color: COLORS.textSecondary,
-    marginBottom: sp(2),
+  },
+  alertBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: sp(3),
+    paddingHorizontal: sp(6),
+    paddingVertical: sp(1),
+    borderRadius: RADIUS.sm,
+    backgroundColor: "#FEF2F2",
+  },
+  alertBadgeText: {
+    fontSize: fs(9.5),
+    fontWeight: "800",
+    letterSpacing: 0.4,
+    color: COLORS.error,
+  },
+  expiryWarning: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: sp(8),
+    marginHorizontal: sp(14),
+    marginBottom: sp(8),
+    padding: sp(11),
+    borderRadius: RADIUS.md,
+    backgroundColor: "#FEF2F2",
+    borderWidth: 1,
+    borderColor: "#FECACA",
+  },
+  expiryWarningText: {
+    flex: 1,
+    fontSize: fs(12),
+    lineHeight: ms(17),
+    color: COLORS.error,
   },
   fieldValue: {
     fontSize: fs(13),

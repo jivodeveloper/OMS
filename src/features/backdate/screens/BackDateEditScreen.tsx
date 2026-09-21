@@ -109,9 +109,21 @@ export default function BackDateEditScreen() {
         remarks: form.remarks.trim(),
       });
       showToast("Request updated.", "success");
-      // Back to the details screen, which refetches and shows the new values
-      // plus the UPDATE row in its history.
-      router.back();
+      // STRAIGHT TO THIS REQUEST'S DETAILS, not back.
+      //
+      // `router.back()` returns to whatever was underneath, which is the
+      // tracking list when the edit was opened from there and the HOME screen
+      // when it was reached any other way — so saving a change could land the
+      // user nowhere near the thing they had just changed.
+      //
+      // `replace`, not `push`: the edit form has served its purpose and should
+      // not sit in the stack for Back to return to. `refreshAt` changes on
+      // every save, which is what makes the details screen refetch rather than
+      // redisplay the copy it already had.
+      router.replace({
+        pathname: "/(main)/backdate/tracking-details",
+        params: { id: String(id), refreshAt: String(Date.now()) },
+      } as never);
     } catch (err) {
       setError(messageFrom(err, "The change could not be saved."));
     } finally {
