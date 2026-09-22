@@ -75,8 +75,13 @@ export interface BackDateFlow {
 
 export interface BackDateRequest {
   id: number;
-  /** ONE company. A request is routed by it and written to its SAP schema. */
-  company: BackDateCompany;
+  /**
+   * The canonical stored value: `"OIL"`, or `"OIL,MART"`.
+   *
+   * Read `companies` to render one badge each and `company_label` for the
+   * readable form — three views of one fact, so no screen splits the string.
+   */
+  company: string;
   company_label: string;
   companies: BackDateCompany[];
   /** The SAP user being granted rights — not the OMS user who asked. */
@@ -174,7 +179,15 @@ export interface DecisionResult {
 }
 
 export interface NewBackDateRequest {
-  company: BackDateCompany;
+  /**
+   * ONE OR MORE companies, and always ONE request.
+   *
+   * The same rights in each named SAP database, decided once by the same
+   * approvers — so a multi-company selection is one POST, one row, one flow
+   * and one approval chain. The server canonicalises the list, so order and
+   * duplicates do not matter. The companies separate only at the SAP write.
+   */
+  company: BackDateCompany[];
   sap_username: string;
   /** THE document identity — the SAP object name. */
   document_type_name: string;

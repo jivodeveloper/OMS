@@ -56,7 +56,7 @@ export default function BackDateCreateScreen() {
     setError("");
     try {
       const request = await backdateService.createRequest({
-        company: form.company,
+        company: form.companies,
         sap_username: form.sap_username.trim(),
         document_type_name: form.document_type_name.trim(),
         action: joinActions(form.actions),

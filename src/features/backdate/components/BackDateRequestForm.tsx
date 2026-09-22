@@ -21,10 +21,18 @@ import {
   type BackDateCompany,
 } from "@/src/services/backdate.service";
 import { formatDate, toYMD } from "@/src/utils/datetime";
+import MultiSelectDialog from "@/src/components/common/MultiSelectDropdown";
 import useBackDateMasters from "../hooks/useBackDateMasters";
 
 export interface BackDateFormState {
-  company: BackDateCompany;
+  /**
+   * ONE OR MORE companies, still ONE request.
+   *
+   * The same rights in two SAP databases are one decision by the same
+   * approvers, so they are one request with one approval chain. The fan-out
+   * is at the SAP write — one `OPEN_BKDT` call each, after final approval.
+   */
+  companies: BackDateCompany[];
   sap_username: string;
   document_type_name: string;
   /** The two tick boxes. Both ticked is ONE request carrying "A,U". */
@@ -37,7 +45,7 @@ export interface BackDateFormState {
 }
 
 export const emptyForm = (): BackDateFormState => ({
-  company: "OIL",
+  companies: ["OIL"],
   sap_username: "",
   document_type_name: "",
   actions: ["A"],
@@ -105,7 +113,7 @@ export type BackDateStep = (typeof STEP_ORDER)[number];
 function isStepFilled(form: BackDateFormState, step: BackDateStep): boolean {
   switch (step) {
     case "company":
-      return Boolean(form.company);
+      return form.companies.length > 0;
     case "sap_username":
       return form.sap_username.trim().length > 0;
     case "document_type_name":
@@ -185,7 +193,11 @@ interface Props {
  */
 export default function BackDateRequestForm({ form, setForm, mode }: Props) {
   const { userOptions, typeOptions, loadingMasters, mastersError } =
-    useBackDateMasters(form.company);
+    // The lists come from the FIRST company picked. Document types are the
+    // same 75 objects with the same names in all three schemas, so any of
+    // them answers for the rest; SAP USERS are not, which the form says
+    // below rather than implying the list covers every company.
+    useBackDateMasters(form.companies[0]);
   const [picking, setPicking] = useState<"from" | "to" | null>(null);
 
   const { done, total, openTo } = stepProgress(form);
@@ -205,6 +217,28 @@ export default function BackDateRequestForm({ form, setForm, mode }: Props) {
   const set = (patch: Partial<BackDateFormState>) =>
     setForm({ ...form, ...patch });
 
+  /**
+   * Replace the chosen companies, and clear what depended on them.
+   *
+   * ONE `set` CALL, and that matters. `set` spreads the `form` it closed
+   * over, so two calls in one handler both start from the SAME snapshot and
+   * the second silently discards the first. Ticking a company and clearing
+   * the SAP fields as two calls meant the tick never registered — the company
+   * step never completed and the form could not be submitted at all.
+   *
+   * Order is normalised to the declared one so the field reads the same way
+   * every time and matches what comes back from the server.
+   */
+  const setCompanies = (next: BackDateCompany[]) =>
+    set({
+      companies: BACKDATE_COMPANIES.filter((c) => next.includes(c)),
+      // The SAP user and document lists come from the first company, so a
+      // pick made under a different one may not exist. Cleared rather than
+      // silently kept.
+      sap_username: "",
+      document_type_name: "",
+    });
+
   const toggleAction = (action: "A" | "U") =>
     set({
       actions: form.actions.includes(action)
@@ -221,25 +255,35 @@ export default function BackDateRequestForm({ form, setForm, mode }: Props) {
 
         {mode === "create" ? (
           <Step {...stepState(0)} style={styles.field}>
-            <Dropdown
-              label="Company"
+            {/* A DROPDOWN OF CHECKBOXES, not checkboxes on the page. Three
+                boxes sitting open looked like three separate questions; a
+                single field that says what is chosen reads as one.
+
+                Several companies on one request is still ONE request with one
+                approval chain — the same rights in each database, decided
+                once. They separate only at the SAP write, where each gets its
+                own `OPEN_BKDT` call into its own schema. */}
+            <Text style={styles.fieldLabel}>
+              Company<Text style={styles.required}> *</Text>
+            </Text>
+            <MultiSelectDialog<BackDateCompany>
+              label="Select companies"
               data={BACKDATE_COMPANIES.map((c) => ({ label: c, value: c }))}
-              value={form.company}
-              onChange={(value: string) =>
-                // The SAP lists are per company, so the previous company's
-                // picks may not exist here. Cleared rather than silently kept.
-                set({
-                  company: value as BackDateCompany,
-                  sap_username: "",
-                  document_type_name: "",
-                })
-              }
-              placeholder="Select company"
-              searchable={false}
-              leftIcon="business-outline"
-              iconColor={COLORS.textSecondary}
-              required
+              values={form.companies}
+              onChange={(next) => setCompanies(next)}
+              placeholder="Select companies"
+              icon="business-outline"
+              // Three codes fit, and reading them back beats "2 selected".
+              summary={(labels) => labels.join(", ")}
             />
+            {form.companies.length > 1 ? (
+              <Text style={styles.fieldHint}>
+                SAP users are listed from {form.companies[0]}. Check the user
+                exists in {form.companies.slice(1).join(" and ")} too — each
+                company&apos;s grant is written separately, so one unknown
+                login fails only its own company.
+              </Text>
+            ) : null}
           </Step>
         ) : (
           <View style={styles.field}>
@@ -250,7 +294,9 @@ export default function BackDateRequestForm({ form, setForm, mode }: Props) {
                 size={18}
                 color={COLORS.textSecondary}
               />
-              <Text style={styles.readOnlyValue}>{form.company}</Text>
+              <Text style={styles.readOnlyValue}>
+                {form.companies.join(", ")}
+              </Text>
               <Text style={styles.readOnlyNote}>(cannot change)</Text>
             </View>
             <Text style={styles.fieldHint}>

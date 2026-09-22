@@ -61,7 +61,8 @@ export default function BackDateEditScreen() {
           return;
         }
         setForm({
-          company: request.company,
+          // The stored value is a canonical set; the form holds the list.
+          companies: request.companies,
           sap_username: request.sap_username,
           document_type_name: request.document_type_name,
           actions: splitActions(request.action),

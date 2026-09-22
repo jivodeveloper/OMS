@@ -11,30 +11,44 @@ import { Checkbox, Button } from "react-native-paper";
 import { Ionicons } from "@expo/vector-icons";
 import { COLORS, RADIUS, SPACING } from "@/src/constants/theme";
 
-type Option = {
+/**
+ * GENERIC over the value type, because not every multi-select is over ids.
+ * The user pages pick numeric roles and pages; BackDate picks company CODES
+ * (`"OIL"`), and a string is not a `number` however hard it is cast.
+ */
+type Option<T> = {
   label: string;
-  value: number;
+  value: T;
 };
 
-type Props = {
+type Props<T> = {
   label: string;
-  data: Option[];
-  values: number[];
-  onChange: (values: number[]) => void;
+  data: Option<T>[];
+  values: T[];
+  onChange: (values: T[]) => void;
   placeholder?: string;
   icon?: string;
+  /**
+   * What the closed field says once something is picked.
+   *
+   * Defaults to "N selected", which is right for a long list of ids. A short
+   * list is better read out — "OIL, MART" tells you what you chose without
+   * reopening the dialog.
+   */
+  summary?: (labels: string[]) => string;
 };
 
-export default function MultiSelectDialog({
+export default function MultiSelectDialog<T extends string | number>({
   label,
   data,
   values,
   onChange,
   placeholder = "Select...",
   icon = "list-outline",
-}: Props) {
+  summary,
+}: Props<T>) {
   const [visible, setVisible] = useState(false);
-  const [tempValues, setTempValues] = useState<number[]>(values);
+  const [tempValues, setTempValues] = useState<T[]>(values);
 
   // Helper to determine if all items are selected
   const isAllSelected = data.length > 0 && tempValues.length === data.length;
@@ -50,7 +64,7 @@ export default function MultiSelectDialog({
     }
   };
 
-  const toggleValue = (val: number) => {
+  const toggleValue = (val: T) => {
     if (tempValues.includes(val)) {
       setTempValues(tempValues.filter((v) => v !== val));
     } else {
@@ -73,8 +87,15 @@ export default function MultiSelectDialog({
       <TouchableOpacity style={styles.input} onPress={handleOpen}>
         <View style={styles.row}>
           <Ionicons name={icon as any} size={18} color={COLORS.textSecondary} />
-          <Text style={styles.inputText}>
-            {values.length ? `${values.length} selected` : placeholder}
+          <Text style={styles.inputText} numberOfLines={1}>
+            {values.length === 0
+              ? placeholder
+              : summary
+                ? summary(
+                    data.filter((o) => values.includes(o.value))
+                      .map((o) => o.label),
+                  )
+                : `${values.length} selected`}
           </Text>
           <Ionicons name="chevron-down" size={18} />
         </View>
