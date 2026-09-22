@@ -2,6 +2,7 @@ import { Platform } from 'react-native';
 import { storage } from '../utils/storage';
 import Constants from 'expo-constants';
 import { getGetCacheTtl, getInvalidationPrefixes } from '../cache/policy';
+import { missingTokenReason, refreshFailureReason } from './sessionPolicy';
 import { fetchQuery, invalidateQueries } from '../cache/queryClient';
   
 // Fallback used only when EXPO_PUBLIC_API_BASE_URL is not set at build time.
@@ -309,9 +310,11 @@ const doRefresh = async (): Promise<RefreshResult> => {
   try {
     refresh = await storage.getRefreshToken();
   } catch {
-    refresh = null;
+    // The store THREW. That says nothing about whether the session is good,
+    // so it must not sign anyone out — see `sessionPolicy.ts`.
+    return { ok: false, reason: missingTokenReason('unreadable') };
   }
-  if (!refresh) return { ok: false, reason: 'invalid' };
+  if (!refresh) return { ok: false, reason: missingTokenReason('absent') };
 
   const result = await requestWithFallback('/auth/refresh/', {
     method: 'POST',
@@ -323,11 +326,24 @@ const doRefresh = async (): Promise<RefreshResult> => {
   const newRefresh: string | undefined = result?.refresh;
 
   if (newAccess) {
-    try {
-      // Rotation returns a new refresh token; persist both.
-      await storage.saveTokens(newAccess, newRefresh || refresh);
-    } catch {
-      /* ignore persistence errors */
+    // ROTATION MAKES THIS SAVE LOAD-BEARING. The server issues a new refresh
+    // token and BLACKLISTS the one just used, so a device that fails to store
+    // the new one is holding a token that will be refused at the next refresh
+    // — a logout, minutes or hours later, with nothing in the logs tying it to
+    // here. One retry costs nothing and turns a transient write failure back
+    // into a working session.
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        await storage.saveTokens(newAccess, newRefresh || refresh);
+        break;
+      } catch (error) {
+        if (attempt === 1) {
+          // Out of options. The access token below still works for its own
+          // lifetime, so the user keeps working now; say so loudly rather
+          // than let the eventual sign-out look random.
+          console.log('Failed to persist refreshed tokens:', error);
+        }
+      }
     }
     // Successful (re)authentication — let device registration retry if a prior
     // attempt hadn't succeeded. Fire-and-forget; never affects the refresh.
@@ -339,13 +355,11 @@ const doRefresh = async (): Promise<RefreshResult> => {
     return { ok: true, access: newAccess };
   }
 
-  // requestWithFallback returns `status: 401` (or 400) for a genuine auth
-  // rejection, and NO `status` for network/timeout errors. Only the former
-  // ends the session; everything else keeps the tokens.
-  if (result?.status === 401 || result?.status === 400) {
-    return { ok: false, reason: 'invalid' };
-  }
-  return { ok: false, reason: 'network' };
+  // ONLY a token the server actually refused ends the session. Offline, a
+  // timeout, a restarting server, a rate limit and the force-update block all
+  // keep the tokens. The rule — and the reasoning for each status — lives in
+  // `sessionPolicy.ts`, where it is tested.
+  return { ok: false, reason: refreshFailureReason(result) };
 };
 
 /** Obtain a fresh access token, ensuring only one refresh runs at a time. */

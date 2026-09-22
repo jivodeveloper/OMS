@@ -26,11 +26,19 @@ import InlineOrderDateFilter, {
 } from "@/src/components/common/InlineOrderDateFilter";
 import { COLORS } from "@/src/constants/theme";
 import { fs, ms, sp } from "@/src/utils/responsive";
+import { useRefreshOnFocus } from "@/src/hooks/useRefreshOnFocus";
 import paymentsService, {
   type BankDeposit,
   type Company,
   type PaymentReceipt,
 } from "@/src/services/payments.service";
+import {
+  HOME_FILTER_VALUE,
+  dateFilterForPeriod,
+  optionForLabel,
+  parseStatuses,
+  statusesParam,
+} from "@/src/features/home/cardFilter";
 import { useCompanies } from "./usePaymentMasters";
 import { usePaymentPermissions } from "./usePaymentPermissions";
 import VerificationDateFilter from "./components/VerificationDateFilter";
@@ -431,7 +439,7 @@ export default function PaymentTrackingScreen({
   // A verifier works everyone's entries, not their own — they are forbidden
   // from verifying what they raised — so the queue is never scoped to `mine`.
   const scopedToMine = verification ? false : (mine ?? !canApprove);
-  const statusOptions = verification
+  const baseStatusOptions = verification
     ? VERIFICATION_STATUS_OPTIONS
     : canApprove
       ? APPROVER_STATUS_OPTIONS
@@ -457,27 +465,64 @@ export default function PaymentTrackingScreen({
    * LABEL and the option list resolves it, which keeps the two screens
    * agreeing without the home page needing to know the viewer's role.
    */
-  const { statusLabel } = useLocalSearchParams<{ statusLabel?: string }>();
+  const {
+    statusLabel,
+    statuses: statusesParamIn,
+    month: monthParamIn,
+  } = useLocalSearchParams<{
+    statusLabel?: string;
+    statuses?: string;
+    month?: string;
+  }>();
+
+  /**
+   * The home page's card, as an option of its own.
+   *
+   * It sends the EXACT statuses it counted, because its buckets and this
+   * screen's options are not the same sets — its "Rejected" includes the two
+   * SAP failure states and a posting reversed in SAP, which live here under
+   * "Failed". Translating one into the other is what made a card reading 5
+   * open a list of 1. Filtering on the set it sends makes the two agree by
+   * construction. See `features/home/cardFilter.ts`.
+   *
+   * Scoped like the rest of the list (no `approval_view`), because the home
+   * page counted the same unscoped list this screen reads.
+   */
+  const homeOption = useMemo(() => {
+    const wanted = statusesParam(parseStatuses(statusesParamIn));
+    if (!wanted) return null;
+    return {
+      label: statusLabel || "Selected",
+      value: HOME_FILTER_VALUE,
+      query: `status=${wanted}`,
+    };
+  }, [statusesParamIn, statusLabel]);
+
+  const statusOptions = useMemo(
+    () => (homeOption ? [...baseStatusOptions, homeOption] : baseStatusOptions),
+    [baseStatusOptions, homeOption],
+  );
+
   const appliedStatusLabel = useRef<string | undefined>(undefined);
   useEffect(() => {
-    if (!statusLabel || statusLabel === appliedStatusLabel.current) return;
-    appliedStatusLabel.current = statusLabel;
-    const wanted = statusLabel.toLowerCase();
-    // A creator's list has no "Approved" — their equivalent is "Completed"
-    // (posted to SAP), because a creator has no rung to have approved at.
-    // Falling back keeps the home card meaningful for both roles instead of
-    // silently doing nothing for one of them.
-    const aliases: Record<string, string[]> = {
-      approved: ["approved", "completed"],
-    };
-    const candidates = aliases[wanted] ?? [wanted];
-    const match = candidates
-      .map((name) =>
-        statusOptions.find((o) => o.label.toLowerCase() === name),
-      )
-      .find(Boolean);
-    if (match) setStatusView(match.value);
-  }, [statusLabel, statusOptions]);
+    // One key for the whole hand-off, so re-tapping the SAME card re-applies
+    // it while a user who has since changed the dropdown is left alone.
+    const key = `${statusLabel ?? ""}|${statusesParamIn ?? ""}|${monthParamIn ?? ""}`;
+    if (key === "||" || key === appliedStatusLabel.current) return;
+    appliedStatusLabel.current = key;
+
+    // An exact status set wins: it is what the card counted.
+    if (homeOption) setStatusView(homeOption.value);
+    else {
+      const match = optionForLabel(statusLabel, statusOptions);
+      if (match) setStatusView(match.value);
+    }
+
+    // The card counted ONE month. Without this the list opened on every
+    // month, so the filter matched and the count still looked wrong.
+    const period = dateFilterForPeriod(monthParamIn);
+    if (period) setDateFilter(period as DateFilterValue);
+  }, [statusLabel, statusesParamIn, monthParamIn, homeOption, statusOptions]);
   const [searchQuery, setSearchQuery] = useState("");
   const [companyFilter, setCompanyFilter] = useState<Company | "">("");
   const [dateFilter, setDateFilter] = useState<DateFilterValue>(null);
@@ -512,6 +557,16 @@ export default function PaymentTrackingScreen({
           const [key, value] = pair.split("=");
           if (key && value) params[key] = value;
         }
+        // NEWEST FIRST, BY SERIAL. The server's default is `-payment_date,
+        // -id` — the date a user TYPES — so an entry raised today for last
+        // week's date sorted below one raised a week ago, and under "All" the
+        // rows were grouped by status and appeared to move up and down. `-id`
+        // is the serial it was created with, which always means latest first.
+        //
+        // Asked of the SERVER, not sorted here: the list is paginated, so a
+        // client-side sort would reorder one page of 25 while the server chose
+        // which 25 those were.
+        params.ordering = "-id";
         if (companyFilter) params.company = companyFilter;
         if (scopedToMine) params.mine = "true";
         // Verification asks its period dropdown; every other view keeps the
@@ -563,16 +618,7 @@ export default function PaymentTrackingScreen({
    * worked. Skipped on the very first focus, since the mount effect above has
    * already fetched.
    */
-  const hasFocusedOnce = useRef(false);
-  useFocusEffect(
-    useCallback(() => {
-      if (!hasFocusedOnce.current) {
-        hasFocusedOnce.current = true;
-        return;
-      }
-      void load("refresh");
-    }, [load]),
-  );
+  useRefreshOnFocus(() => load("refresh"));
 
   /**
    * An explicit refetch signal from a screen that just changed the data.

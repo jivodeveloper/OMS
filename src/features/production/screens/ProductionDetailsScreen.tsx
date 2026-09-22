@@ -1,6 +1,8 @@
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { router, useLocalSearchParams } from "expo-router";
+
+import { useRefreshOnFocus } from "@/src/hooks/useRefreshOnFocus";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -130,6 +132,10 @@ export default function ProductionDetailsScreen() {
   useEffect(() => {
     load();
   }, [load]);
+
+  // Reloads as a pull-to-refresh rather than a blank page: returning must re-read the order — otherwise a decision just made still
+  // shows its Approve and Reject buttons.
+  useRefreshOnFocus(() => load(true));
 
   const submit = async (which: ApprovalDecision, remarks: string) => {
     if (inFlight.current) return;

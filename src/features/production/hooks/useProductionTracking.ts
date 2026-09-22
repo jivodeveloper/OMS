@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { DateFilterValue } from "@/src/components/common/InlineOrderDateFilter";
 import { can } from "@/src/constants/permissions";
 import { useAuth } from "@/src/context/AuthContext";
+import { useRefreshOnFocus } from "@/src/hooks/useRefreshOnFocus";
 import productionService, {
   type ProductionOrder,
 } from "@/src/services/production.service";
@@ -221,6 +222,11 @@ export function useProductionTracking() {
   useEffect(() => {
     load();
   }, [load]);
+
+  // Returning from a details page where something was approved,
+  // rejected or edited. Refreshes in place — the rows stay visible and
+  // only the pull-to-refresh spinner shows.
+  useRefreshOnFocus(() => load(true));
 
   return {
     rows,

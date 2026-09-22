@@ -19,6 +19,7 @@ import paymentsService, {
   type StatusHistoryRow,
 } from "@/src/services/payments.service";
 import type { TrackingKind } from "./PaymentTrackingScreen";
+import { useRefreshOnFocus } from "@/src/hooks/useRefreshOnFocus";
 
 /**
  * Approval timeline for one payment or deposit.
@@ -243,6 +244,11 @@ export default function TrackingProgressScreen() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // Coming back after approving or rejecting on the details page: the ladder
+  // and the SAP card both change, and neither remounts. `load` shows no
+  // spinner of its own, so the timeline simply updates in place.
+  useRefreshOnFocus(load);
 
   const onRefresh = () => {
     setRefreshing(true);

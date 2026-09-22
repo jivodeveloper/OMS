@@ -21,6 +21,10 @@ interface Props {
  * happens next: the screen only navigates when the user has acknowledged the
  * request number, which is the one thing they need to find it again.
  *
+ * The button names its destination — the tracking list, as the body already
+ * promised. It read "View request" while going somewhere else, which is the
+ * kind of small lie that teaches people not to read dialogs.
+ *
  * Deliberately not dismissable by backdrop — there is exactly one thing to do.
  */
 export default function BackDateSuccessDialog({
@@ -47,7 +51,7 @@ export default function BackDateSuccessDialog({
       </View>
 
       <DialogFooter
-        confirmLabel="View request"
+        confirmLabel="Go to Tracking"
         onConfirm={onDone}
         accent={COLORS.success}
       />

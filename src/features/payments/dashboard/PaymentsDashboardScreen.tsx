@@ -1,4 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+
+import { useRefreshOnFocus } from "@/src/hooks/useRefreshOnFocus";
 import {
   ActivityIndicator,
   FlatList,
@@ -312,6 +314,12 @@ export default function PaymentsDashboardScreen() {
     setLoading(true);
     load().finally(() => setLoading(false));
   }, [load]);
+
+  // Totals move whenever anybody approves, verifies or banks something,
+  // so a dashboard left open behind other screens goes stale quickly.
+  // Quiet on purpose: `load` alone leaves the figures on screen while they
+  // are re-read, rather than blanking the page to a spinner.
+  useRefreshOnFocus(load);
 
   const loadMore = useCallback(async () => {
     if (loadingMore || !hasMore || loading) return;

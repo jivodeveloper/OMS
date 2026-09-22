@@ -21,9 +21,11 @@ import { useAuth } from "@/src/context/AuthContext";
 import {
   MY_ORDERS_SCREEN,
   ORDER_APPROVAL_SCREENS,
+  canAccessScreen,
   isOrderCreatorApprover,
   resolveWorkQueueRoute,
 } from "@/src/constants/pages";
+import { routeIsOnHomeModule } from "@/src/features/home/moduleHome";
 import { COLORS } from "@/src/constants/theme";
 import { orderService } from "@/src/services/order.service";
 import { storage } from "@/src/utils/storage";
@@ -176,6 +178,18 @@ export default function CustomDrawer(props: DrawerContentComponentProps) {
   const footerTrackingScreen = resolveWorkQueueRoute(user).screen;
   const showOrderListsInDrawer = isOrderCreatorApprover(user);
 
+  /**
+   * Routes belonging to the module the user is already homed on.
+   *
+   * The dashboard IS that module — its recent list, its counts, its create
+   * button — so listing the same module again below it is an entry pointing
+   * at the page you are looking at. A single-module user therefore gets no
+   * module entries at all; a multi-module user gets only the modules they are
+   * NOT homed on. Same question `dashboard.tsx` asks, so the two agree.
+   */
+  const onHomeModule = (routeName: string) =>
+    routeIsOnHomeModule(routeName, (screen) => canAccessScreen(screen, user));
+
   // Only render routes that are visible for this role (the navigator hides the
   // rest via `drawerItemStyle: { display: 'none' }`) and that expose an icon.
   const visibleItems = props.state.routes
@@ -192,6 +206,8 @@ export default function CustomDrawer(props: DrawerContentComponentProps) {
         (showOrderListsInDrawer || !ORDER_LIST_ROUTES.has(route.name)) &&
         // ...and the one tracking screen the footer's second tab reaches.
         route.name !== footerTrackingScreen &&
+        // The module the dashboard is already showing.
+        !onHomeModule(route.name) &&
         (options.drawerItemStyle as any)?.display !== "none" &&
         !!options.drawerIcon,
     );
@@ -283,7 +299,24 @@ export default function CustomDrawer(props: DrawerContentComponentProps) {
             index > 0 ? GROUP[visibleItems[index - 1].route.name] ?? 0 : group;
           const showDivider = index > 0 && group !== prevGroup;
           const focused = route.name === focusedRouteName;
-          const label = (options.title as string) ?? route.name;
+          // `drawerLabel` FIRST, `title` only as a fallback.
+          //
+          // They are different jobs. `title` is the screen HEADER, where
+          // "Sap Party Product Assignment" reads fine across the full width;
+          // the drawer row is icon + text in a narrow panel, where the same
+          // string truncates to "Sap Party Product…" and every long item ends
+          // in the same ellipsis. A screen only needs `drawerLabel` when its
+          // title is too long to fit — see `app/(main)/_layout.tsx`.
+          //
+          // Only a STRING counts. React Navigation also allows a render
+          // function there, and this drawer renders its own rows — handing a
+          // function to <Text> would render nothing useful.
+          const label =
+            (typeof options.drawerLabel === "string"
+              ? options.drawerLabel
+              : undefined) ??
+            (options.title as string) ??
+            route.name;
           const badge =
             route.name === "notifications" && unreadCount > 0
               ? unreadCount
@@ -653,7 +686,10 @@ const styles = StyleSheet.create({
   },
   itemLabel: {
     flex: 1,
-    fontSize: 15,
+    // `fs()`, not a fixed 15: the drawer is a fraction of the screen width, so
+    // on a small phone a hardcoded size truncates labels that fit everywhere
+    // else. Slightly smaller as well — a menu row is scanned, not read.
+    fontSize: fs(14),
     fontWeight: "600",
     color: "#1F2937",
   },

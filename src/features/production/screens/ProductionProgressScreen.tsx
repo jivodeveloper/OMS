@@ -1,5 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams } from "expo-router";
+
+import { useRefreshOnFocus } from "@/src/hooks/useRefreshOnFocus";
 import React, { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
@@ -153,6 +155,10 @@ export default function ProductionProgressScreen() {
   useEffect(() => {
     load();
   }, [load]);
+
+  // Reloads as a pull-to-refresh rather than a blank page: the rail and the SAP outcome both change when a decision is made
+  // elsewhere, and this screen does not remount on the way back.
+  useRefreshOnFocus(() => load(true));
 
   if (loading) {
     return (

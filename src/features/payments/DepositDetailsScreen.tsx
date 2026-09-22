@@ -13,6 +13,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { useIsFocused } from "@react-navigation/native";
+import { useRefreshOnFocus } from "@/src/hooks/useRefreshOnFocus";
 
 import { setHeaderEditHandler } from "@/src/utils/headerEdit";
 import ApprovalBottomBar from "@/src/features/approval/components/ApprovalBottomBar";
@@ -171,6 +172,11 @@ export default function DepositDetailsScreen() {
   useEffect(() => {
     void load();
   }, [load, refreshAt]);
+
+  // Returning by the back button, or from the progress screen after a
+  // decision. The `refreshAt` param above only covers callers that remember
+  // to send it; this covers every other way back in.
+  useRefreshOnFocus(() => load("refresh"));
 
   /** Post the decision and re-read the deposit; `handleDone` decides where next. */
   const act = useCallback(

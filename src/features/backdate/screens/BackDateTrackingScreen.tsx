@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
-import { router } from "expo-router";
-import React, { useCallback, useState } from "react";
+import { router, useLocalSearchParams } from "expo-router";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
@@ -16,8 +16,14 @@ import {
 } from "react-native";
 
 import Dropdown from "@/src/components/common/DropdownProps";
-import InlineOrderDateFilter from "@/src/components/common/InlineOrderDateFilter";
+import InlineOrderDateFilter, {
+  type DateFilterValue,
+} from "@/src/components/common/InlineOrderDateFilter";
 import { COLORS } from "@/src/constants/theme";
+import {
+  dateFilterForPeriod,
+  optionForLabel,
+} from "@/src/features/home/cardFilter";
 import {
   BACKDATE_COMPANIES,
   type BackDateRequest,
@@ -62,6 +68,34 @@ export default function BackDateTrackingScreen() {
     reload,
     canApprove,
   } = useBackDateTracking();
+
+  /**
+   * Preselect what the home page's card counted.
+   *
+   * The card sends a LABEL, because this list's options and the home page's
+   * buckets are the same thing here — one flow status each — so resolving the
+   * label keeps the dropdown showing a name rather than a raw status. It also
+   * sends the MONTH it counted: without applying it, a card reading "Pending
+   * 2" opened a list of every month's pending requests and the count looked wrong
+   * even though the filter was right.
+   */
+  const { statusLabel, month } = useLocalSearchParams<{
+    statusLabel?: string;
+    month?: string;
+  }>();
+  const applied = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    const key = `${statusLabel ?? ""}|${month ?? ""}`;
+    if (key === "|" || key === applied.current) return;
+    applied.current = key;
+    // No alias list: these options carry both "Approved" and "Completed" and
+    // mean different things by them, so an unmatched label must leave the
+    // dropdown alone rather than guess.
+    const match = optionForLabel(statusLabel, STATUS_OPTIONS, {});
+    if (match) setStatus(match.value);
+    const period = dateFilterForPeriod(month);
+    if (period) setDateFilter(period as DateFilterValue);
+  }, [statusLabel, month, setStatus, setDateFilter]);
 
   const [filterOpen, setFilterOpen] = useState(false);
 

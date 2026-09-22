@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { useRefreshOnFocus } from "@/src/hooks/useRefreshOnFocus";
+
 import paymentsService, {
   type StatusHistoryRow,
   type PaymentReceipt,
@@ -408,6 +410,11 @@ export function useApprovalDetails(
       alive.current = false;
     };
   }, [load]);
+
+  // Returning to an approval after acting on it elsewhere — verifying it,
+  // retrying a SAP post, or opening its progress screen. Refreshes in place
+  // so the decision buttons reflect what the server now allows.
+  useRefreshOnFocus(() => load("refresh"));
 
   const onRefresh = useCallback(() => void load("refresh"), [load]);
   const clearError = useCallback(() => setError(null), []);

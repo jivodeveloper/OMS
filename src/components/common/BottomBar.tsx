@@ -13,7 +13,7 @@ import {
 } from "@/src/constants/pages";
 import { useDrawerOpen } from "@/src/utils/drawerState";
 
-type TabKey = "home" | "orders" | "create" | "reports" | "profile";
+import { activeTabFor, type TabKey } from "./bottomTab";
 
 // Each role's own "orders" destination now lives in constants/pages.ts, so the
 // Orders tab and the post-create "Go to Orders" action resolve it identically.
@@ -40,9 +40,10 @@ export default function BottomBar({
   const [createSheetOpen, setCreateSheetOpen] = useState(false);
 
   // The second tab adapts to what the user actually has, in priority order:
-  // Orders, then Payments, Deposits, Verify. Labelling it "Orders" for a
-  // payments-only user sent them somewhere they cannot open. It always
-  // resolves to something, so the bar keeps five icons for every account.
+  // Orders, then Payments, Verify, Deposits, Production, BackDate. Labelling
+  // it "Orders" for a payments-only user sent them somewhere they cannot
+  // open. It always resolves to something, so the bar keeps five icons for
+  // every account.
   const workQueue = resolveWorkQueueRoute(user);
 
   // Everything this user may create. None hides the button; one opens directly;
@@ -54,39 +55,17 @@ export default function BottomBar({
   // tab shows the permission dialog instead of navigating somewhere refused.
   const reports = resolveReportsRoute(user);
 
-  // Highlight the tab that matches the current route (so the global bar shows
-  // the right active tab on every screen). An explicit `active` prop wins.
-  const activeTab: TabKey = useMemo(() => {
-    if (active) return active;
-    const p = (pathname || "").toLowerCase();
-    if (p.includes("create")) return "create";
-    if (p.includes("profile")) return "profile";
-    if (p.includes("report")) return "reports";
-    // Checked BEFORE the generic /payments/ match below, which would otherwise
-    // light the work-queue tab while the user is looking at analytics.
-    if (p.includes("/payments/dashboard")) return "reports";
-    if (
-      p.includes("orderlist") ||
-      p.includes("ordertracking") ||
-      p.includes("pending_approval") ||
-      p.includes("auditorapproval") ||
-      p.includes("orderdetails") ||
-      p.includes("orderprogress")
-    )
-      return "orders";
-    // The second tab is not always Orders — for a payments user it resolves to
-    // Payments or Deposits (see resolveWorkQueueRoute). Those routes were not
-    // matched here, so every payment screen fell through to "home" and lit the
-    // wrong tab. Matching the whole section keeps the bar honest wherever the
-    // tab happens to point.
-    if (p.includes("/payments/") || p.includes("/approval/")) return "orders";
-    return "home";
-  }, [active, pathname]);
-
-  // The work-queue tab is now always present, so "orders" can always be the
-  // highlighted tab — the guard that redirected to "home" when it was absent
-  // is no longer needed.
-  const resolvedActiveTab: TabKey = activeTab;
+  // Highlight the tab that matches the current route, so the global bar shows
+  // the right active tab on every screen. An explicit `active` prop wins.
+  //
+  // The rule itself lives in `bottomTab.ts`, free of React so it can be
+  // tested: it used to be a list of route fragments here with a fallthrough to
+  // "home", which lit HOME on Production Tracking — and would do the same for
+  // the next module added.
+  const resolvedActiveTab: TabKey | null = useMemo(
+    () => active ?? activeTabFor(pathname),
+    [active, pathname],
+  );
 
   // Hide the footer while the sidebar is open (the drawer covers the screen),
   // then show it again on close. All hooks above run unconditionally.
@@ -133,11 +112,11 @@ export default function BottomBar({
           router.navigate("/(main)/dashboard" as never);
       },
     },
-    // Orders / Payments / Deposits / Verify, in that priority order. ALWAYS
-    // rendered: resolveWorkQueueRoute never returns null, so the bar keeps the
-    // same five icons for every user and never reflows between accounts.
-    // `guarded` re-checks access on tap, so a user holding none of the four
-    // sees the tab and gets the "no permission" dialog instead of navigating.
+    // The user's own work queue, whichever module that is. ALWAYS rendered:
+    // resolveWorkQueueRoute never returns null, so the bar keeps the same five
+    // icons for every user and never reflows between accounts. `guarded`
+    // re-checks access on tap, so a user holding none of them sees the tab and
+    // gets the "no permission" dialog instead of navigating.
     {
       key: "orders" as TabKey,
       label: workQueue.label,

@@ -144,13 +144,20 @@ export default function BackDateCreateScreen() {
         visible={created !== null}
         requestNo={created !== null ? `#${created}` : ""}
         onDone={() => {
-          const id = created;
           setCreated(null);
           setForm(emptyForm());
-          router.replace({
-            pathname: "/(main)/backdate/tracking-details",
-            params: { id: String(id), from: "backdate/create" },
-          } as never);
+          // THE TRACKING LIST, which is where a create lands everywhere else
+          // in the app — a payment goes to payment tracking, a deposit to
+          // deposit tracking, and only an EDIT goes to the one document it
+          // changed. This screen used to open the new request's details page
+          // instead, which left the user a level deeper than the equivalent
+          // flow beside it and with no sight of the queue they just joined.
+          //
+          // replace(), so Back does not return to a form already submitted.
+          // No refresh param is needed: the list refetches on focus (see
+          // `hooks/useRefreshOnFocus`), so the new request is there whether
+          // the screen was already mounted or not.
+          router.replace("/(main)/backdate/tracking" as never);
         }}
       />
     </View>

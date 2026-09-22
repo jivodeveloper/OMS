@@ -11,6 +11,8 @@ import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { useLocalSearchParams } from "expo-router";
 
+import { useRefreshOnFocus } from "@/src/hooks/useRefreshOnFocus";
+
 import { COLORS } from "@/src/constants/theme";
 import { fs, sp } from "@/src/utils/responsive";
 import paymentsService, {
@@ -104,13 +106,18 @@ export default function TrackingDetailsScreen() {
   // ReceiptViewerModal (with its own Download button). Only for a POSTED payment.
   const [receiptOpen, setReceiptOpen] = useState(false);
 
-  const load = useCallback(async () => {
+  /**
+   * @param quiet re-read without the full-page spinner. The data is already
+   *              on screen when returning from an action, and blanking it to
+   *              a spinner on every return makes going back feel broken.
+   */
+  const load = useCallback(async (quiet = false) => {
     if (!Number.isFinite(id)) {
       setError("Missing document reference.");
       setLoading(false);
       return;
     }
-    setLoading(true);
+    if (!quiet) setLoading(true);
     setError("");
     try {
       if (isPayment) {
@@ -137,6 +144,11 @@ export default function TrackingDetailsScreen() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // The action that changes this document happens on the progress screen, so
+  // returning here must re-read it — otherwise a posted receipt still shows
+  // the status it had before.
+  useRefreshOnFocus(() => load(true));
 
   if (loading) {
     return (

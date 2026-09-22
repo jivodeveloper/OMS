@@ -21,8 +21,8 @@ import { storage } from "@/src/utils/storage";
 import {
   canAccessScreen,
   orderScreenTitle,
-  isPaymentsOnlyUser,
 } from "@/src/constants/pages";
+import { homeModuleFor } from "@/src/features/home/moduleHome";
 import {
   getNotificationDedupeKey,
   originScreenForRole,
@@ -282,35 +282,20 @@ export default function MainLayout() {
 
   const hiddenStyle = { display: "none" as const };
 
-  const renderDrawerLabel = (label: string, color: string) => (
-    <Text
-      style={{
-        color,
-        fontSize: 15,
-        fontWeight: "600",
-        lineHeight: 20,
-        flexShrink: 1,
-      }}
-    >
-      {label}
-    </Text>
-  );
-
   // Single source of truth for the header bell and the drawer's Notifications
   // item, so the two can never disagree.
   const canSeeNotifications = canAccessScreen("notifications", user);
 
-  // Mirrors what dashboard.tsx renders, so the header and the page agree.
-  const paymentsOnlyHome = isPaymentsOnlyUser(user);
-  // Same choice dashboard.tsx makes: anyone holding payments sees the payments
-  // home, everyone else on this branch is a deposits user. The header has to
-  // follow, or a deposits user reads "Payments Dashboard" above deposit data.
-  // Must match dashboard.tsx exactly, or a verifier reads "Deposits" above
-  // payments data. Verification counts as payment work on both sides.
-  const homeIsDeposits =
-    paymentsOnlyHome &&
-    !canAccessScreen("payments/payment-tracking", user) &&
-    !canAccessScreen("payments/verification", user);
+  // Which module home dashboard.tsx will render. Asked the SAME way it asks,
+  // so the header can never disagree with the page under it — a deposits user
+  // reading "Payments Dashboard" above deposit data was exactly that bug.
+  const homeModule = homeModuleFor((screen) => canAccessScreen(screen, user));
+  // Orders (and holding no module at all) keeps the plain sales dashboard, so
+  // it keeps the plain title.
+  const homeTitle =
+    homeModule && homeModule.key !== "orders"
+      ? `${homeModule.label} Dashboard`
+      : "Dashboard";
 
   /**
    * Whether a screen appears in the sidebar.
@@ -514,14 +499,10 @@ export default function MainLayout() {
         <Drawer.Screen
           name="dashboard"
           options={{
-            drawerLabel: ({ color }) => renderDrawerLabel("Dashboard", color),
-            // A payments-only user's home IS the payments dashboard — calling
+            drawerLabel: "Dashboard",
+            // A non-orders user's home IS their module's dashboard — calling
             // it "Dashboard" suggested the sales one they cannot open.
-            title: homeIsDeposits
-              ? "Deposits Dashboard"
-              : paymentsOnlyHome
-                ? "Payments Dashboard"
-                : "Dashboard",
+            title: homeTitle,
             drawerIcon: ({ color }) => (
               <Ionicons name="grid-outline" size={22} color={color} />
             ),
@@ -540,7 +521,7 @@ export default function MainLayout() {
         <Drawer.Screen
           name="notifications"
           options={{
-            drawerLabel: ({ color }) => renderDrawerLabel("Notifications", color),
+            drawerLabel: "Notifications",
             title: "Notifications",
             drawerIcon: ({ color }) => (
               <Ionicons name="notifications-outline" size={22} color={color} />
@@ -551,7 +532,7 @@ export default function MainLayout() {
         <Drawer.Screen
           name="orders/create"
           options={{
-            drawerLabel: ({ color }) => renderDrawerLabel("Create Order", color),
+            drawerLabel: "Create Order",
             title: "Create Order",
             drawerIcon: ({ color }) => (
               <Ionicons name="add-circle-outline" size={22} color={color} />
@@ -576,7 +557,7 @@ export default function MainLayout() {
         <Drawer.Screen
           name="orders/drafts"
           options={{
-            drawerLabel: ({ color }) => renderDrawerLabel("Drafts", color),
+            drawerLabel: "Drafts",
             title: "Drafts",
             drawerIcon: ({ color }) => (
               <Ionicons name="document-text-outline" size={22} color={color} />
@@ -589,7 +570,7 @@ export default function MainLayout() {
         <Drawer.Screen
           name="orders/foc"
           options={{
-            drawerLabel: ({ color }) => renderDrawerLabel("FOC", color),
+            drawerLabel: "FOC",
             title: "FOC",
             drawerIcon: ({ color }) => (
               <Ionicons name="bag-add-outline" size={22} color={color} />
@@ -600,7 +581,7 @@ export default function MainLayout() {
         <Drawer.Screen
           name="orders/orderlist"
           options={{
-            drawerLabel: ({ color }) => renderDrawerLabel(orderTitle("orders/orderlist", "Order List"), color),
+            drawerLabel: orderTitle("orders/orderlist", "Order List"),
             title: orderTitle("orders/orderlist", "Order List"),
             drawerIcon: ({ color }) => (
               <Ionicons name="document-text-outline" size={22} color={color} />
@@ -613,9 +594,8 @@ export default function MainLayout() {
         <Drawer.Screen
           name="payments/receive-payment"
           options={{
-            drawerLabel: ({ color }) =>
-              renderDrawerLabel("Receive Payment", color),
             title: "Receive Payment",
+            drawerLabel: "New Payment",
             drawerIcon: ({ color }) => (
               <Ionicons name="wallet-outline" size={22} color={color} />
             ),
@@ -642,7 +622,7 @@ export default function MainLayout() {
         <Drawer.Screen
           name="payments/bank-deposit"
           options={{
-            drawerLabel: ({ color }) => renderDrawerLabel("Bank Deposit", color),
+            drawerLabel: "Bank Deposit",
             title: "Bank Deposit",
             drawerIcon: ({ color }) => (
               <Ionicons name="business-outline" size={22} color={color} />
@@ -655,9 +635,8 @@ export default function MainLayout() {
         <Drawer.Screen
           name="payments/dashboard"
           options={{
-            drawerLabel: ({ color }) =>
-              renderDrawerLabel("Payments Dashboard", color),
             title: "Payments Dashboard",
+            drawerLabel: "Dashboard",
             drawerIcon: ({ color }) => (
               <Ionicons name="pie-chart-outline" size={22} color={color} />
             ),
@@ -677,9 +656,8 @@ export default function MainLayout() {
         <Drawer.Screen
           name="payments/payment-tracking"
           options={{
-            drawerLabel: ({ color }) =>
-              renderDrawerLabel("Payment Tracking", color),
             title: "Payment Tracking",
+            drawerLabel: "Payments",
             drawerIcon: ({ color }) => (
               <Ionicons name="trail-sign-outline" size={22} color={color} />
             ),
@@ -691,9 +669,8 @@ export default function MainLayout() {
         <Drawer.Screen
           name="payments/verification"
           options={{
-            drawerLabel: ({ color }) =>
-              renderDrawerLabel("Verify Payments", color),
             title: "Verify Payments",
+            drawerLabel: "Verify",
             drawerIcon: ({ color }) => (
               <Ionicons name="shield-checkmark-outline" size={22} color={color} />
             ),
@@ -705,9 +682,8 @@ export default function MainLayout() {
         <Drawer.Screen
           name="payments/deposit-tracking"
           options={{
-            drawerLabel: ({ color }) =>
-              renderDrawerLabel("Deposit Tracking", color),
             title: "Deposit Tracking",
+            drawerLabel: "Deposits",
             drawerIcon: ({ color }) => (
               <Ionicons name="analytics-outline" size={22} color={color} />
             ),
@@ -744,9 +720,8 @@ export default function MainLayout() {
         <Drawer.Screen
           name="backdate/create"
           options={{
-            drawerLabel: ({ color }) =>
-              renderDrawerLabel("BackDate Request", color),
             title: "BackDate Request",
+            drawerLabel: "New BackDate",
             drawerIcon: ({ color }) => (
               <Ionicons name="time-outline" size={22} color={color} />
             ),
@@ -758,9 +733,8 @@ export default function MainLayout() {
         <Drawer.Screen
           name="backdate/tracking"
           options={{
-            drawerLabel: ({ color }) =>
-              renderDrawerLabel("BackDate Tracking", color),
             title: "BackDate Tracking",
+            drawerLabel: "BackDate",
             drawerIcon: ({ color }) => (
               <Ionicons name="reader-outline" size={22} color={color} />
             ),
@@ -799,9 +773,8 @@ export default function MainLayout() {
         <Drawer.Screen
           name="production/tracking"
           options={{
-            drawerLabel: ({ color }) =>
-              renderDrawerLabel("Production Orders", color),
             title: "Production Orders",
+            drawerLabel: "Production",
             drawerIcon: ({ color }) => (
               <Ionicons name="cube-outline" size={22} color={color} />
             ),
@@ -828,7 +801,7 @@ export default function MainLayout() {
         <Drawer.Screen
           name="reports/daily-report"
           options={{
-            drawerLabel: ({ color }) => renderDrawerLabel("Daily Report", color),
+            drawerLabel: "Daily Report",
             title: "Daily Report",
             drawerIcon: ({ color }) => (
               <Ionicons name="bar-chart-outline" size={22} color={color} />
@@ -841,7 +814,7 @@ export default function MainLayout() {
         <Drawer.Screen
           name="admin/order-flow"
           options={{
-            drawerLabel: ({ color }) => renderDrawerLabel("Order Flow", color),
+            drawerLabel: "Order Flow",
             title: "Order Flow",
             drawerIcon: ({ color }) => (
               <Ionicons name="git-branch-outline" size={22} color={color} />
@@ -854,8 +827,8 @@ export default function MainLayout() {
         <Drawer.Screen
           name="admin/sales-quotation"
           options={{
-            drawerLabel: ({ color }) => renderDrawerLabel("Sales Quotation", color),
             title: "Sales Quotation",
+            drawerLabel: "Quotations",
             drawerIcon: ({ color }) => (
               <Ionicons name="receipt-outline" size={22} color={color} />
             ),
@@ -867,7 +840,7 @@ export default function MainLayout() {
         <Drawer.Screen
           name="users/create"
           options={{
-            drawerLabel: ({ color }) => renderDrawerLabel("Create User", color),
+            drawerLabel: "Create User",
             title: "Create User",
             drawerIcon: ({ color }) => (
               <Ionicons name="person-add-outline" size={22} color={color} />
@@ -880,7 +853,7 @@ export default function MainLayout() {
         <Drawer.Screen
           name="users/allUsers"
           options={{
-            drawerLabel: ({ color }) => renderDrawerLabel("All Users", color),
+            drawerLabel: "All Users",
             title: "All Users",
             drawerIcon: ({ color }) => (
               <Ionicons name="people-outline" size={22} color={color} />
@@ -893,8 +866,8 @@ export default function MainLayout() {
         <Drawer.Screen
           name="users/pagePermissions"
           options={{
-            drawerLabel: ({ color }) => renderDrawerLabel("Page Permissions", color),
             title: "Page Permissions",
+            drawerLabel: "Permissions",
             drawerIcon: ({ color }) => (
               <Ionicons name="shield-checkmark-outline" size={22} color={color} />
             ),
@@ -906,7 +879,7 @@ export default function MainLayout() {
         <Drawer.Screen
           name="users/addScheme"
           options={{
-            drawerLabel: ({ color }) => renderDrawerLabel("Add Scheme", color),
+            drawerLabel: "Add Scheme",
             title: "All Schemes",
             drawerIcon: ({ color }) => (
               <Ionicons name="pricetag-outline" size={22} color={color} />
@@ -926,7 +899,7 @@ export default function MainLayout() {
         <Drawer.Screen
           name="sap/sap-sync"
           options={{
-            drawerLabel: ({ color }) => renderDrawerLabel("Sap Sync", color),
+            drawerLabel: "Sap Sync",
             title: "Sap Sync",
             drawerIcon: ({ color }) => (
               <Ionicons name="sync-outline" size={22} color={color} />
@@ -939,9 +912,8 @@ export default function MainLayout() {
         <Drawer.Screen
           name="sap/party-assignment"
           options={{
-            drawerLabel: ({ color }) =>
-              renderDrawerLabel("Sap Party Assignment", color),
             title: "Sap Party Assignment",
+            drawerLabel: "Party Assignment",
             drawerIcon: ({ color }) => (
               <Ionicons name="business-outline" size={22} color={color} />
             ),
@@ -953,9 +925,8 @@ export default function MainLayout() {
         <Drawer.Screen
           name="sap/party-product-assignment"
           options={{
-            drawerLabel: ({ color }) =>
-              renderDrawerLabel("Sap Party Product Assignment", color),
             title: "Sap Party Product Assignment",
+            drawerLabel: "Party Products",
             drawerIcon: ({ color }) => (
               <Ionicons name="cube-outline" size={22} color={color} />
             ),
@@ -987,7 +958,7 @@ export default function MainLayout() {
         <Drawer.Screen
           name="orders/ordertracking"
           options={{
-            drawerLabel: ({ color }) => renderDrawerLabel(orderTitle("orders/ordertracking", "Order Tracking"), color),
+            drawerLabel: orderTitle("orders/ordertracking", "Order Tracking"),
             title: orderTitle("orders/ordertracking", "Order Tracking"),
             drawerIcon: ({ color }) => (
               <Ionicons name="locate-outline" size={22} color={color} />
@@ -1000,8 +971,7 @@ export default function MainLayout() {
         <Drawer.Screen
           name="approver/pending_approval"
           options={{
-            drawerLabel: ({ color }) =>
-              renderDrawerLabel(orderTitle("approver/pending_approval", "Pending Approvals"), color),
+            drawerLabel: orderTitle("approver/pending_approval", "Pending Approvals"),
             title: orderTitle("approver/pending_approval", "Pending Approvals"),
             drawerIcon: ({ color }) => (
               <Ionicons name="checkmark-done-outline" size={22} color={color} />
@@ -1014,8 +984,7 @@ export default function MainLayout() {
         <Drawer.Screen
           name="orders/auditorapproval"
           options={{
-            drawerLabel: ({ color }) =>
-              renderDrawerLabel(orderTitle("orders/auditorapproval", "Auditor Approvals"), color),
+            drawerLabel: orderTitle("orders/auditorapproval", "Auditor Approvals"),
             title: orderTitle("orders/auditorapproval", "Auditor Approvals"),
             drawerIcon: ({ color }) => (
               <Ionicons name="checkmark-done-outline" size={22} color={color} />

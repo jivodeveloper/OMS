@@ -1,4 +1,6 @@
 import React, { useCallback, useEffect, useState } from "react";
+
+import { useRefreshOnFocus } from "@/src/hooks/useRefreshOnFocus";
 import {
   ActivityIndicator,
   Pressable,
@@ -152,6 +154,11 @@ export default function PersonDetailScreen() {
     setLoading(true);
     load().finally(() => setLoading(false));
   }, [load]);
+
+  // One person's figures change the moment their entries are acted on.
+  // Quiet on purpose: `load` alone leaves the figures on screen while they
+  // are re-read, rather than blanking the page to a spinner.
+  useRefreshOnFocus(load);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);

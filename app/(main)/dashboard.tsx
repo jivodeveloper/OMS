@@ -30,11 +30,11 @@ import StatewiseBarChart from "@/src/components/dashboard/StateWiseBarChart";
 import AnimatedCard from "@/src/components/dashboard/AnimatedCard";
 import AnimatedNumber from "@/src/components/dashboard/AnimatedNumber";
 import StateWrapper from "@/src/components/common/StateWrapper";
-import {
-  canAccessScreen,
-  isPaymentsOnlyUser,
-} from "@/src/constants/pages";
+import { canAccessScreen } from "@/src/constants/pages";
 import PaymentHomeScreen from "@/src/features/payments/PaymentHomeScreen";
+import ModuleHomeScreen from "@/src/features/home/ModuleHomeScreen";
+import { backdateHome, productionHome } from "@/src/features/home/moduleConfigs";
+import { homeModuleFor } from "@/src/features/home/moduleHome";
 import { refreshLiveData } from "@/src/cache";
 import { fs, ms, sp } from "@/src/utils/responsive";
 import {
@@ -132,28 +132,36 @@ export default function DashboardScreen() {
   const { user } = useAuth();
 
   /**
-   * A payments-only user gets the payments home HERE, as the dashboard.
+   * WHICH HOME THIS USER GETS.
    *
    * The rest of this screen is the sales dashboard: it fetches order metrics
-   * and renders order charts, none of which such a user can even open. Showing
-   * it meant their home page was a wall of empty sales figures. Returning
-   * early keeps that whole path untouched for everyone who does hold orders.
+   * and renders order charts, none of which a non-orders user can even open.
+   * Showing it meant a verifier's or a production approver's home page was a
+   * wall of empty sales figures.
+   *
+   * The choice is the ranked table in `moduleHome.ts` — Orders, Payments,
+   * Deposits, Production, BackDate — not a chain of `isXOnlyUser` checks.
+   * Adding a module is one entry there plus one case here. Returning early
+   * keeps the sales path untouched for everyone who does hold orders.
    */
-  const paymentsOnly = isPaymentsOnlyUser(user);
-  if (paymentsOnly) {
-    // Deposits-only users see deposits; anyone doing PAYMENT work — recording
-    // or verifying — sees the payments home. Verification counts here because
-    // a verifier's whole day is payments; sending them to the deposits home
-    // would show them banking figures they have no part in.
-    const kind =
-      canAccessScreen("payments/payment-tracking", user) ||
-      canAccessScreen("payments/verification", user)
-        ? "payment"
-        : "deposit";
-    return <PaymentHomeScreen kind={kind} />;
-  }
+  const home = homeModuleFor((screen) => canAccessScreen(screen, user));
 
-  return <SalesDashboard />;
+  switch (home?.key) {
+    // Payments and Deposits share one screen: they are the same layout with
+    // different wording, and splitting them would be two copies to fix.
+    case "payments":
+      return <PaymentHomeScreen kind="payment" />;
+    case "deposits":
+      return <PaymentHomeScreen kind="deposit" />;
+    case "production":
+      return <ModuleHomeScreen config={productionHome} />;
+    case "backdate":
+      return <ModuleHomeScreen config={backdateHome} />;
+    // "orders", and the null case — a reports-only or settings-only user who
+    // holds no module at all keeps exactly what they saw before.
+    default:
+      return <SalesDashboard />;
+  }
 }
 
 function SalesDashboard() {

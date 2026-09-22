@@ -2,6 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { useIsFocused } from "@react-navigation/native";
+import { useRefreshOnFocus } from "@/src/hooks/useRefreshOnFocus";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -140,6 +141,11 @@ export default function BackDateDetailsScreen() {
     // `params.refreshAt` is what makes an edit's save land here as fresh data
     // rather than the stale copy this screen was already showing.
   }, [load, params.refreshAt]);
+
+  // Returning by the back button, or from the progress screen after a
+  // decision. The `refreshAt` param above only covers callers that remember
+  // to send it; this covers every other way back in.
+  useRefreshOnFocus(() => load(true));
 
   const openEdit = useCallback(() => {
     router.push({

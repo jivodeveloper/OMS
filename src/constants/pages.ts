@@ -448,7 +448,7 @@ export const resolveOrdersRoute = (
 
 /** One thing a user can create, for the Create chooser sheet. */
 export interface CreateTarget {
-  key: "payment" | "deposit" | "order";
+  key: "payment" | "deposit" | "order" | "backdate";
   label: string;
   description: string;
   icon: string;
@@ -481,6 +481,17 @@ const CREATE_TARGETS: CreateTarget[] = [
     screen: "orders/create",
     route: "/orders/create",
   },
+  {
+    key: "backdate",
+    label: "BackDate Request",
+    description: "Ask for temporary back-posting rights in SAP",
+    icon: "time-outline",
+    screen: "backdate/create",
+    route: "/(main)/backdate/create",
+  },
+  // Production is deliberately absent. SAP originates a production order;
+  // OMS only approves what SAP already has, so there is nothing to raise —
+  // and a "+" that opens a form nobody can submit is worse than no button.
 ];
 
 /**
@@ -579,8 +590,8 @@ export const resolveWorkQueueRoute = (
     }
   }
 
-  // No orders access — fall back to the payments work they hold, in priority
-  // order: Payments, then Verify, then Deposits.
+  // No orders access — fall back to the work they DO hold, in priority order:
+  // Payments, Verify, Deposits, Production, BackDate.
   //
   // Payments and Verify sit together because they are the same surface: both
   // are payment work, and a user holding either gets the payments home as
@@ -608,6 +619,24 @@ export const resolveWorkQueueRoute = (
       route: "/(main)/payments/deposit-tracking",
       label: "Deposits",
       icon: "business-outline",
+    },
+    // Production and BackDate, in the same order the home page ranks them
+    // (see features/home/moduleHome.ts). Without these a BackDate-only user
+    // read "Orders" on the tab and got the no-permission dialog on every tap
+    // — the footer named a module they do not have and hid the one they do.
+    {
+      screen: "production/tracking",
+      route: "/(main)/production/tracking",
+      label: "Production",
+      // The SAME icon the sidebar gives Production. A wrench in the footer and
+      // a box in the drawer read as two different pages.
+      icon: "cube-outline",
+    },
+    {
+      screen: "backdate/tracking",
+      route: "/(main)/backdate/tracking",
+      label: "BackDate",
+      icon: "time-outline",
     },
   ];
   for (const candidate of candidates) {
