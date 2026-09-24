@@ -58,6 +58,10 @@ import {
   proposalToSchemeEntry,
   useSchemePreview,
 } from "@/src/features/orders/useSchemePreview";
+import {
+  defaultWarehouseFor,
+  warehouseBranchFor,
+} from "@/src/features/orders/warehouseDefaults";
 import { useRouter, useNavigation, useLocalSearchParams, useFocusEffect } from "expo-router";
 
 interface ItemRow {
@@ -89,6 +93,17 @@ interface ItemRow {
   tax: string;
   itemTotal: string;
   isQtyManual: boolean;
+  /**
+   * A deliberate giveaway on an otherwise paid order.
+   *
+   * Billed at the FOC token rate rather than zero, for the reason the backend
+   * gives in `orders/services/order_items.py`: a zero rate reaches SAP as
+   * either a zero-value invoice with no IRN or, worse, falls through to the
+   * price list and bills the customer in full. `freeReason` is what the rate
+   * approver reads to decide.
+   */
+  isFree: boolean;
+  freeReason: string;
 }
 
 interface RowSchemeSelection {
@@ -123,6 +138,8 @@ interface OrderItemType {
   total: number;
   taxRate: number;
   priceListBasic: number;
+  isFree?: boolean;
+  freeReason?: string;
 }
 
 type AddressOption = {
@@ -162,6 +179,16 @@ function FixedLabelTextInput({
   );
 }
 
+/**
+ * What a free line is billed at.
+ *
+ * Not zero, and not the price list. The backend applies exactly this in
+ * `orders/services/order_items.py` and OMS-Frontend shows the same string on
+ * its Free item checkbox; the three have to agree or the screen and the
+ * invoice disagree.
+ */
+const FOC_TOKEN_BASIC_PRICE = "0.001";
+
 const emptyRow = (id: number): ItemRow => ({
   id,
   selectedCategory: null,
@@ -191,6 +218,8 @@ const emptyRow = (id: number): ItemRow => ({
   tax: "",
   itemTotal: "",
   isQtyManual: false,
+  isFree: false,
+  freeReason: "",
 });
 
 const dedupePartyProducts = (products: any[]) => {
@@ -614,6 +643,21 @@ export function OrderEntryScreen({
     [],
   );
 
+  // ── Warehouse ──────────────────────────────────────────────────────────────
+  // One warehouse for the whole order, sent as `warehouse_code`. The list is
+  // what HANA holds for the order's category; the value starts on the default
+  // the server reads from its environment -- the same one the SAP push would
+  // apply if the order carried none, so what is on screen is what ships.
+  const [warehouses, setWarehouses] = useState<{ code: string; name: string }[]>([]);
+  const [defaultWarehouses, setDefaultWarehouses] = useState<Record<string, string> | null>(
+    null,
+  );
+  const [warehouse, setWarehouse] = useState<string>("");
+  // "Did a PERSON put it there", not "is there a value". The field follows the
+  // category until someone actually chooses -- or until an edit loads a saved
+  // order, whose stored warehouse must never be overwritten.
+  const warehouseChosenByUser = useRef(false);
+
   useEffect(() => {
     if (company == null && companies.length === 1) {
       setCompany(companies[0].value);
@@ -625,6 +669,21 @@ export function OrderEntryScreen({
       setBranch(branches[0].value);
     }
   }, [branch, branches]);
+
+  /**
+   * Drop a dispatch branch the current list no longer offers.
+   *
+   * The list changes under this field when the category changes, and `bpl_id`
+   * is unique only WITHIN a line -- id 2 is FACTORY under OIL but HARYANA
+   * under MART. A held-over id is not a harmless stale value; it silently
+   * renames itself into a different place. Left alone in edit mode, where the
+   * saved order's branch is a decision already made.
+   */
+  useEffect(() => {
+    if (isEditMode || branch == null || branches.length === 0) return;
+    if (branches.some((d) => d.value === branch)) return;
+    setBranch(branches[0]?.value ?? null);
+  }, [branch, branches, isEditMode]);
 
   const [partyProducts, setPartyProducts] = useState<any[]>([]);
 
@@ -759,8 +818,68 @@ export function OrderEntryScreen({
     return index === undefined ? [] : draftProposalsByLine[index] ?? [];
   };
 
+  /**
+   * Auto schemes the user has dropped from this order.
+   *
+   * The engine proposes a giveaway off the quantities entered, which is right
+   * most of the time and wrong some of it — a promo the customer is not owed,
+   * or one already given on another order. There was no way to decline one:
+   * whatever the engine proposed went into the payload.
+   *
+   * Keyed by the CONFIRMED item, because the confirmed items are what the
+   * payload is built from. `item.id` rather than the line index, so removing
+   * an earlier line does not silently re-point a dismissal at another item.
+   */
+  const [dismissedAutoSchemes, setDismissedAutoSchemes] = useState<
+    Record<string, true>
+  >({});
+
+  const autoSchemeKey = (itemId: number | string, proposal: SchemeProposal) =>
+    `${itemId}|${proposal.scheme_id}|${proposal.benefit_id}`;
+
+  const dismissAutoScheme = (itemId: number | string, proposal: SchemeProposal) =>
+    setDismissedAutoSchemes((prev) => ({
+      ...prev,
+      [autoSchemeKey(itemId, proposal)]: true,
+    }));
+
+  /**
+   * Carry a row's dismissals onto the item it becomes.
+   *
+   * The draft row is where the proposal is shown and declined, but the row is
+   * discarded on Confirm and the payload is built from the item that replaces
+   * it. Without this the delete would appear to work and then silently undo
+   * itself the moment the item was confirmed.
+   */
+  const carryDismissalsToItem = (rowId: number, itemId: number) =>
+    setDismissedAutoSchemes((prev) => {
+      const next = { ...prev };
+      for (const key of Object.keys(prev)) {
+        if (!key.startsWith(`${rowId}|`)) continue;
+        next[`${itemId}|${key.slice(String(rowId).length + 1)}`] = true;
+        delete next[key];
+      }
+      return next;
+    });
+
+  const restoreAutoSchemes = (itemId: number | string) =>
+    setDismissedAutoSchemes((prev) => {
+      const next = { ...prev };
+      for (const key of Object.keys(next)) {
+        if (key.startsWith(`${itemId}|`)) delete next[key];
+      }
+      return next;
+    });
+
+  /** The proposals for one confirmed line, minus the ones dropped. */
+  const keptProposals = (itemId: number | string, proposals: SchemeProposal[]) =>
+    proposals.filter((p) => !dismissedAutoSchemes[autoSchemeKey(itemId, p)]);
+
   /** One engine-proposed scheme, as shown on confirmed items and draft rows. */
-  const renderAutoProposal = (proposal: SchemeProposal) => (
+  const renderAutoProposal = (
+    proposal: SchemeProposal,
+    onDelete?: () => void,
+  ) => (
     <View
       key={`${proposal.scheme_id}-${proposal.benefit_id}`}
       style={styles.schemeLine}
@@ -778,6 +897,19 @@ export function OrderEntryScreen({
         <Text style={styles.comboLineName} numberOfLines={2}>
           {proposal.benefit_item_name || proposal.benefit_item_code}
         </Text>
+        {/* Decline this one. Only offered on a CONFIRMED item, because that is
+            what the payload is built from — dropping it anywhere else would
+            look like it had an effect it does not have. */}
+        {onDelete ? (
+          <TouchableOpacity
+            style={styles.autoSchemeRemoveBtn}
+            onPress={onDelete}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            accessibilityLabel={`Remove auto scheme ${proposal.scheme_name ?? ""}`}
+          >
+            <Ionicons name="trash-outline" size={16} color={COLORS.error} />
+          </TouchableOpacity>
+        ) : null}
       </View>
       <Text style={styles.comboLineNote}>
         {proposal.scheme_name}
@@ -875,6 +1007,106 @@ export function OrderEntryScreen({
       category: normalizeCategory(rawCategory),
     };
   };
+
+  /**
+   * The category this order ships as -- the party's, else the user's own.
+   *
+   * Drives which HANA schema lists the warehouses, which env default applies,
+   * and which business line's dispatch branches are offered.
+   */
+  const orderCategory = useMemo(() => {
+    const party = partyName
+      ? parties.find((p) => p.value === partyName) ||
+        parties.find((p) => p.cardCode === parsePartyValue(partyName).cardCode)
+      : null;
+    return String(party?.category || userCategory || "").trim().toUpperCase();
+  }, [partyName, parties, userCategory]);
+
+  const warehouseBranch = warehouseBranchFor(orderCategory);
+  // Deliberately EMPTY until the category is known. `warehouseBranch` falls
+  // back to OIL so the LIST has something to fetch; applying OIL's default
+  // before the user's own category has arrived is how a BEVERAGES user gets
+  // pinned to the wrong warehouse. No category yet means no default yet.
+  const defaultWarehouse = defaultWarehouseFor(orderCategory, defaultWarehouses);
+
+  /**
+   * Dispatch branches belong to a business line, so they are re-fetched
+   * whenever the order's category changes.
+   *
+   * The master-data load on mount cannot do this on its own: it is what SETS
+   * `userCategory`, so `orderCategory` is still "" while it runs and the list
+   * it fetches is every branch in every line. Asking again once the category
+   * settles is what narrows it.
+   */
+  useEffect(() => {
+    if (!orderCategory) return;
+    let cancelled = false;
+    orderService
+      .getbranch(orderCategory)
+      .then((data: any) => {
+        if (cancelled) return;
+        const list = Array.isArray(data)
+          ? data
+          : Array.isArray(data?.data)
+            ? data.data
+            : Array.isArray(data?.results)
+              ? data.results
+              : [];
+        setbranches(
+          list.map((d: any) => ({
+            label: d.bpl_name,
+            value: Number(d.bpl_id),
+          })),
+        );
+      })
+      .catch((error) => console.log("Error fetching dispatch branches:", error));
+    return () => {
+      cancelled = true;
+    };
+  }, [orderCategory]);
+
+  useEffect(() => {
+    orderService
+      .getOrderDefaults()
+      .then((defaults: any) => setDefaultWarehouses(defaults?.warehouse_code ?? null))
+      .catch((error) => console.log("Error fetching order defaults:", error));
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    orderService
+      .getWarehouses(warehouseBranch)
+      .then((rows: { code: string; name: string }[]) => {
+        if (!cancelled) setWarehouses(rows);
+      })
+      .catch((error) => {
+        console.log("Error fetching warehouses:", error);
+        if (!cancelled) setWarehouses([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [warehouseBranch]);
+
+  // Track the env default until someone actually chooses a warehouse. The
+  // guard is `warehouseChosenByUser`, not "is the field filled": the defaults
+  // call answers before the profile does, so the first value written is from
+  // an unknown category and must stay correctable.
+  useEffect(() => {
+    if (warehouseChosenByUser.current || !defaultWarehouse) return;
+    setWarehouse((prev) => (prev === defaultWarehouse ? prev : defaultWarehouse));
+  }, [defaultWarehouse]);
+
+  /** The list, plus whatever is already selected if HANA has not listed it. */
+  const warehouseOptions = useMemo(() => {
+    const base = warehouses.map((w) => ({
+      label: w.name && w.name !== w.code ? `${w.code} — ${w.name}` : w.code,
+      value: w.code,
+    }));
+    return warehouse && !warehouses.some((w) => w.code === warehouse)
+      ? [{ label: warehouse, value: warehouse }, ...base]
+      : base;
+  }, [warehouses, warehouse]);
 
   const findSelectedParty = (value: string | null | undefined) => {
     if (!value) return null;
@@ -1028,6 +1260,12 @@ export function OrderEntryScreen({
         // 3. Auto-fill form fields
         setCompany(Number(orderDetails.company) || 1);
         setBranch(Number(orderDetails.dispatch_from_id) || null);
+        // A saved warehouse is a decision already made -- pin it so the
+        // category effect cannot replace it with the category default.
+        if (orderDetails.warehouse_code) {
+          warehouseChosenByUser.current = true;
+          setWarehouse(String(orderDetails.warehouse_code));
+        }
         setPoNumber(orderDetails.po_number || "");
         setComment(orderDetails.remarks || "");
         setSelectedBillTo(Number(orderDetails.bill_to_id) || null);
@@ -1128,6 +1366,8 @@ export function OrderEntryScreen({
               priceListBasic: String(item.price_list_basic || matchedProduct?.basic_rate || 0),
               tax: String(item.tax_rate || matchedProduct?.tax_rate || 0),
               itemTotal: String(item.total || 0),
+              isFree: Boolean(item.is_free),
+              freeReason: String(item.free_reason || ""),
             };
           });
           setItemRows(newRows);
@@ -1247,7 +1487,7 @@ export function OrderEntryScreen({
         // Now fetch master data that depends on stateId
         const [partiesData, branchesData, schemeData] = await Promise.all([
           orderService.getParties(),
-          orderService.getbranch(""),
+          orderService.getbranch(orderCategory),
           isFocMode
             ? Promise.resolve([])
             : schemeService.getSchemes(stateId ? String(stateId) : "DEFAULT"),
@@ -1360,6 +1600,10 @@ export function OrderEntryScreen({
       setDeliveryDate(order.delivery_date || getDefaultDeliveryDate());
       setCompany(1);
       if (order.dispatch_from_id) setBranch(Number(order.dispatch_from_id));
+      if (order.warehouse_code) {
+        warehouseChosenByUser.current = true;
+        setWarehouse(String(order.warehouse_code));
+      }
 
       // Addresses — best-effort: a failure here (e.g. an incomplete draft with
       // no card_code) must not stop the order's items from pre-filling below.
@@ -1468,6 +1712,8 @@ export function OrderEntryScreen({
           total: Number(item.total) || 0,
           taxRate: Number(item.tax_rate) || 0,
           priceListBasic: orderIsFoc ? FOC_PRICE_LIST_BASIC : Number(item.price_list_basic) || 0,
+          isFree: Boolean(item.is_free),
+          freeReason: String(item.free_reason || ""),
         };
       });
       // A draft can contain incomplete items (no product picked yet). Mirror the
@@ -1948,6 +2194,49 @@ export function OrderEntryScreen({
       );
 
     }
+  };
+
+  /**
+   * Mark a line free, or put it back on its agreed rate.
+   *
+   * A free line carries no scheme: the giveaway IS the concession, and
+   * stacking a scheme on top of it bills a second one. That mirrors
+   * `applyFreePricingToRow` in OMS-Frontend, which clears the same fields.
+   */
+  const handleRowFreeToggle = (rowId: number, value: boolean) => {
+    setItemRows((prev) =>
+      prev.map((r) => {
+        if (r.id !== rowId) return r;
+        const basicPrice = value ? FOC_TOKEN_BASIC_PRICE : r.priceListBasic || "";
+        return {
+          ...r,
+          isFree: value,
+          freeReason: value ? r.freeReason : "",
+          // A free line cannot also carry a scheme.
+          ...(value
+            ? {
+                isScheme: false,
+                selectedScheme: null,
+                schemeSelections: [],
+                schemeQty: "",
+                schemePcsPerBox: 0,
+                schemeLtrsPerBox: 0,
+              }
+            : {}),
+          basicPrice,
+          itemTotal: calculateRowItemTotal({
+            qty: r.qty,
+            boxes: r.boxes,
+            priceListBasic: r.priceListBasic,
+            basicPrice,
+          }),
+        };
+      }),
+    );
+  };
+
+  const handleRowFreeReason = (rowId: number, freeReason: string) => {
+    updateRow(rowId, { freeReason });
   };
 
   const handleRowIsSchemeToggle = (rowId: number, value: boolean) => {
@@ -2432,9 +2721,13 @@ export function OrderEntryScreen({
       total: effectiveTotal,
       taxRate: parseFloat(row.tax) || 0,
       priceListBasic: isFocOrder ? FOC_PRICE_LIST_BASIC : parseFloat(row.priceListBasic) || product.basic_rate || 0,
+      isFree: Boolean(row.isFree),
+      freeReason: row.isFree ? String(row.freeReason || "").trim() : "",
     };
 
     setOrderItems((prev) => [...prev, newItem]);
+    // Any auto scheme declined on the row stays declined on the item.
+    carryDismissalsToItem(rowId, newItem.id);
     // FIX 3: Remove the confirmed row so the next item starts fresh
     setItemRows((prev) => prev.filter((r) => r.id !== rowId));
   };
@@ -2535,6 +2828,8 @@ export function OrderEntryScreen({
 
     const editableRow: ItemRow = {
       id: Date.now(),
+      isFree: Boolean(confirmedItem.isFree),
+      freeReason: String(confirmedItem.freeReason || ""),
       selectedCategory: confirmedItem.category || null,
       selectedBrand: confirmedItem.brand || null,
       selectedVariety: confirmedItem.variety || null,
@@ -2658,6 +2953,7 @@ export function OrderEntryScreen({
         dispatch_from_id: branch ?? 0,
         dispatch_from_name:
           branches.find((d) => d.value === branch)?.label ?? "",
+        warehouse_code: warehouse,
         delivery_date: delivery,
         company: String(company ?? ""),
         remarks: String(comment ?? ""),
@@ -2670,9 +2966,13 @@ export function OrderEntryScreen({
           // their own: the SAP push fans a scheme entry out into its own
           // zero-priced line, so emitting it here as well would ship it twice.
           // (A combo half is the opposite — a real item. See comboLines.ts.)
-          const engineSchemes = (proposalsByLine[itemIndex] ?? []).map(
-            proposalToSchemeEntry,
-          );
+          // Minus the ones the user declined on the confirmed line. This is
+          // the whole point of the delete: the engine still proposes it, the
+          // order just does not carry it.
+          const engineSchemes = keptProposals(
+            item.id,
+            proposalsByLine[itemIndex] ?? [],
+          ).map(proposalToSchemeEntry);
           return {
             item_code: String(item.itemCode ?? ""),
             item_name: String(item.itemName ?? ""),
@@ -2702,10 +3002,14 @@ export function OrderEntryScreen({
             pcs: Number(item.pcs) || 0,
             boxes: Number(item.qty) || 0,
             ltrs: Number(item.ltrs) || 0,
-            basic_price: Number(item.basicPrice) || 0,
+            basic_price: item.isFree
+              ? Number(FOC_TOKEN_BASIC_PRICE)
+              : Number(item.basicPrice) || 0,
             total: Number(item.total) || 0,
             tax_rate: Number(item.taxRate) || 0,
-            price_list_basic: Number(item.priceListBasic) || 0,
+            price_list_basic: item.isFree ? 0 : Number(item.priceListBasic) || 0,
+            is_free: Boolean(item.isFree),
+            free_reason: item.isFree ? String(item.freeReason || "").trim() : "",
           };
         })
           // A combo posts as TWO rows: the priced parent above, and its free
@@ -2814,7 +3118,9 @@ export function OrderEntryScreen({
         ) ||
         0,
       tax_rate: Number(row.tax) || 0,
-      price_list_basic: Number(row.priceListBasic) || 0,
+      price_list_basic: row.isFree ? 0 : Number(row.priceListBasic) || 0,
+      is_free: Boolean(row.isFree),
+      free_reason: row.isFree ? String(row.freeReason || "").trim() : "",
     };
   };
 
@@ -2844,6 +3150,7 @@ export function OrderEntryScreen({
         ship_to_address: selectedShipToAddress?.name ?? "",
         dispatch_from_id: branch ?? 0,
         dispatch_from_name: branches.find((d) => d.value === branch)?.label ?? "",
+        warehouse_code: warehouse,
         delivery_date: delivery || "",
         company: String(company ?? ""),
         remarks: String(comment ?? ""),
@@ -2856,9 +3163,13 @@ export function OrderEntryScreen({
           // their own: the SAP push fans a scheme entry out into its own
           // zero-priced line, so emitting it here as well would ship it twice.
           // (A combo half is the opposite — a real item. See comboLines.ts.)
-          const engineSchemes = (proposalsByLine[itemIndex] ?? []).map(
-            proposalToSchemeEntry,
-          );
+          // Minus the ones the user declined on the confirmed line. This is
+          // the whole point of the delete: the engine still proposes it, the
+          // order just does not carry it.
+          const engineSchemes = keptProposals(
+            item.id,
+            proposalsByLine[itemIndex] ?? [],
+          ).map(proposalToSchemeEntry);
           return {
             item_code: String(item.itemCode ?? ""),
             item_name: String(item.itemName ?? ""),
@@ -2888,10 +3199,14 @@ export function OrderEntryScreen({
             pcs: Number(item.pcs) || 0,
             boxes: Number(item.qty) || 0,
             ltrs: Number(item.ltrs) || 0,
-            basic_price: Number(item.basicPrice) || 0,
+            basic_price: item.isFree
+              ? Number(FOC_TOKEN_BASIC_PRICE)
+              : Number(item.basicPrice) || 0,
             total: Number(item.total) || 0,
             tax_rate: Number(item.taxRate) || 0,
-            price_list_basic: Number(item.priceListBasic) || 0,
+            price_list_basic: item.isFree ? 0 : Number(item.priceListBasic) || 0,
+            is_free: Boolean(item.isFree),
+            free_reason: item.isFree ? String(item.freeReason || "").trim() : "",
           };
         }).concat(
           // Also capture item rows the user filled in but didn't confirm, so
@@ -3350,6 +3665,33 @@ export function OrderEntryScreen({
                     </View>
                   </View>
 
+                  {/* One warehouse for the whole order. Every order picks one
+                      now, not only Mart -- the SAP push applies a default when
+                      an order carries none, and this is that same default, so
+                      the screen and the shipment cannot disagree. */}
+                  <View style={styles.row}>
+                    <View style={styles.fullField}>
+                      <Dropdown
+                        label="Warehouse"
+                        data={warehouseOptions}
+                        value={warehouse}
+                        onChange={(val: string) => {
+                          warehouseChosenByUser.current = true;
+                          setWarehouse(val);
+                        }}
+                        placeholder={
+                          warehouseOptions.length === 0
+                            ? "Loading warehouses…"
+                            : "Select"
+                        }
+                        mode="modal"
+                        leftIcon={null}
+                        icon="cube-outline"
+                        floatingLabel
+                      />
+                    </View>
+                  </View>
+
                   <View style={styles.field}>
                     <Dropdown
                       label="Bill To Address *"
@@ -3693,6 +4035,14 @@ export function OrderEntryScreen({
                     </View>
                   </View>
 
+                  {/* The manual Schemes box, commented out to match
+                      OMS-Frontend, which did the same to its scheme panel when
+                      the v2 engine took over. Schemes now come from the engine
+                      (the Auto schemes section below), and a line that should
+                      simply be given away uses the Free item checkbox instead
+                      of a hand-picked scheme. Kept rather than deleted: the v2
+                      rollout is not finished, and this is the fallback.
+
                   {shouldAllowSchemes && manualSchemeBox.enabled && row.selectedProduct && (
                     <View style={styles.schemeBox}>
                       <View style={styles.schemeHeaderRow}>
@@ -3773,6 +4123,54 @@ export function OrderEntryScreen({
                       )}
                     </View>
                   )}
+                  */}
+
+                  {/* A deliberate giveaway on a paid order — the replacement
+                      for picking a scheme by hand. Not offered on an FOC
+                      order, where every line is already free. */}
+                  {!isFocOrder && row.selectedProduct && (
+                    <View style={styles.freeItemBox}>
+                      <TouchableOpacity
+                        activeOpacity={0.8}
+                        style={styles.freeItemRow}
+                        onPress={() => handleRowFreeToggle(row.id, !row.isFree)}
+                        accessibilityRole="checkbox"
+                        accessibilityState={{ checked: Boolean(row.isFree) }}
+                        accessibilityLabel="Mark as Free"
+                        hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                      >
+                        <Ionicons
+                          style={styles.freeItemCheckbox}
+                          name={row.isFree ? "checkbox" : "square-outline"}
+                          size={26}
+                          color={row.isFree ? COLORS.primary : COLORS.textMuted}
+                        />
+                        {/* Label and hint stack, so neither is squeezed onto a
+                            second line by the other on a narrow phone. */}
+                        <View style={styles.freeItemTextCol}>
+                          <Text style={styles.freeItemLabel}>Mark as Free</Text>
+                          <Text style={styles.freeItemHint}>
+                            Billed at ₹{FOC_TOKEN_BASIC_PRICE} · needs rate approval
+                          </Text>
+                        </View>
+                      </TouchableOpacity>
+
+                      {row.isFree && (
+                        <FixedLabelTextInput
+                          label="Reason for giving this free"
+                          textColor={COLORS.black}
+                          value={row.freeReason}
+                          onChangeText={(val) => handleRowFreeReason(row.id, val)}
+                          mode="outlined"
+                          maxLength={255}
+                          placeholder="e.g. sample, replacement, launch offer"
+                          style={styles.input}
+                          outlineColor={COLORS.border}
+                          activeOutlineColor={COLORS.primary}
+                        />
+                      )}
+                    </View>
+                  )}
 
                   {/* Schemes the mapping attaches on its own — shown before
                       Confirm so the user knows what the item already gets,
@@ -3783,20 +4181,42 @@ export function OrderEntryScreen({
                         <Ionicons name="sparkles-outline" size={16} color={COLORS.primary} />
                         <Text style={styles.schemeTitleText}>Auto schemes</Text>
                       </View>
-                      {getRowAutoProposals(row.id).length > 0 ? (
+                      {keptProposals(row.id, getRowAutoProposals(row.id)).length > 0 ? (
                         <>
                           <Text style={styles.schemeBoxHint}>
                             Added automatically when you confirm this item.
                           </Text>
-                          {getRowAutoProposals(row.id).map(renderAutoProposal)}
+                          {keptProposals(row.id, getRowAutoProposals(row.id)).map(
+                            (proposal) =>
+                              renderAutoProposal(proposal, () =>
+                                dismissAutoScheme(row.id, proposal),
+                              ),
+                          )}
                         </>
                       ) : (
                         <Text style={styles.schemeBoxHint}>
                           {draftProposalsLoading
                             ? "Checking schemes…"
-                            : "No auto scheme for this item at this quantity."}
+                            : getRowAutoProposals(row.id).length > 0
+                              ? "Removed from this order."
+                              : "No auto scheme for this item at this quantity."}
                         </Text>
                       )}
+
+                      {getRowAutoProposals(row.id).length >
+                      keptProposals(row.id, getRowAutoProposals(row.id)).length ? (
+                        <TouchableOpacity
+                          style={styles.autoSchemeRestoreBtn}
+                          onPress={() => restoreAutoSchemes(row.id)}
+                        >
+                          <Ionicons
+                            name="arrow-undo-outline"
+                            size={14}
+                            color={COLORS.primary}
+                          />
+                          <Text style={styles.autoSchemeRestoreText}>Undo remove</Text>
+                        </TouchableOpacity>
+                      ) : null}
                     </View>
                   )}
 
@@ -3975,7 +4395,34 @@ export function OrderEntryScreen({
                     </View>
                   ))}
 
-                  {proposals.map(renderAutoProposal)}
+                  {keptProposals(item.id, proposals).map((proposal) =>
+                    renderAutoProposal(proposal, () =>
+                      dismissAutoScheme(item.id, proposal),
+                    ),
+                  )}
+
+                  {/* Say so, and offer the way back — a dropped scheme that
+                      simply vanishes looks like the engine stopped working. */}
+                  {proposals.length > keptProposals(item.id, proposals).length ? (
+                    <TouchableOpacity
+                      style={styles.autoSchemeRestoreBtn}
+                      onPress={() => restoreAutoSchemes(item.id)}
+                    >
+                      <Ionicons
+                        name="arrow-undo-outline"
+                        size={14}
+                        color={COLORS.primary}
+                      />
+                      <Text style={styles.autoSchemeRestoreText}>
+                        {proposals.length - keptProposals(item.id, proposals).length} auto
+                        scheme
+                        {proposals.length - keptProposals(item.id, proposals).length === 1
+                          ? ""
+                          : "s"}{" "}
+                        removed · Undo
+                      </Text>
+                    </TouchableOpacity>
+                  ) : null}
 
                   {comboLine ? (
                     <View style={styles.comboLine}>
@@ -4394,7 +4841,65 @@ const styles = StyleSheet.create({
   field: { marginBottom: SPACING.sm },
   row: { flexDirection: "row", gap: SPACING.sm },
   halfField: { flex: 1 },
+  fullField: { flex: 1 },
   thirdField: { flex: 1 },
+
+  // ── Free item ──────────────────────────────────────────────────────────────
+  freeItemBox: {
+    marginTop: SPACING.sm,
+    marginBottom: SPACING.sm,
+    gap: 10,
+    borderWidth: 1,
+    borderColor: COLORS.borderLight,
+    borderRadius: RADIUS.md,
+    padding: 12,
+    backgroundColor: COLORS.surface,
+  },
+  freeItemRow: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  freeItemCheckbox: {
+    marginRight: 14,
+  },
+  freeItemTextCol: {
+    flex: 1,
+    gap: 2,
+  },
+  freeItemLabel: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: COLORS.black,
+  },
+  freeItemHint: {
+    fontSize: 12.5,
+    lineHeight: 17,
+    color: COLORS.textMuted,
+  },
+
+  // ── Declining an auto scheme ───────────────────────────────────────────────
+  autoSchemeRemoveBtn: {
+    marginLeft: "auto",
+    width: 34,
+    height: 34,
+    borderRadius: RADIUS.sm,
+    borderWidth: 1,
+    borderColor: COLORS.errorLight,
+    backgroundColor: COLORS.errorLight,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  autoSchemeRestoreBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingVertical: 6,
+  },
+  autoSchemeRestoreText: {
+    fontSize: 12,
+    color: COLORS.primary,
+    fontWeight: "600",
+  },
   additionalDetailsBox: {
     borderWidth: 1,
     borderColor: COLORS.borderLight,
@@ -4465,6 +4970,7 @@ const styles = StyleSheet.create({
     borderColor: COLORS.borderLight,
     borderRadius: RADIUS.md,
     padding: SPACING.sm,
+    marginTop: SPACING.sm,
     marginBottom: SPACING.sm,
   },
   schemeHeaderRow: {

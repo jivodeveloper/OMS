@@ -211,8 +211,36 @@ export const orderService = {
  return await api.get(`/orders/party-products/${cardCode}/`);
  },
 
- getbranch: async (company: string) => {
- return await api.get(`/orders/branch/`);
+ /**
+  * Dispatch branches for one business line.
+  *
+  * The category is NOT optional in practice. `/orders/branch/` returns every
+  * active branch across all three lines when it is omitted, and `bpl_id` is
+  * unique only WITHIN a line -- id 2 is FACTORY under OIL but HARYANA under
+  * MART -- so an unfiltered list is ambiguous, not merely long. This used to
+  * take `company` and drop it on the floor.
+  */
+ getbranch: async (category?: string) => {
+ const c = String(category || "").trim().toUpperCase();
+ return await api.get(`/orders/branch/${c ? `?category=${encodeURIComponent(c)}` : ""}`);
+ },
+
+ /** The warehouse a new order starts on, per category, read from the server env. */
+ getOrderDefaults: async () => {
+ return await api.get(`/orders/defaults/`);
+ },
+
+ /**
+  * Warehouses HANA lists for a company. "BEVERAGE" is singular here -- that is
+  * the endpoint's spelling, not the category's.
+  */
+ getWarehouses: async (branch: "OIL" | "BEVERAGE" | "MART" = "OIL") => {
+ const rows = await api.get(`/hana/warehouses/?branch=${branch}`);
+ const list = Array.isArray(rows) ? rows : Array.isArray(rows?.data) ? rows.data : [];
+ return list.map((row: { WhsCode?: string; WhsName?: string }) => ({
+ code: String(row.WhsCode || ""),
+ name: String(row.WhsName || row.WhsCode || ""),
+ }));
  },
 
  getOrderLogs: async(orderId:number):Promise<any>=>{
@@ -495,6 +523,8 @@ export interface CreateOrderPayload {
  ship_to_address: string;
  dispatch_from_id: number;
  dispatch_from_name: string;
+ /** One warehouse for the whole order; the SAP push applies it. */
+ warehouse_code?: string;
  company: string;
  po_number?: string;
  is_foc?: boolean;
@@ -538,6 +568,9 @@ export interface ApproveOr {
  boxes?: string | number;
  ltrs?: string | number;
  price_list_basic?: string | number;
+ /** A deliberate giveaway on a paid order; billed at the FOC token rate. */
+ is_free?: boolean;
+ free_reason?: string;
  basic_price?: string | number;
  total?: string | number;
  tax_rate?: string | number;
