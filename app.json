@@ -2,7 +2,7 @@
   "expo": {
     "name": "OMSAPP",
     "slug": "OMSAPP",
-    "version": "1.0.9",
+    "version": "1.1.1",
     "orientation": "portrait",
     "icon": "./assets/images/logo.png",
     "scheme": "omsapp",
@@ -34,7 +34,7 @@
       "googleServicesFile": "./google-services.json",
       "usesCleartextTraffic": true,
       "softwareKeyboardLayoutMode": "resize",
-      "versionCode": 10,
+      "versionCode": 11,
       "permissions": [
         "INTERNET", "POST_NOTIFICATIONS", "CAMERA"
       ],
