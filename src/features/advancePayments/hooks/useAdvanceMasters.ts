@@ -6,6 +6,7 @@ import {
   advancePaymentService,
   type AdvancePaymentCompany,
   type OmsDepartment,
+  type SapBudget,
 } from "@/src/services/advancePayment.service";
 
 import type { OpenDocument, Partner } from "../logic/constants";
@@ -201,4 +202,71 @@ export function useOpenDocuments(
   }, [company, kind, partner, live]);
 
   return { documents, loading, error };
+}
+
+/**
+ * The company's Payment Purpose choices: SAP's Budget and Sub Budget cost
+ * centres.
+ *
+ * PER COMPANY, because a cost centre belongs to one company's SAP — a code
+ * picked under OIL means nothing, or something else, under MART. `applyChange`
+ * clears the two fields whenever the company changes for the same reason, so
+ * this list and the chosen value can never come from different companies.
+ *
+ * One request per company, cached for the life of the screen: the list is
+ * short, rarely changes, and re-reading it every time the form re-renders
+ * would put a SAP round trip behind each keystroke.
+ */
+export function useBudgets(company: AdvancePaymentCompany | "") {
+  const [budgets, setBudgets] = useState<SapBudget[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!company) {
+      setBudgets([]);
+      setError("");
+      return;
+    }
+    let alive = true;
+    setLoading(true);
+    setError("");
+    advancePaymentService
+      .budgets(company)
+      .then((rows) => {
+        if (alive) setBudgets(rows);
+      })
+      .catch((err) => {
+        if (!alive) return;
+        setError(advancePaymentError(err));
+        setBudgets([]);
+      })
+      .finally(() => {
+        if (alive) setLoading(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [company]);
+
+  /**
+   * One kind's options, with the chosen code kept on the list even when SAP no
+   * longer offers it — otherwise opening an old request would silently blank
+   * its purpose, and saving would drop a value nobody meant to change.
+   */
+  const optionsFor = useCallback(
+    (kind: SapBudget["kind"], chosen: string, chosenName: string) => {
+      const options = budgets
+        .filter((row) => row.kind === kind)
+        // A cost centre with no name (Oil's "R & D") is shown by its code.
+        .map((row) => ({ label: row.name || row.code, value: row.code }));
+      if (chosen && !options.some((option) => option.value === chosen)) {
+        return [{ label: chosenName || chosen, value: chosen }, ...options];
+      }
+      return options;
+    },
+    [budgets],
+  );
+
+  return { budgets, optionsFor, loading, error };
 }

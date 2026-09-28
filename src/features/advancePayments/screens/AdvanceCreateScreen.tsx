@@ -14,6 +14,7 @@ import { Button } from "react-native-paper";
 
 import { appAlert } from "@/src/components/common/AppDialog";
 import { COLORS, RADIUS, SPACING } from "@/src/constants/theme";
+import useBackToOrigin from "@/src/hooks/useBackToOrigin";
 import {
   advancePaymentError,
   advancePaymentProblems,
@@ -21,6 +22,10 @@ import {
 } from "@/src/services/advancePayment.service";
 
 import AdvanceRequestForm from "../components/AdvanceRequestForm";
+import {
+  useBackgroundReadings,
+  withReadings,
+} from "../hooks/useAttachmentReadings";
 import type { FileAttachment } from "../logic/attachments";
 import { toApiRequest } from "../logic/requestApi";
 import { EMPTY_FORM, validate, type RequestForm } from "../logic/rules";
@@ -33,6 +38,10 @@ import { EMPTY_FORM, validate, type RequestForm } from "../logic/rules";
  * files, and the workflow engine picks the route from the department.
  */
 export default function AdvanceCreateScreen() {
+  // Back goes where this page was opened from - the list, or the details
+  // page behind a progress page - never to the dashboard. See the hook.
+  useBackToOrigin("/(main)/advance-payments/tracking");
+
   const [form, setForm] = useState<RequestForm>(EMPTY_FORM);
   const [files, setFiles] = useState<FileAttachment[]>([]);
   const [saving, setSaving] = useState(false);
@@ -44,6 +53,19 @@ export default function AdvanceCreateScreen() {
    * the field, and on a long form that is most of the form.
    */
   const [showErrors, setShowErrors] = useState(false);
+
+  // The chosen documents' SAP attachments are read while the requester keeps
+  // filling the form, so each document is saved with what its attachment says.
+  //
+  // SUBMIT DOES NOT WAIT FOR THEM — and this is where the app parts from the
+  // web, which disables its Submit while any read is in flight. On a phone,
+  // on a phone's network, blocking a finished request behind a ~10 s-a-page
+  // OCR is a requester stuck staring at a dead button. Whatever has arrived by
+  // then is sent; a document still being read is simply saved without its
+  // reading, and the approver's screen reads it live instead — the same
+  // fallback the web already uses for requests raised before readings existed.
+  // Nothing is lost but the head start.
+  const background = useBackgroundReadings(form.selected);
 
   const { missing, problems } = validate(form);
   const blocking = problems[0] ?? (missing.length ? `${missing[0]} is still needed.` : "");
@@ -86,7 +108,10 @@ export default function AdvanceCreateScreen() {
       const picked = files
         .map((attachment) => attachment.file)
         .filter((file): file is NonNullable<typeof file> => file !== undefined);
-      const request = await advancePaymentService.createRequest(toApiRequest(form), picked);
+      const request = await advancePaymentService.createRequest(
+        toApiRequest(withReadings(form, background.readings)),
+        picked,
+      );
       appAlert("Request submitted", `${request.request_no} is with its first approver.`, [
         {
           text: "Done",

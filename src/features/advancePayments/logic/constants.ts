@@ -31,6 +31,8 @@
  */
 
 /** The three operating companies, as the rest of OMS names them. */
+import type { AttachmentCheck } from "@/src/services/advancePayment.service";
+
 export const COMPANIES = ["OIL", "MART", "BEVERAGES"] as const;
 export type Company = (typeof COMPANIES)[number];
 
@@ -162,6 +164,11 @@ export interface OpenDocument {
    * chosen document onto the approval desk.
    */
   attachment?: DocumentAttachment;
+  /**
+   * What reading that attachment found, once it has been read: kept with the
+   * request so the approvers see it without the file being read again.
+   */
+  reading?: AttachmentCheck | null;
 }
 
 export interface DocumentAttachment {

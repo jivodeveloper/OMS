@@ -79,6 +79,12 @@ const getTimeoutForEndpoint = (endpoint: string): number => {
     return PAYMENT_PROOF_REQUEST_TIMEOUT_MS;
   }
 
+  // Reading a PO's or bill's SAP attachment is the same OCR on the same kind
+  // of scan — the web client allows it 180 s a call, and a page can take ~10 s.
+  if (endpoint.startsWith('/advance-payments/document-attachment/read/')) {
+    return PAYMENT_PROOF_REQUEST_TIMEOUT_MS;
+  }
+
   if (
     endpoint.startsWith('/sap/sync/') ||
     endpoint.startsWith('/sap/approve-sales-order/') ||

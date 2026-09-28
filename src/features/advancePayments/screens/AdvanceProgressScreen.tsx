@@ -11,6 +11,7 @@ import {
   View,
 } from "react-native";
 
+import useBackToOrigin from "@/src/hooks/useBackToOrigin";
 import { useRefreshOnFocus } from "@/src/hooks/useRefreshOnFocus";
 import { COLORS } from "@/src/constants/theme";
 import { fs, ms, sp } from "@/src/utils/responsive";
@@ -20,6 +21,9 @@ import {
   type ApiRequest,
 } from "@/src/services/advancePayment.service";
 
+import EditChangeRows, {
+  ManualAccountFlag,
+} from "../components/EditChangeRows";
 import { formatDateTime } from "../logic/requestLabels";
 
 /**
@@ -124,6 +128,10 @@ interface Stage {
 }
 
 export default function AdvanceProgressScreen() {
+  // Back goes where this page was opened from - the list, or the details
+  // page behind a progress page - never to the dashboard. See the hook.
+  useBackToOrigin("/(main)/advance-payments/tracking");
+
   const { id } = useLocalSearchParams<{ id?: string }>();
   const requestId = Number(id);
 
@@ -528,6 +536,8 @@ function HistoryBox({ request }: { request: ApiRequest }) {
                   {log.remarks ? (
                     <Text style={styles.historyRemarks}>{log.remarks}</Text>
                   ) : null}
+                  <ManualAccountFlag log={log} />
+                  <EditChangeRows log={log} />
                 </View>
               </View>
             );

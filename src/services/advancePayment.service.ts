@@ -185,6 +185,40 @@ export interface AttachmentReading {
   };
 }
 
+/** A Payment Purpose choice: SAP's Budget (dimension 3) or Sub Budget (4) cost centre. */
+export interface SapBudget {
+  kind: "BUDGET" | "SUB_BUDGET";
+  code: string;
+  name: string;
+}
+
+/**
+ * A partner's open ledger (`/open-documents/`), with its totals.
+ *
+ * `net_open_means` is the server's own words for which way the balance runs
+ * — a signed figure alone is read backwards about half the time.
+ */
+export interface SapPartnerLedger {
+  summary: {
+    open_count: number;
+    open_debit: string;
+    open_credit: string;
+    net_open: string;
+    net_open_means: string;
+    overdue_count: number;
+  };
+  results: (SapLedgerDocument & { days_overdue: number | null })[];
+}
+
+/**
+ * A document's attachment reading as SAVED WITH THE REQUEST: what
+ * `/document-attachment/read/` answered when it was raised, or why it could
+ * not be read. Read once, at submission, so the approvers see what the
+ * requester's document said without the file being opened again — and without
+ * the answer changing under them if the attachment is replaced later.
+ */
+export type AttachmentCheck = AttachmentReading | { error: string };
+
 /** The document kinds `/document-attachment/` reads. */
 export type SapAttachmentKind = "po" | "bill";
 
@@ -337,6 +371,7 @@ export interface ApiRequestDocument {
   attachment_file: string;
   attachment_count: number;
   attachment_date: string | null;
+  attachment_check?: AttachmentCheck | null;
 }
 
 export interface ApiRequestFile {
@@ -427,6 +462,12 @@ export interface RequestAbilities {
   send_back: boolean;
   edit_payout: boolean;
   record_utr: boolean;
+  /**
+   * The payee's account — payment details, proofs, their change log, the SAP
+   * balance and ledger — is sent to Payment and later stages only. Before
+   * that the server omits them, so a screen must ask rather than assume.
+   */
+  see_account: boolean;
 }
 
 export interface ApiRequestFields {
@@ -449,6 +490,9 @@ export interface ApiRequestFields {
   priority: "LOW" | "MEDIUM" | "HIGH";
   remarks: string;
   owner_label: string;
+  /** Payment Purpose: SAP's Budget and Sub Budget cost-centre codes. */
+  budget_code: string;
+  sub_budget_code: string;
 }
 
 /** What the form sends to raise or edit a request. */
@@ -466,6 +510,9 @@ export interface ApiRequest extends ApiRequestFields {
   partner_not_in_sap: boolean;
   currency: string;
   owner_employee_id: number | null;
+  /** The Budget / Sub Budget names as SAP had them when the request was raised. */
+  budget_name: string;
+  sub_budget_name: string;
   status: ApiRequestStatus;
   created_by: ApiUser;
   created_on: string;
@@ -498,6 +545,12 @@ export interface ApiRequest extends ApiRequestFields {
   voucher: ApiVoucher | null;
   /** The latest return, send-back or rejection: what someone must act on. */
   last_decision: ApiRequestLog | null;
+  /**
+   * The viewer's OWN latest approve / reject / return / send-back on it, or
+   * null. `my_action` beside it is the same fact as a bare action string,
+   * which is what `deskStatus` files a request under.
+   */
+  my_decision?: ApiRequestLog | null;
   /* Detail only. */
   vouchers?: ApiVoucher[];
   logs?: ApiRequestLog[];
@@ -676,6 +729,36 @@ export const advancePaymentService = {
       guard(
         await api.get(
           `${BASE}/open-other-documents/${query({
+            company,
+            card_code: cardCode,
+            limit: DOCUMENT_LIMIT,
+          })}`,
+        ),
+      ),
+    ),
+
+  /**
+   * The company's Budget and Sub Budget cost centres, for Payment Purpose.
+   *
+   * Cost centres belong to ONE company's SAP, so this is re-read whenever the
+   * company changes and a code chosen under one company means nothing under
+   * another.
+   */
+  budgets: async (company: AdvancePaymentCompany): Promise<SapBudget[]> =>
+    rows<SapBudget>(guard(await api.get(`${BASE}/budgets/${query({ company })}`))),
+
+  /**
+   * A partner's whole open ledger (JDT1, as SAP's own ageing reads it),
+   * oldest due first, with the totals that say which way the balance runs.
+   */
+  partnerLedger: async (
+    company: AdvancePaymentCompany,
+    cardCode: string,
+  ): Promise<SapPartnerLedger> =>
+    unwrap<SapPartnerLedger>(
+      guard(
+        await api.get(
+          `${BASE}/open-documents/${query({
             company,
             card_code: cardCode,
             limit: DOCUMENT_LIMIT,
@@ -877,6 +960,24 @@ export const advancePaymentService = {
   /** One of a request's files as a data URI, for showing in the app. */
   requestFileImage: async (id: number, fileId: number): Promise<string> =>
     fetchDataUri(`${API_BASE_URL}${BASE}/requests/${id}/files/${fileId}/`),
+
+  /**
+   * OCR a PO's / bill's latest SAP attachment (a scan or a photo) and check
+   * its invoice fields against SAP. Can take ~10 s a page; the server caches
+   * the result, so reading the same document again is instant.
+   */
+  readDocumentAttachment: async (
+    company: AdvancePaymentCompany,
+    kind: SapAttachmentKind,
+    docEntry: number,
+  ): Promise<AttachmentReading> =>
+    unwrap<AttachmentReading>(
+      guard(
+        await api.get(
+          `${BASE}/document-attachment/read/${query({ company, kind, doc_entry: docEntry })}`,
+        ),
+      ),
+    ),
 
   /** A PO's or bill's latest SAP attachment as a data URI. */
   documentAttachmentImage: async (

@@ -24,6 +24,7 @@ import type { AttachmentStub } from "@/app/(main)/payments/_lib/types";
 import { appAlert } from "@/src/components/common/AppDialog";
 import { useAuth } from "@/src/context/AuthContext";
 import { COLORS } from "@/src/constants/theme";
+import useBackToOrigin from "@/src/hooks/useBackToOrigin";
 import { useRefreshOnFocus } from "@/src/hooks/useRefreshOnFocus";
 import { setHeaderEditHandler } from "@/src/utils/headerEdit";
 import { fs, ms, sp } from "@/src/utils/responsive";
@@ -45,6 +46,11 @@ import AttachmentViewerModal, {
   type AttachmentSource,
 } from "../components/AttachmentViewerModal";
 import { DecisionDone, DecisionPrompt } from "../components/DecisionDialogs";
+import EditChangeRows, {
+  ManualAccountFlag,
+} from "../components/EditChangeRows";
+import AttachmentReadingRows from "../components/AttachmentReadingRows";
+import PartnerLedgerCard from "../components/PartnerLedgerCard";
 import PayoutEditor, { type PayoutStatus } from "../components/PayoutEditor";
 import {
   paymentAgainstLabel,
@@ -56,10 +62,17 @@ import type { AdvanceRequestEntry } from "../logic/approvalData";
 import { PAYOUT_METHODS, isTransfer, type PayoutLine } from "../logic/payout";
 import { formatSize, type FileAttachment } from "../logic/attachments";
 import { fromApiRequest } from "../logic/requestApi";
-import { STATUS_LABEL, formatDateTime, priorityLabel } from "../logic/requestLabels";
+import {
+  STATUS_LABEL,
+  formatDateTime,
+  priorityLabel,
+  showsBalance,
+} from "../logic/requestLabels";
 import {
   REFERENCE_KINDS,
   allocationRows,
+  dueFirst,
+  dueLabel,
   allocationTotals,
   formatDate,
   resolveCase,
@@ -129,6 +142,11 @@ const money = (value: number) =>
 export default function AdvanceDetailsScreen() {
   const { id } = useLocalSearchParams<{ id?: string }>();
   const requestId = Number(id);
+
+  // Back goes where this page was opened from - the list, or the details
+  // page behind a progress page - never to the dashboard. See the hook.
+  useBackToOrigin("/(main)/advance-payments/tracking");
+
   // Only for the name a recorded UTR is stamped with — who read the proof.
   const { user } = useAuth();
 
@@ -421,7 +439,9 @@ export default function AdvanceDetailsScreen() {
   const { form } = entry;
   const c = resolveCase(form);
   const amount = requestAmount(form);
-  const rows = c.reference ? allocationRows(form) : [];
+  // Due documents first, the longest overdue at the top: what is due is what
+  // the payment is most likely for, and what an approver should meet first.
+  const rows = c.reference ? dueFirst(allocationRows(form), (row) => row.document) : [];
 
 /**
    * Where the money actually goes — for the stages that are asked about it.
@@ -733,6 +753,34 @@ export default function AdvanceDetailsScreen() {
 
           <Field icon="ribbon-outline" label="Ownership" value={form.ownership} full />
 
+          {/* What the money is for, in SAP's own terms. Shown by NAME with the
+              code beneath: an approver reads "Back Office", and the code is
+              what reconciles against SAP. Hidden entirely on a request raised
+              before the purpose existed, rather than shown as two dashes. */}
+          {form.budget || form.subBudget ? (
+            <>
+              <View style={styles.divider} />
+              <View style={styles.grid}>
+                <Field
+                  icon="pricetag-outline"
+                  label="Purpose (Budget)"
+                  value={form.budgetName || form.budget || "—"}
+                  sub={form.budgetName && form.budget !== form.budgetName ? form.budget : undefined}
+                />
+                <Field
+                  icon="pricetags-outline"
+                  label="Purpose (Sub Budget)"
+                  value={form.subBudgetName || form.subBudget || "—"}
+                  sub={
+                    form.subBudgetName && form.subBudget !== form.subBudgetName
+                      ? form.subBudget
+                      : undefined
+                  }
+                />
+              </View>
+            </>
+          ) : null}
+
           {c.expectedDate || c.expectedBillDate ? (
             <>
               <View style={styles.divider} />
@@ -870,6 +918,11 @@ export default function AdvanceDetailsScreen() {
                           ? ` · ${row.allocation.percentage}%`
                           : ""}
                       </Text>
+                      {/* Said in words rather than by colour alone: "Overdue
+                          since 03 Sep" is the reason this row is at the top. */}
+                      {dueLabel(row.document) ? (
+                        <Text style={styles.dueFlag}>{dueLabel(row.document)}</Text>
+                      ) : null}
                     </View>
                     <View style={styles.lineRight}>
                       <Text style={styles.lineAmount}>{money(row.calc.payment ?? 0)}</Text>
@@ -943,6 +996,17 @@ export default function AdvanceDetailsScreen() {
                           </Text>
                           <Ionicons name="open-outline" size={ms(13)} color={COLORS.primary} />
                         </TouchableOpacity>
+                      ) : null}
+                      {/* WHAT THE SCAN ACTUALLY SAYS, against what SAP holds.
+                          An approver's check, so it waits for the Payment
+                          stage — `showsBalance` is the same gate the payee's
+                          balance uses, and it asks the server rather than
+                          guessing. Never shown to the requester. */}
+                      {row.document.attachment && showsBalance(entry) ? (
+                        <AttachmentReadingRows
+                          attachment={row.document.attachment}
+                          stored={row.document.reading}
+                        />
                       ) : null}
                       {row.document.note ? (
                         <DetailLine label="Note" value={row.document.note} />
@@ -1018,11 +1082,23 @@ export default function AdvanceDetailsScreen() {
                   {log.remarks ? (
                     <Text style={styles.lineParty}>{log.remarks}</Text>
                   ) : null}
+                  {/* WHAT the edit changed, not just that it happened — the
+                      same Was / Now rows the Progress page's history shows,
+                      read from the same log row, so the two cannot disagree. */}
+                  <ManualAccountFlag log={log} />
+                  <EditChangeRows log={log} />
                 </View>
               </View>
             ))}
           </View>
         ) : null}
+
+        {/* ── What the payment is weighed against ──────────────────────
+            The payee's SAP balance and open items. `showsBalance` asks the
+            server whether this viewer may see the account at all, so the card
+            is absent — not empty — for the requester and for the approvals
+            before Payment. */}
+        {showsBalance(entry) ? <PartnerLedgerCard entry={entry} /> : null}
 
         {/* ── Payment Information ──────────────────────────────────────── */}
         {!can.edit_payout && entry.payout ? (
@@ -2343,6 +2419,7 @@ const styles = StyleSheet.create({
   lineText: { flex: 1, minWidth: 0 },
   lineNo: { fontSize: fs(13), fontWeight: "700", color: COLORS.text },
   lineParty: { fontSize: fs(11), color: COLORS.textSecondary, marginTop: sp(2) },
+  dueFlag: { fontSize: fs(10.5), fontWeight: "800", color: "#E25555", marginTop: sp(2) },
   lineAmount: {
     fontSize: fs(13),
     fontWeight: "800",

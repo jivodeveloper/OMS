@@ -143,6 +143,15 @@ export interface RequestForm {
   paymentDate: string;
   priority: Priority;
   remarks: string;
+  /**
+   * Payment Purpose: SAP's Budget (cost-centre dimension 3) and Sub Budget
+   * (dimension 4) codes, with their names. Per company, so a company change
+   * clears them.
+   */
+  budget: string;
+  budgetName: string;
+  subBudget: string;
+  subBudgetName: string;
 }
 
 export const EMPTY_FORM: RequestForm = {
@@ -174,6 +183,10 @@ export const EMPTY_FORM: RequestForm = {
   // unset radio group with no safe middle makes every requester choose High.
   priority: "MEDIUM",
   remarks: "",
+  budget: "",
+  budgetName: "",
+  subBudget: "",
+  subBudgetName: "",
 };
 
 /* ── The documents a payment can be made against ─────────────────────────── */
@@ -467,6 +480,13 @@ export function resolveCase(form: RequestForm): ResolvedCase {
 
 const CLEARED_DOCUMENTS = { selected: [] as OpenDocument[], allocations: {} } as const;
 const CLEARED_PARTNER = { partner: "", partnerName: "" } as const;
+/** Budgets are cost centres of ONE company's SAP. */
+const CLEARED_PURPOSE = {
+  budget: "",
+  budgetName: "",
+  subBudget: "",
+  subBudgetName: "",
+} as const;
 const CLEARED_REPAYMENT = {
   returnMethod: "",
   returnMethodOther: "",
@@ -569,7 +589,7 @@ export function applyChange(form: RequestForm, patch: Partial<RequestForm>): Req
   // are not the other companies', and a CardCode chosen under OIL may name
   // someone else — or no one — under MART.
   if (changed("company")) {
-    next = { ...next, ...CLEARED_PARTNER, ...CLEARED_DOCUMENTS };
+    next = { ...next, ...CLEARED_PARTNER, ...CLEARED_DOCUMENTS, ...CLEARED_PURPOSE };
   }
   if (changed("type")) {
     next = {
@@ -894,6 +914,42 @@ export function todayIso(now: Date = new Date()): string {
   return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
 }
 
+/* ── Due documents ───────────────────────────────────────────────────────── */
+
+/** Where a bill or PO stands against its due date: past it, on it, or neither. */
+export type DueState = "OVERDUE" | "DUE_TODAY" | null;
+
+export function dueState(doc: OpenDocument, today: string = todayIso()): DueState {
+  if (!doc.dueDate) return null;
+  if (doc.dueDate < today) return "OVERDUE";
+  if (doc.dueDate === today) return "DUE_TODAY";
+  return null;
+}
+
+/** "Overdue since 03 Sep 2026" / "Due today", or "" when not due. */
+export function dueLabel(doc: OpenDocument, today: string = todayIso()): string {
+  const state = dueState(doc, today);
+  if (state === "OVERDUE") return `Overdue since ${formatDate(doc.dueDate as string)}`;
+  if (state === "DUE_TODAY") return "Due today";
+  return "";
+}
+
+/**
+ * Due documents first, the longest overdue at the top; the rest keep their
+ * order. What is due is what the payment is most likely for, and what an
+ * approver should see first.
+ */
+export function dueFirst<T>(
+  items: T[],
+  docOf: (item: T) => OpenDocument,
+  today: string = todayIso(),
+): T[] {
+  const due = items
+    .filter((item) => dueState(docOf(item), today))
+    .sort((a, b) => (docOf(a).dueDate as string).localeCompare(docOf(b).dueDate as string));
+  return [...due, ...items.filter((item) => !dueState(docOf(item), today))];
+}
+
 /** "{label} cannot be before today." or null when the date is fine or empty. */
 export function pastDateError(label: string, date: string, today: string): string | null {
   return date && date < today ? `${label} cannot be before today.` : null;
@@ -936,6 +992,8 @@ export function validate(form: RequestForm, today: string = todayIso()): Validat
     missing.push("Payment Against (what it is)");
   }
   if (c.decided && !form.partner) missing.push(c.partnerLabel);
+  if (!form.budget) missing.push("Payment Purpose (Budget)");
+  if (!form.subBudget) missing.push("Payment Purpose (Sub Budget)");
   if (!form.department) missing.push("Department");
   else if (form.hasSubDepartments && !form.subDepartment) missing.push("Sub-department");
   if (c.expectedDate && !form.expectedDate) missing.push("Expected Bill Date");

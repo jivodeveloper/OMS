@@ -4,7 +4,12 @@ import { View } from "react-native";
 import AttachmentPicker from "@/app/(main)/payments/_components/AttachmentPicker";
 import type { PickedFile as PaymentsPickedFile } from "@/app/(main)/payments/_lib/pickAttachment";
 
-import { useDepartments, useOpenDocuments, useOwners } from "../hooks/useAdvanceMasters";
+import {
+  useBudgets,
+  useDepartments,
+  useOpenDocuments,
+  useOwners,
+} from "../hooks/useAdvanceMasters";
 import { attachFile, type FileAttachment } from "../logic/attachments";
 import {
   COMPANIES,
@@ -96,6 +101,7 @@ export default function AdvanceRequestForm({
   const c = resolveCase(form);
   const today = todayIso();
   const { departments } = useDepartments();
+  const budgets = useBudgets(form.company);
   /** The attachment being looked at, if any — see `PickedFileViewer`. */
   const [viewing, setViewing] = useState<FileAttachment | null>(null);
   const owners = useOwners();
@@ -497,6 +503,61 @@ export default function AdvanceRequestForm({
 
       {/* ── Who it belongs to ──────────────────────────────────────── */}
       <Card title="Additional Information">
+        {/* What the money is FOR, in SAP's own terms: its Budget and Sub
+            Budget cost centres. Both belong to one company's SAP, so they
+            wait on the company and clear with it — picking a code under OIL
+            and then switching to MART would otherwise send a code that names
+            a different cost centre, or none. */}
+        <Select
+          label="Payment Purpose (Budget)"
+          required
+          searchable
+          data={budgets.optionsFor("BUDGET", form.budget, form.budgetName)}
+          value={form.budget}
+          onChange={(value) =>
+            change({
+              budget: value,
+              budgetName:
+                budgets.optionsFor("BUDGET", "", "").find((o) => o.value === value)?.label ?? "",
+            })
+          }
+          placeholder={
+            !form.company
+              ? "Choose the company first"
+              : budgets.loading
+                ? "Loading budgets…"
+                : "Select budget"
+          }
+          disabled={!form.company}
+          error={errorFor("Payment Purpose (Budget)") ?? budgets.error ?? undefined}
+        />
+
+        <Select
+          label="Payment Purpose (Sub Budget)"
+          required
+          searchable
+          data={budgets.optionsFor("SUB_BUDGET", form.subBudget, form.subBudgetName)}
+          value={form.subBudget}
+          onChange={(value) =>
+            change({
+              subBudget: value,
+              subBudgetName:
+                budgets
+                  .optionsFor("SUB_BUDGET", "", "")
+                  .find((o) => o.value === value)?.label ?? "",
+            })
+          }
+          placeholder={
+            !form.company
+              ? "Choose the company first"
+              : budgets.loading
+                ? "Loading sub budgets…"
+                : "Select sub budget"
+          }
+          disabled={!form.company}
+          error={errorFor("Payment Purpose (Sub Budget)") ?? budgets.error ?? undefined}
+        />
+
         <Select
           label="Department"
           required

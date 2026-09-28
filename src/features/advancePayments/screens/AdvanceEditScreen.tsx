@@ -14,6 +14,7 @@ import { Button } from "react-native-paper";
 
 import { appAlert } from "@/src/components/common/AppDialog";
 import { COLORS, RADIUS, SPACING } from "@/src/constants/theme";
+import useBackToOrigin from "@/src/hooks/useBackToOrigin";
 import {
   advancePaymentError,
   advancePaymentProblems,
@@ -22,6 +23,10 @@ import {
 } from "@/src/services/advancePayment.service";
 
 import AdvanceRequestForm from "../components/AdvanceRequestForm";
+import {
+  useBackgroundReadings,
+  withReadings,
+} from "../hooks/useAttachmentReadings";
 import type { FileAttachment } from "../logic/attachments";
 import { fromApiRequest, toApiRequest } from "../logic/requestApi";
 import { EMPTY_FORM, validate, type RequestForm } from "../logic/rules";
@@ -35,6 +40,10 @@ import { EMPTY_FORM, validate, type RequestForm } from "../logic/rules";
  * are listed beside newly picked ones; taking one off removes it on save.
  */
 export default function AdvanceEditScreen() {
+  // Back goes where this page was opened from - the list, or the details
+  // page behind a progress page - never to the dashboard. See the hook.
+  useBackToOrigin("/(main)/advance-payments/tracking");
+
   const { id } = useLocalSearchParams<{ id?: string }>();
   const requestId = Number(id);
 
@@ -75,6 +84,10 @@ export default function AdvanceEditScreen() {
     };
   }, [requestId]);
 
+  // Reads the SAP attachment of any document ADDED by this edit; one already
+  // carrying a reading is left as it was read when the request was raised.
+  const background = useBackgroundReadings(form.selected);
+
   const { missing, problems } = validate(form);
   const blocking = problems[0] ?? (missing.length ? `${missing[0]} is still needed.` : "");
   const ready = blocking === "" && request !== null;
@@ -98,12 +111,18 @@ export default function AdvanceEditScreen() {
       const picked = files
         .map((attachment) => attachment.file)
         .filter((file): file is NonNullable<typeof file> => file !== undefined);
-      const saved = await advancePaymentService.editRequest(request.id, toApiRequest(form), {
-        files: picked,
-        removeFileIds,
-        resubmit,
-        version: request.flow?.version,
-      });
+      // A document already carrying a reading is left alone; only one newly
+      // added to the request is read. See `useBackgroundReadings`.
+      const saved = await advancePaymentService.editRequest(
+        request.id,
+        toApiRequest(withReadings(form, background.readings)),
+        {
+          files: picked,
+          removeFileIds,
+          resubmit,
+          version: request.flow?.version,
+        },
+      );
       appAlert(
         resubmit ? "Resubmitted" : "Saved",
         resubmit

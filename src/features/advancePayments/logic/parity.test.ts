@@ -26,6 +26,9 @@ import {
   EMPTY_FORM,
   expectedPeriodError,
   pastDateError,
+  dueFirst,
+  dueLabel,
+  dueState,
   resolveCase,
   validate,
   type RequestForm,
@@ -244,10 +247,56 @@ describe("the ported Advance Payment rules", () => {
     assert.deepEqual(missing, [
       "Company",
       "Type",
+      // The Payment Purpose sits between Type and Department, exactly where
+      // `validate` asks for it on the web.
+      "Payment Purpose (Budget)",
+      "Payment Purpose (Sub Budget)",
       "Department",
       "Ownership",
       "Payment Date",
       "Remarks",
     ]);
+  });
+
+  it("asks for the Payment Purpose", () => {
+    const { missing } = validate(EMPTY_FORM, "2026-09-26");
+    assert.ok(missing.includes("Payment Purpose (Budget)"));
+    assert.ok(missing.includes("Payment Purpose (Sub Budget)"));
+  });
+
+  it("clears the Payment Purpose when the company changes: each company has its own budgets", () => {
+    // `bpl`-style scoping applies to cost centres too — "BackOff" under OIL is
+    // not the same cost centre as "BackOff" under MART, and may not exist at
+    // all. Carrying the code across would post the money to the wrong place.
+    const form = applyChange(
+      { ...EMPTY_FORM, company: "OIL", budget: "BackOff", subBudget: "IT" },
+      { company: "MART" },
+    );
+    assert.deepEqual([form.budget, form.subBudget], ["", ""]);
+  });
+});
+
+describe("due documents", () => {
+  const doc = (id: string, dueDate?: string): OpenDocument => ({
+    id, number: id, date: "2026-08-01", partner: "V", original: 100, paid: 0, open: 100, dueDate,
+  });
+  const TODAY = "2026-09-23";
+
+  it("calls a document due on or after its due date", () => {
+    assert.equal(dueState(doc("a", "2026-09-01"), TODAY), "OVERDUE");
+    assert.equal(dueState(doc("b", TODAY), TODAY), "DUE_TODAY");
+    assert.equal(dueState(doc("c", "2026-10-01"), TODAY), null);
+    // No due date is not "due" — a PO without one is not overdue, it is silent.
+    assert.equal(dueState(doc("d"), TODAY), null);
+    assert.equal(dueLabel(doc("b", TODAY), TODAY), "Due today");
+    assert.equal(dueLabel(doc("c", "2026-10-01"), TODAY), "");
+  });
+
+  it("puts due documents first, the longest overdue at the top, the rest in their order", () => {
+    const docs = [doc("later", "2026-10-01"), doc("today", TODAY), doc("none"), doc("old", "2026-08-15")];
+    assert.deepEqual(
+      dueFirst(docs, (d) => d, TODAY).map((d) => d.id),
+      ["old", "today", "later", "none"],
+    );
   });
 });
