@@ -33,7 +33,11 @@ import StateWrapper from "@/src/components/common/StateWrapper";
 import { canAccessScreen } from "@/src/constants/pages";
 import PaymentHomeScreen from "@/src/features/payments/PaymentHomeScreen";
 import ModuleHomeScreen from "@/src/features/home/ModuleHomeScreen";
-import { backdateHome, productionHome } from "@/src/features/home/moduleConfigs";
+import {
+  advancePaymentHome,
+  backdateHome,
+  productionHome,
+} from "@/src/features/home/moduleConfigs";
 import { homeModuleFor } from "@/src/features/home/moduleHome";
 import { refreshLiveData } from "@/src/cache";
 import { fs, ms, sp } from "@/src/utils/responsive";
@@ -157,6 +161,8 @@ export default function DashboardScreen() {
       return <ModuleHomeScreen config={productionHome} />;
     case "backdate":
       return <ModuleHomeScreen config={backdateHome} />;
+    case "advancePayments":
+      return <ModuleHomeScreen config={advancePaymentHome} />;
     // "orders", and the null case — a reports-only or settings-only user who
     // holds no module at all keeps exactly what they saw before.
     default:

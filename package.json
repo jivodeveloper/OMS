@@ -10,7 +10,7 @@
     "web": "expo start --web",
     "lint": "expo lint",
     "postinstall": "node scripts/patch-android-cmake.js",
-    "test": "node --test \"src/**/*.test.ts\""
+    "test": "node --import ./scripts/testResolver.mjs --test \"src/**/*.test.ts\""
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",

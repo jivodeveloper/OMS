@@ -26,6 +26,10 @@ import {
   productionService,
   type ProductionOrder,
 } from "@/src/services/production.service";
+import { advancePaymentService } from "@/src/services/advancePayment.service";
+import { fromApiRequest } from "@/src/features/advancePayments/logic/requestApi";
+import { requestAmount } from "@/src/features/advancePayments/logic/approvalData";
+import { formatINR } from "@/src/features/advancePayments/logic/rules";
 
 /**
  * Approval outcome -> bucket, shared by both modules.
@@ -145,4 +149,84 @@ export const backdateHome: ModuleHomeConfig = {
       pathname: "/(main)/backdate/tracking-details",
       params: { id: String(row.id) },
     } as never),
+};
+
+/* ================================================================== *
+ * Advance Payments
+ * ================================================================== */
+
+/**
+ * The same page again, for advance payment requests.
+ *
+ * BOTH SCOPES, AND NEITHER IS REQUIRED. A requester may read `mine` and an
+ * approver `desk`; a user holding one key is refused the other outright, and
+ * `load()` has no way to know which they hold. So both are asked for and only
+ * the answers that came back are used — a 403 on the scope this user does not
+ * have is expected, not an error to show them.
+ *
+ * The desk copy wins a duplicate for the same reason it does on the list: only
+ * it says the request is awaiting this user.
+ */
+export const advancePaymentHome: ModuleHomeConfig = {
+  heroCount: "Total Requests",
+  totalLabel: "Total Requests",
+  recentTitle: "Recent Advance Payments",
+  empty: "No recent requests",
+  trackingRoute: "/(main)/advance-payments/tracking",
+  // This list filters on the status itself, so the bucket is sent as it is.
+  filterParamsFor: (bucket: HomeBucket | "all"): Record<string, string> => {
+    if (bucket === "all" || bucket === "other") return {};
+    return { status: AP_STATUS_FOR[bucket] };
+  },
+  load: async (): Promise<HomeRow[]> => {
+    const [mine, desk] = await Promise.allSettled([
+      advancePaymentService.requests("mine"),
+      advancePaymentService.requests("desk"),
+    ]);
+    const seen = new Set<number>();
+    const rows: HomeRow[] = [];
+    for (const settled of [desk, mine]) {
+      if (settled.status !== "fulfilled") continue;
+      for (const api of settled.value) {
+        if (seen.has(api.id)) continue;
+        seen.add(api.id);
+        const entry = fromApiRequest(api);
+        rows.push({
+          id: entry.serverId,
+          docNo: entry.requestNo,
+          party: entry.form.partnerName || entry.form.partner || "—",
+          right: formatINR(requestAmount(entry.form)),
+          date: entry.requestedOn,
+          bucket: AP_BUCKET_FOR[entry.status],
+        });
+      }
+    }
+    return rows;
+  },
+  openDetail: (row: HomeRow) =>
+    router.push({
+      pathname: "/(main)/advance-payments/details",
+      params: { id: String(row.id) },
+    } as never),
+};
+
+/**
+ * Where each status is counted.
+ *
+ * RETURNED and CANCELLED are neither approved nor rejected and are counted in
+ * Total only — the same treatment `OBSOLETE` gets above, and for the same
+ * reason: a card must not hold rows the list it opens cannot show.
+ */
+const AP_BUCKET_FOR: Record<string, HomeBucket> = {
+  PENDING: "pending",
+  APPROVED: "approved",
+  REJECTED: "rejected",
+  RETURNED: "other",
+  CANCELLED: "other",
+};
+
+const AP_STATUS_FOR: Record<Exclude<HomeBucket, "other">, string> = {
+  pending: "PENDING",
+  approved: "APPROVED",
+  rejected: "REJECTED",
 };

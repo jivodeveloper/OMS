@@ -19,6 +19,15 @@ interface AttachmentPickerProps {
   onRemove: (id: string) => void;
   /** Cap per section — the sheet is refused once this many are attached. */
   maxFiles?: number;
+  /**
+   * Open one attached file. Optional: without it the tiles are read-only, which
+   * is how the payment screens have always had them.
+   *
+   * Given it, the whole tile becomes tappable — a person who has just attached
+   * three photos of a quotation needs to check WHICH one they attached, and a
+   * thumbnail the size of a stamp does not answer that.
+   */
+  onOpen?: (file: AttachmentStub) => void;
 }
 
 /**
@@ -34,6 +43,7 @@ export default function AttachmentPicker({
   onAdd,
   onRemove,
   maxFiles = 5,
+  onOpen,
 }: AttachmentPickerProps) {
   const [sheetOpen, setSheetOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -99,8 +109,20 @@ export default function AttachmentPicker({
         <View style={styles.previewGrid}>
           {attachments.map((file) => {
             const isPdf = file.name.toLowerCase().endsWith(".pdf");
+            const Tile = onOpen ? TouchableOpacity : View;
             return (
-              <View key={file.id} style={styles.previewTile}>
+              <Tile
+                key={file.id}
+                style={styles.previewTile}
+                {...(onOpen
+                  ? {
+                      activeOpacity: 0.85,
+                      onPress: () => onOpen(file),
+                      accessibilityRole: "button" as const,
+                      accessibilityLabel: `Open ${file.name}`,
+                    }
+                  : {})}
+              >
                 <View style={styles.previewImage}>
                   {/* A picked image has a local uri, so show the real thing —
                       a collector needs to confirm the cheque is legible. */}
@@ -139,7 +161,7 @@ export default function AttachmentPicker({
                 >
                   <Ionicons name="close-circle" size={20} color={COLORS.error} />
                 </TouchableOpacity>
-              </View>
+              </Tile>
             );
           })}
         </View>

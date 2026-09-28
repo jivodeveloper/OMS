@@ -860,18 +860,6 @@ export default function BillingOrderList() {
     };
   }, [activeTab, orders]);
 
-  const formatDate = (value?: string) => {
-    if (!value) return "-";
-    const normalizedValue =
-      typeof value === "string" &&
-      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?$/.test(value)
-        ? `${value}Z`
-        : value;
-    const parsed = new Date(normalizedValue);
-    if (Number.isNaN(parsed.getTime())) return value;
-    return parsed.toLocaleDateString("en-GB");
-  };
-
   const formatDateTime = (value?: string) => {
     if (!value) return "-";
     const normalizedValue =
@@ -1084,11 +1072,12 @@ export default function BillingOrderList() {
       )}
 
       <View style={styles.metaWrap}>
+        {/* Category leads the row. It is what the web detail page shows
+            first and what a reviewer sorts these cards by; the delivery date
+            and PO that used to sit here were dropped. */}
         <View style={styles.metaChip}>
-          <Ionicons name="calendar-outline" size={14} color={COLORS.primary} />
-          <Text style={styles.metaText}>
-            Delivery: {formatDate(item.delivery_date)}
-          </Text>
+          <Ionicons name="pricetags-outline" size={14} color={COLORS.primary} />
+          <Text style={styles.metaText}>Category: {getCategoryText(item)}</Text>
         </View>
         <View style={styles.metaChip}>
           <Ionicons name="cube-outline" size={14} color={COLORS.primary} />
@@ -1102,16 +1091,6 @@ export default function BillingOrderList() {
         )}
       </View>
 
-      <View style={styles.metaWrap}>
-        <View style={styles.metaChip}>
-          <Ionicons name="pricetags-outline" size={14} color={COLORS.primary} />
-          <Text style={styles.metaText}>Category: {getCategoryText(item)}</Text>
-        </View>
-        <View style={styles.metaChip}>
-          <Ionicons name="document-text-outline" size={14} color={COLORS.primary} />
-          <Text style={styles.metaText}>PO: {item.po_number || "-"}</Text>
-        </View>
-      </View>
 
       <View style={styles.amountRow}>
         <Text style={styles.amountLabel}>Total Amount</Text>

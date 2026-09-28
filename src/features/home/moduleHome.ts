@@ -42,7 +42,8 @@ export type ModuleKey =
   | "payments"
   | "deposits"
   | "production"
-  | "backdate";
+  | "backdate"
+  | "advancePayments";
 
 /**
  * Deposit screens, which share the `payments/` route prefix.
@@ -151,6 +152,19 @@ export const MODULE_PRIORITY: ModuleDef[] = [
     label: "BackDate",
     screens: ["backdate/create", "backdate/tracking"],
     ownsRoute: (route: string) => route.startsWith("backdate/"),
+    homeShowsEntries: true,
+  },
+  {
+    key: "advancePayments",
+    label: "Advance Payments",
+    // NOT the details or edit screens: both open for either side, so counting
+    // them would make the module look held by anybody who can be sent a link.
+    screens: [
+      "advance-payments/create",
+      "advance-payments/tracking",
+      "advance-payments/approval",
+    ],
+    ownsRoute: (route: string) => route.startsWith("advance-payments/"),
     homeShowsEntries: true,
   },
 ];

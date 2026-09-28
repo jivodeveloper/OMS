@@ -25,6 +25,12 @@ const ENV_BASE_URL =
 const BASE_URL = ENV_BASE_URL || DEFAULT_BASE_URL;
 export const API_BASE_URL = BASE_URL;
 const DEFAULT_REQUEST_TIMEOUT_MS = 70000;
+// An Advance Payment stage action can post an outgoing payment to SAP before it
+// answers, which is slower than an ordinary write. The web client allows the
+// same 120s. Aborting here would show a failure for something the server went
+// on to complete — and invite the user to approve it twice.
+const ADVANCE_PAYMENT_REQUEST_TIMEOUT_MS = 120000;
+const PAYMENT_PROOF_REQUEST_TIMEOUT_MS = 180000;
 const STATUS_TRACKING_REQUEST_TIMEOUT_MS = 45000;
 const SAP_SYNC_REQUEST_TIMEOUT_MS = 0;
 const isExpoGo = Constants.appOwnership === 'expo';
@@ -61,6 +67,16 @@ if (process.env.EXPO_PUBLIC_API_URL?.trim() && !process.env.EXPO_PUBLIC_API_BASE
 const getTimeoutForEndpoint = (endpoint: string): number => {
   if (endpoint.startsWith('/orders/status-tracking/')) {
     return STATUS_TRACKING_REQUEST_TIMEOUT_MS;
+  }
+
+  if (endpoint.startsWith('/advance-payments/requests/')) {
+    return ADVANCE_PAYMENT_REQUEST_TIMEOUT_MS;
+  }
+
+  // Reading a payment proof is OCR on a photographed statement: the server's
+  // own screen warns it can take a minute, so the app must wait at least that.
+  if (endpoint.startsWith('/advance-payments/payment-proof/')) {
+    return PAYMENT_PROOF_REQUEST_TIMEOUT_MS;
   }
 
   if (

@@ -38,6 +38,7 @@ const WORK_QUEUE_SECTIONS = [
   "payments",
   "backdate",
   "production",
+  "advance-payments",
 ];
 
 /**

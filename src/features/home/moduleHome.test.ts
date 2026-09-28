@@ -44,7 +44,14 @@ describe("the priority order itself", () => {
     // asserted literally rather than derived from the table under test.
     assert.deepEqual(
       MODULE_PRIORITY.map((m) => m.key),
-      ["orders", "payments", "deposits", "production", "backdate"],
+      [
+        "orders",
+        "payments",
+        "deposits",
+        "production",
+        "backdate",
+        "advancePayments",
+      ],
     );
   });
 
@@ -132,7 +139,7 @@ describe("a user holding several modules", () => {
     assert.equal(homeModuleFor(everybody)?.key, "orders");
     assert.deepEqual(
       sidebarModulesFor(everybody).map((m) => m.key),
-      ["payments", "deposits", "production", "backdate"],
+      ["payments", "deposits", "production", "backdate", "advancePayments"],
     );
   });
 });

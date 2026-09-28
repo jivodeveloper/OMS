@@ -27,6 +27,20 @@ interface DropdownProps {
   flatListProps?: Omit<FlatListProps<any>, 'renderItem' | 'data'>;
   floatingLabel?: boolean;
   noBottomSpacing?: boolean;
+  /**
+   * The search text changed.
+   *
+   * For a list that is SEARCHED ON THE SERVER — SAP's vendors are 500+ per
+   * company and the lookup caps there, so filtering what already arrived would
+   * silently hide anyone past the cap. Pair it with `searchQuery` returning
+   * true, otherwise the local filter runs again over the server's answer.
+   */
+  onSearchTextChange?: (text: string) => void;
+  /** Overrides the local match. `() => true` = "the server already filtered". */
+  searchQuery?: (keyword: string, labelValue: string) => boolean;
+  /** A richer row than the label alone — e.g. a name with its SAP code under it. */
+  renderItem?: (item: any, selected?: boolean) => React.ReactElement | null;
+  searchPlaceholder?: string;
 }
 
 export default function Dropdown({
@@ -51,6 +65,10 @@ export default function Dropdown({
   flatListProps,
   floatingLabel = false,
   noBottomSpacing = false,
+  onSearchTextChange,
+  searchQuery,
+  renderItem,
+  searchPlaceholder = 'Search...',
 }: DropdownProps) {
   const normalizedData = Array.isArray(data) ? data : [];
   const showLabel = String(label || '').trim().length > 0;
@@ -90,7 +108,10 @@ export default function Dropdown({
         labelField="label"
         valueField="value"
         placeholder={placeholder}
-        searchPlaceholder="Search..."
+        searchPlaceholder={searchPlaceholder}
+        onChangeText={onSearchTextChange}
+        searchQuery={searchQuery}
+        renderItem={renderItem}
         value={value}
         onChange={(item) => onChange(item.value)}
         disable={disabled}

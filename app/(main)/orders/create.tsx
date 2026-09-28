@@ -523,6 +523,34 @@ const calculateRowItemTotal = (
   return (totalPcs * price).toFixed(2);
 };
 
+/**
+ * The dispatch branch a new order starts on.
+ *
+ * FACTORY is where orders actually dispatch from, so it is the right answer
+ * for almost every one of them and picking it by hand each time was pure
+ * ceremony.
+ *
+ * Matched on the NAME, never on the id. `bpl_id` is unique only within a
+ * business line: id 2 is FACTORY under OIL and BEVERAGES but HARYANA under
+ * MART, so a hard-coded id would quietly start Mart orders at a sales office.
+ *
+ * Substring match, the same rule `useSalesOrderForm` uses on the web, so the
+ * two forms cannot start a new order on different branches.
+ *
+ * MART has no FACTORY branch at all. There this falls back to what the field
+ * did before — auto-select only when the list offers a single choice, and
+ * otherwise leave it for the user.
+ */
+const defaultBranchValue = (
+  list: { label: string; value: number }[],
+): number | null => {
+  const factory = list.find((d) =>
+    String(d.label ?? "").trim().toLowerCase().includes("factory"),
+  );
+  if (factory) return factory.value;
+  return list.length === 1 ? list[0].value : null;
+};
+
 const FOC_PRICE_LIST_BASIC = 0;
 
 export function OrderEntryScreen({
@@ -665,9 +693,9 @@ export function OrderEntryScreen({
   }, [companies, company]);
 
   useEffect(() => {
-    if (branch == null && branches.length === 1) {
-      setBranch(branches[0].value);
-    }
+    if (branch != null) return;
+    const preferred = defaultBranchValue(branches);
+    if (preferred != null) setBranch(preferred);
   }, [branch, branches]);
 
   /**
@@ -682,7 +710,7 @@ export function OrderEntryScreen({
   useEffect(() => {
     if (isEditMode || branch == null || branches.length === 0) return;
     if (branches.some((d) => d.value === branch)) return;
-    setBranch(branches[0]?.value ?? null);
+    setBranch(defaultBranchValue(branches) ?? branches[0]?.value ?? null);
   }, [branch, branches, isEditMode]);
 
   const [partyProducts, setPartyProducts] = useState<any[]>([]);
@@ -3256,7 +3284,7 @@ export function OrderEntryScreen({
 
   const handleClear = useCallback((options?: { keepSuccessModal?: boolean }) => {
     setPartyName(null);
-    setBranch(branches.length === 1 ? branches[0].value : null);
+    setBranch(defaultBranchValue(branches));
     setCompany(companies.length === 1 ? companies[0].value : null);
     setPoNumber("");
     setComment("");

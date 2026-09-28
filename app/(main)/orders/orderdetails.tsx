@@ -569,6 +569,22 @@ export default function OrderDetailsScreen() {
   );
   const grandTotalAmount =
     order?.grand_total ?? subtotalAmount + calculatedTaxAmount;
+
+  // Litres across the whole order — the same number the web detail page shows
+  // as "Total Ltrs", computed by the same rule so the two cannot disagree.
+  // Per line it trusts the server's `total_ltrs`; only where that is absent
+  // does it fall back to the line's own litres plus the scheme qty riding on
+  // it, which is exactly what each item row already displays.
+  const totalLitres = itemsList.reduce((sum: number, item: any) => {
+    const stated = toNumber(item?.total_ltrs);
+    if (stated > 0) return sum + stated;
+
+    const schemeQty = getItemSchemes(item).reduce(
+      (qty: number, scheme: any) => qty + getSchemeQty(scheme),
+      0,
+    );
+    return sum + toNumber(item?.ltrs) + schemeQty;
+  }, 0);
   const totalSubLabelText =
     calculatedTaxAmount > 0
       ? `Includes tax of ₹${formatCurrencyAmount(calculatedTaxAmount)}`
@@ -1145,6 +1161,33 @@ export default function OrderDetailsScreen() {
                 <Text style={styles.totalAmountHint}>Final payable</Text>
               </View>
             </LinearGradient>
+
+            {/* ===== Total Ltrs =====
+                The web detail page carries this beside the money as a fifth
+                KPI. The app has no KPI row, so it sits directly under the
+                grand total in the same card shape — volume is the other
+                figure an approver checks, and reading it meant adding up the
+                item rows by hand. Kept on a plain surface rather than the
+                brand gradient: two gradient cards in a row would read as two
+                grand totals. */}
+            <View style={[styles.totalCard, styles.litresCard]}>
+              <View style={styles.totalInfo}>
+                <Text style={[styles.totalLabel, styles.litresLabel]}>
+                  Total Ltrs
+                </Text>
+                <Text style={[styles.totalSubLabel, styles.litresSubLabel]}>
+                  Volume across all items
+                </Text>
+              </View>
+              <View style={styles.totalAmountWrap}>
+                <Text style={[styles.totalValue, styles.litresValue]}>
+                  {totalLitres.toFixed(2)}
+                </Text>
+                <Text style={[styles.totalAmountHint, styles.litresHint]}>
+                  Litres
+                </Text>
+              </View>
+            </View>
           </ScrollView>
 
           {/* ===== Fixed bottom action bar ===== */}
@@ -1772,6 +1815,25 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     marginTop: 4,
   },
+  // Same box as the grand total above it, minus the gradient: white on the
+  // page, so the money keeps the emphasis and this reads as the figure
+  // beside it rather than a second headline. `marginTop: 0` because RN does
+  // not collapse margins — without it the two cards sit 32px apart.
+  litresCard: {
+    marginTop: 0,
+    backgroundColor: COLORS.surface,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    shadowColor: "#0F172A",
+    shadowOpacity: 0.06,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 2,
+  },
+  litresLabel: { color: COLORS.text },
+  litresSubLabel: { color: COLORS.textSecondary },
+  litresValue: { color: COLORS.primaryDark },
+  litresHint: { color: COLORS.textSecondary },
   // Marks a giveaway the engine proposed, so it reads differently from one a
   // person chose. Outline, so it qualifies the badge rather than competing.
   // A giveaway, nested inside the card of the item that earned it. Indented

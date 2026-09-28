@@ -345,7 +345,10 @@ export default function MainLayout() {
             // BackDate's detail screen publishes an Edit action the same way,
             // so it opts out of the blanket "no header actions for admin" rule
             // too — without this an admin sees no Edit pencil at all.
-            route.name === "backdate/tracking-details";
+            route.name === "backdate/tracking-details" ||
+            // The advance payment detail screen publishes an Edit action the
+            // same way, so it opts out of "no header actions for admin" too.
+            route.name === "advance-payments/details";
           // Approval Details carries an Edit action next to the bell.
           const isApprovalDetails = route.name === "approval/approval-details";
 
@@ -762,6 +765,72 @@ export default function MainLayout() {
           name="backdate/edit-request"
           options={{
             title: "Edit BackDate Request",
+            drawerItemStyle: hiddenStyle,
+          }}
+        />
+
+        {/* ── Advance Payments ──────────────────────────────────────────
+            Two drawer entries, like BackDate: one to raise a request, one
+            list that serves requester and approver alike. */}
+        <Drawer.Screen
+          name="advance-payments/create"
+          options={{
+            title: "Advance Payment Request",
+            drawerLabel: "New Advance Payment",
+            drawerIcon: ({ color }) => (
+              <Ionicons name="wallet-outline" size={22} color={color} />
+            ),
+            drawerItemStyle: isVisible("advance-payments/create")
+              ? visibleStyle
+              : hiddenStyle,
+          }}
+        />
+        <Drawer.Screen
+          name="advance-payments/tracking"
+          options={{
+            title: "Advance Payments",
+            drawerLabel: "Advance Payments",
+            drawerIcon: ({ color }) => (
+              <Ionicons name="card-outline" size={22} color={color} />
+            ),
+            drawerItemStyle: isVisible("advance-payments/tracking")
+              ? visibleStyle
+              : hiddenStyle,
+          }}
+        />
+        <Drawer.Screen
+          name="advance-payments/approval"
+          options={{
+            title: "Advance Payment Approval",
+            drawerLabel: "Advance Approvals",
+            drawerIcon: ({ color }) => (
+              <Ionicons name="shield-checkmark-outline" size={22} color={color} />
+            ),
+            drawerItemStyle: isVisible("advance-payments/approval")
+              ? visibleStyle
+              : hiddenStyle,
+          }}
+        />
+        <Drawer.Screen
+          name="advance-payments/details"
+          options={{
+            title: "Advance Payment Details",
+            // Reached from a list card or a deep link, never from the drawer.
+            drawerItemStyle: hiddenStyle,
+          }}
+        />
+        <Drawer.Screen
+          name="advance-payments/tracking-progress"
+          options={{
+            title: "Advance Payment Progress",
+            // Reached from a list card or a push, never from the drawer.
+            drawerItemStyle: hiddenStyle,
+          }}
+        />
+        <Drawer.Screen
+          name="advance-payments/edit-request"
+          options={{
+            title: "Edit Advance Payment",
             drawerItemStyle: hiddenStyle,
           }}
         />

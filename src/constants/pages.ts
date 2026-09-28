@@ -103,6 +103,37 @@ export const ASSIGNABLE_PAGES: AppPage[] = [
     ],
   },
   {
+    // Advance Payments — raise a request to pay a vendor or an employee ahead
+    // of the bill. The grant opens the form AND the list it feeds, plus the two
+    // screens a card leads to: granting the form alone would leave the
+    // requester unable to see what became of what they raised.
+    key: "Advance_Payment",
+    label: "Advance Payment Request",
+    screens: [
+      "advance-payments/create",
+      "advance-payments/tracking",
+      "advance-payments/details",
+      "advance-payments/tracking-progress",
+      "advance-payments/edit-request",
+    ],
+  },
+  {
+    // Opens the approval desk. NOT sufficient to act on any given request —
+    // the server also requires the holder to be that stage's effective user,
+    // so this grant shows the desk and nothing more.
+    key: "Advance_Payment_Approval",
+    label: "Advance Payment Approval",
+    screens: [
+      "advance-payments/approval",
+      "advance-payments/tracking",
+      "advance-payments/details",
+      "advance-payments/tracking-progress",
+      // An approver edits to correct a request in place, so the edit screen
+      // opens for them too. `can.edit` decides per request.
+      "advance-payments/edit-request",
+    ],
+  },
+  {
     // Production Orders — SAP plans them, OMS approves them.
     //
     // There is no "create" screen to grant, and there never will be: a planner
@@ -157,6 +188,7 @@ const ALL_PAYMENT_ACTIONS = Object.values(PAYMENT_ACTIONS);
  */
 const ALL_BACKDATE_ACTIONS = ["BackDate", "BackDate_Approval"];
 const ALL_PRODUCTION_ACTIONS = ["Production_Order", "Production_Order_Approval"];
+const ALL_ADVANCE_PAYMENT_ACTIONS = ["Advance_Payment", "Advance_Payment_Approval"];
 
 export type PaymentAction =
   (typeof PAYMENT_ACTIONS)[keyof typeof PAYMENT_ACTIONS];
@@ -258,6 +290,23 @@ export const SCREEN_KEYS: Record<string, string[]> = {
   // Reached from a card, a deep link or a push — never from the drawer.
   "production/tracking-details": ALL_PRODUCTION_ACTIONS,
   "production/tracking-progress": ALL_PRODUCTION_ACTIONS,
+
+  // Advance Payments — two keys, spelled as the backend registry issues them
+  // (`advance_payment/permissions.py`: `Advance_Payment`, and `views.py`:
+  // `Advance_Payment_Approval`). Raising and approving are unrelated jobs, so
+  // neither key implies the other, and the SAP lookups the form needs are
+  // gated on `Advance_Payment` alone.
+  "advance-payments/create": ["Advance_Payment"],
+  // One list serves both sides, showing what the viewer is entitled to.
+  "advance-payments/tracking": ALL_ADVANCE_PAYMENT_ACTIONS,
+  "advance-payments/approval": ["Advance_Payment_Approval"],
+  // Reached from a card or a deep link, never from the drawer. Which ACTIONS it
+  // offers is the server's `can` block — being able to open it is not consent.
+  "advance-payments/details": ALL_ADVANCE_PAYMENT_ACTIONS,
+  "advance-payments/tracking-progress": ALL_ADVANCE_PAYMENT_ACTIONS,
+  // Editing is open to the creator AND to an approver correcting a request in
+  // place, so both keys admit here; `can.edit` decides per request.
+  "advance-payments/edit-request": ALL_ADVANCE_PAYMENT_ACTIONS,
 };
 
 /**
@@ -448,7 +497,7 @@ export const resolveOrdersRoute = (
 
 /** One thing a user can create, for the Create chooser sheet. */
 export interface CreateTarget {
-  key: "payment" | "deposit" | "order" | "backdate";
+  key: "payment" | "deposit" | "order" | "backdate" | "advancePayment";
   label: string;
   description: string;
   icon: string;
@@ -488,6 +537,14 @@ const CREATE_TARGETS: CreateTarget[] = [
     icon: "time-outline",
     screen: "backdate/create",
     route: "/(main)/backdate/create",
+  },
+  {
+    key: "advancePayment",
+    label: "Advance Payment",
+    description: "Ask to pay a vendor or an employee ahead of the bill",
+    icon: "wallet-outline",
+    screen: "advance-payments/create",
+    route: "/(main)/advance-payments/create",
   },
   // Production is deliberately absent. SAP originates a production order;
   // OMS only approves what SAP already has, so there is nothing to raise —
@@ -637,6 +694,17 @@ export const resolveWorkQueueRoute = (
       route: "/(main)/backdate/tracking",
       label: "BackDate",
       icon: "time-outline",
+    },
+    // Last, as the home ranking has it. Without this an Advance-Payment-only
+    // user read "Orders" on the tab and got the no-permission dialog on every
+    // tap — the footer naming a module they do not have and hiding the one
+    // they do.
+    {
+      screen: "advance-payments/tracking",
+      route: "/(main)/advance-payments/tracking",
+      label: "Advances",
+      // The SAME icon the sidebar gives the list.
+      icon: "card-outline",
     },
   ];
   for (const candidate of candidates) {
