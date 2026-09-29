@@ -234,3 +234,39 @@ gradle.taskGraph.whenReady { graph ->
         )
     }
 }
+
+/**
+ * Make `gradlew clean` work in this project.
+ *
+ * It did not. `clean` depends on `externalNativeBuildClean<Variant>`, and
+ * ninja re-runs CMake BEFORE it will delete anything. The generated
+ * `app/build/generated/autolinking/.../Android-autolinking.cmake` points at
+ * `node_modules/<lib>/android/build/generated/source/codegen/jni/` for every
+ * autolinked library, and those directories only exist after that library has
+ * been built -- so they are gone after any `npm install`, after a manual
+ * delete, and after a previous clean. CMake then fails with
+ *
+ *     add_subdirectory given source "..." which is not an existing directory
+ *
+ * leaving the project in a state where it can be neither cleaned NOR built
+ * until `app/.cxx` is removed by hand. The task that exists to reset the build
+ * was the one thing that could not run.
+ *
+ * Fixed in two parts:
+ *
+ *   1. Skip the native clean tasks. They only exist to invoke `ninja clean`,
+ *      and deleting the directory achieves the same thing without needing a
+ *      valid CMake configuration to do it.
+ *   2. Have `clean` delete `.cxx` itself, so the stale configuration that
+ *      caused the failure is what actually goes away.
+ *
+ * A real build is unaffected: codegen runs before CMake there, so those
+ * directories exist by the time the configuration is read.
+ */
+tasks.matching { it.name.startsWith("externalNativeBuildClean") }.configureEach {
+    enabled = false
+}
+
+tasks.named("clean") {
+    delete "${projectDir}/.cxx"
+}
