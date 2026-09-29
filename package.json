@@ -10,6 +10,8 @@
     "web": "expo start --web",
     "lint": "expo lint",
     "postinstall": "node scripts/patch-android-cmake.js",
+    "clean:android": "node scripts/clean-android.js",
+    "build:android": "npm run clean:android && cd android && gradlew.bat assembleRelease bundleRelease",
     "test": "node --import ./scripts/testResolver.mjs --test \"src/**/*.test.ts\""
   },
   "dependencies": {
