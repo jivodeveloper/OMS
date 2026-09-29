@@ -309,8 +309,9 @@ async function init(): Promise<void> {
   if (initialized) return;
   initialized = true;
 
-  // Register the IoC hooks first so headers are attached even to the very first
-  // requests; device id fills in as soon as it loads just below.
+  // The header provider is registered at MODULE LOAD (see the bottom of this
+  // file), not here, so it cannot be raced. Re-registering is harmless and
+  // keeps init() correct on its own if the module-level call is ever removed.
   setDeviceHeaderProvider(getHeaders);
   setAuthenticatedHandler(() => {
     void onAuthenticated('refresh');
@@ -322,6 +323,24 @@ async function init(): Promise<void> {
     console.log('DeviceService: init failed to load device id', error);
   }
 }
+
+/**
+ * Register the version/device headers the moment this module is imported.
+ *
+ * This used to happen only inside `init()`, which AuthContext calls from a
+ * `useEffect`. Any request issued before that effect ran therefore carried NO
+ * `X-App-Version` / `X-Build-Number`, and the backend treats a missing build
+ * as "below the floor" and answers 426. That is unrecoverable on the client:
+ * `UpdateContext` is a deliberate one-way latch, so a SINGLE header-less
+ * request at startup pins the app on the update screen for the whole session
+ * -- on a build that is perfectly up to date, with no way out but a restart.
+ *
+ * Registering at import time closes the window entirely: the provider exists
+ * before any screen or context can issue a request. It is a pure function of
+ * `expo-application` values and touches no storage, so running it this early
+ * is safe.
+ */
+setDeviceHeaderProvider(getHeaders);
 
 export const deviceService = {
   init,

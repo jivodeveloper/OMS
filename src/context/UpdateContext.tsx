@@ -10,6 +10,7 @@ import {
   setUpdateRequiredHandler,
   type UpdateRequiredPayload,
 } from '../services/api';
+import { deviceService } from '../services/device.service';
 
 /**
  * UpdateContext — the single global "the app must update" flag.
@@ -53,6 +54,36 @@ export const UpdateProvider: React.FC<{ children: React.ReactNode }> = ({
     // and — being on the required build — no longer receives 426. So there is
     // no manual reset and nothing to clear here.
     setUpdateRequiredHandler((payload: UpdateRequiredPayload) => {
+      // Ignore a 426 this build already satisfies.
+      //
+      // The server answers 426 when it thinks we are below `required_build`.
+      // If our OWN build is at or above the value it just named, the response
+      // contradicts itself -- we cannot install anything newer than what is
+      // already running. That never means "out of date"; it means the request
+      // did not carry correct version headers (they are attached by a provider
+      // that can, in principle, be missing) or it reached a different backend.
+      //
+      // This matters because the block below is a deliberate ONE-WAY latch:
+      // without this check a single such response strands a fully up-to-date
+      // app on the update screen until the process is killed, and no amount of
+      // updating clears it because there is nothing newer to install.
+      const requiredBuild = Number(payload.required_build);
+      const ourBuild = Number(deviceService.getBuildNumber());
+      if (
+        Number.isFinite(requiredBuild) &&
+        Number.isFinite(ourBuild) &&
+        ourBuild >= requiredBuild
+      ) {
+        console.log(
+          'UpdateContext: ignoring APP_UPDATE_REQUIRED for build ' +
+            requiredBuild +
+            ' — this app is build ' +
+            ourBuild +
+            '. Version headers or backend target are wrong, not the app.',
+        );
+        return;
+      }
+
       setState((current) => {
         if (current.updateRequired) return current; // already blocked; keep first
         return {

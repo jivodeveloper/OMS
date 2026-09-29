@@ -99,10 +99,6 @@ const getSchemeName = (scheme: any, index: number) =>
   scheme?.scheme_v2_code ||
   (scheme?.scheme_id ? `Scheme ${scheme.scheme_id}` : `Scheme ${index + 1}`);
 
-/** True when the engine proposed it rather than a person picking it. */
-const isEngineScheme = (scheme: any) =>
-  Boolean(scheme?.scheme_v2_id) && !scheme?.scheme_id;
-
 /**
  * The giveaway item a scheme hands over — code and name.
  *
@@ -516,6 +512,25 @@ export default function OrderDetailsScreen() {
 
   // Bucket the order's items by variety, keeping Premium → Commodity → Others
   // order. Only buckets that actually have items become tabs.
+  /**
+   * The order's business line(s), for the header.
+   *
+   * Taken from the lines rather than a top-level field: the detail payload
+   * has no `categories` of its own, and every line already carries one. An
+   * order is normally a single category, so this is usually one word; it
+   * falls back to a count when a mixed order somehow has more than two.
+   */
+  const orderCategoryText = useMemo(() => {
+    const seen: string[] = [];
+    for (const item of itemsList) {
+      const category = String((item as any)?.category || "").trim();
+      if (category && !seen.includes(category)) seen.push(category);
+    }
+    if (seen.length === 0) return "";
+    if (seen.length <= 2) return seen.join(", ");
+    return `${seen.slice(0, 2).join(", ")} +${seen.length - 2}`;
+  }, [itemsList]);
+
   const varietyGroups = useMemo(() => {
     const buckets = new Map<VarietyKey, any[]>();
     (itemsList as any[]).forEach((item) => {
@@ -770,11 +785,14 @@ export default function OrderDetailsScreen() {
                   <Text style={styles.partyName} numberOfLines={1}>
                     {stripCardCode(order.card_name, order.card_code)}
                   </Text>
-                  {!!order.party_state && (
+                  {/* The order's business line. Replaces the party state,
+                      which is still one row down in Order Info -- showing it
+                      twice on one screen used the only free space up here for
+                      something the user had already read. */}
+                  {!!orderCategoryText && (
                     <View style={styles.stateRow}>
-                      <Ionicons name="location" size={14} color="#4ADE80" />
                       <Text style={styles.party} numberOfLines={1}>
-                        {order.party_state}
+                        {orderCategoryText}
                       </Text>
                     </View>
                   )}
@@ -1042,36 +1060,26 @@ export default function OrderDetailsScreen() {
                                   />
                                 </View>
                                 <View style={styles.schemeCardTitleWrap}>
+                                  {/* Two lines: these SKU names carry pack
+                                      size and count ("EXTRA LIGHT OLIVE 1 LTR
+                                      16 PCS"), and one line cut off exactly
+                                      the part that identifies the SKU. */}
                                   <Text
                                     style={styles.schemeCardTitle}
-                                    numberOfLines={1}
+                                    numberOfLines={2}
                                   >
                                     {benefit.name ||
                                       benefit.code ||
                                       getSchemeName(scheme, sIndex)}
                                   </Text>
-                                  <Text
-                                    style={styles.schemeCardSubtitle}
-                                    numberOfLines={1}
-                                  >
-                                    {getSchemeName(scheme, sIndex)}
-                                    {schemeQty > 0
-                                      ? ` · Qty ${formatDisplayNumber(schemeQty)}`
-                                      : ""}
-                                  </Text>
                                 </View>
-                                {isEngineScheme(scheme) ? (
-                                  <View style={styles.schemeAutoTag}>
-                                    <Text style={styles.schemeAutoTagText}>
-                                      AUTO
+                                {!schemeExpanded ? (
+                                  <View style={styles.schemeCardTag}>
+                                    <Text style={styles.schemeCardTagText}>
+                                      Scheme
                                     </Text>
                                   </View>
                                 ) : null}
-                                <View style={styles.schemeCardTag}>
-                                  <Text style={styles.schemeCardTagText}>
-                                    Scheme
-                                  </Text>
-                                </View>
                                 <Ionicons
                                   name={
                                     schemeExpanded
@@ -1123,9 +1131,6 @@ export default function OrderDetailsScreen() {
                                       <GridCell label="Amount" value="₹0.00" bold />
                                     </View>
                                   </View>
-                                  <Text style={styles.schemeCardNote}>
-                                    Free with {item.item_name}
-                                  </Text>
                                 </View>
                               )}
                             </View>
@@ -1841,7 +1846,6 @@ const styles = StyleSheet.create({
   // line of its own — it has no price, no boxes and no ltrs.
   schemeCard: {
     marginTop: 8,
-    marginLeft: 10,
     backgroundColor: "#FAF8FF",
     borderRadius: 10,
     borderWidth: 1,
@@ -1869,11 +1873,6 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: "#0F172A",
   },
-  schemeCardSubtitle: {
-    fontSize: 11,
-    color: "#64748B",
-    marginTop: 1,
-  },
   schemeCardTag: {
     backgroundColor: "#EEF2FF",
     borderRadius: 6,
@@ -1888,15 +1887,9 @@ const styles = StyleSheet.create({
   schemeCardBody: {
     borderTopWidth: 1,
     borderTopColor: "#EDE9FE",
-    paddingHorizontal: 10,
-    paddingTop: 8,
-    paddingBottom: 10,
-  },
-  schemeCardNote: {
-    fontSize: 11,
-    color: "#64748B",
-    marginTop: 6,
-    fontStyle: "italic",
+    paddingHorizontal: 8,
+    paddingTop: 2,
+    paddingBottom: 6,
   },
   comboItemTag: {
     flexDirection: "row",
@@ -1913,19 +1906,6 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: "800",
     color: "#047857",
-    letterSpacing: 0.3,
-  },
-  schemeAutoTag: {
-    borderWidth: 1,
-    borderColor: "#7C3AED",
-    borderRadius: 5,
-    paddingHorizontal: 4,
-    paddingVertical: 1,
-  },
-  schemeAutoTagText: {
-    fontSize: 9,
-    fontWeight: "800",
-    color: "#7C3AED",
     letterSpacing: 0.3,
   },
 

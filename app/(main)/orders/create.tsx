@@ -916,13 +916,11 @@ export function OrderEntryScreen({
         <View style={styles.schemeBadge}>
           <Text style={styles.schemeBadgeText}>SCHEME</Text>
         </View>
-        {/* Nobody picked this one — the engine proposed it off the quantities
-            entered. Marked so a user can tell it apart from a scheme they
-            chose themselves. */}
-        <View style={styles.autoBadge}>
-          <Text style={styles.autoBadgeText}>AUTO</Text>
-        </View>
-        <Text style={styles.comboLineName} numberOfLines={2}>
+        {/* The SKU being given away. Three lines rather than two: these names
+            carry pack size and count ("MUSTARD PAKKI GHANI 1 LTR 20 PCS") and
+            truncating them loses exactly the part that identifies which SKU
+            it is. */}
+        <Text style={styles.comboLineName} numberOfLines={3}>
           {proposal.benefit_item_name || proposal.benefit_item_code}
         </Text>
         {/* Decline this one. Only offered on a CONFIRMED item, because that is
@@ -943,20 +941,6 @@ export function OrderEntryScreen({
         {proposal.scheme_name}
         {proposal.scheme_code ? ` (${proposal.scheme_code})` : ""}
       </Text>
-      {/* Why this applied — the first question anyone asks about an
-          unexpected giveaway. */}
-      {proposal.scope_type ? (
-        <Text style={styles.schemeMeta}>
-          Applies via {proposal.scope_type}
-          {proposal.scope_value ? ` ${proposal.scope_value}` : ""}
-          {Number(proposal.qualifying_qty) > 0
-            ? `  ·  on ${proposal.qualifying_qty} qualifying`
-            : ""}
-        </Text>
-      ) : null}
-      {proposal.benefit_item_name && proposal.benefit_item_code ? (
-        <Text style={styles.schemeMeta}>Item {proposal.benefit_item_code}</Text>
-      ) : null}
       <View style={styles.itemPriceRow}>
         <Text style={styles.itemDetailBold}>
           Free: {formatProposalQty(proposal)}
@@ -2059,6 +2043,17 @@ export function OrderEntryScreen({
 
       const focPriceListBasic = String(FOC_PRICE_LIST_BASIC);
       updateRow(rowId, {
+        // Picking a different item starts that item's line from scratch.
+        // Without this the row kept the PREVIOUS item's basic price, quantity
+        // and free flag, so switching items silently priced the new one at the
+        // old one's rate -- the numbers looked filled in and were wrong.
+        basicPrice: "",
+        qty: "",
+        boxes: "",
+        ltrs: "",
+        isQtyManual: false,
+        isFree: false,
+        freeReason: "",
         selectedBrand: product.brand || null,
         selectedVariety: product.variety || null,
         selectedType: extractType(product.item_name),
@@ -2235,7 +2230,11 @@ export function OrderEntryScreen({
     setItemRows((prev) =>
       prev.map((r) => {
         if (r.id !== rowId) return r;
-        const basicPrice = value ? FOC_TOKEN_BASIC_PRICE : r.priceListBasic || "";
+        // Ticked -> the token rate. Un-ticked -> BLANK, deliberately: the
+        // operator types the rate they agreed. Putting the price list back
+        // here looked like a decision they had made, and it is the one rate a
+        // free-then-unfreed line is least likely to be.
+        const basicPrice = value ? FOC_TOKEN_BASIC_PRICE : "";
         return {
           ...r,
           isFree: value,
@@ -4201,52 +4200,49 @@ export function OrderEntryScreen({
                   )}
 
                   {/* Schemes the mapping attaches on its own — shown before
-                      Confirm so the user knows what the item already gets,
-                      whether or not the manual Schemes box is enabled. */}
-                  {shouldAllowSchemes && row.selectedProduct && Number(row.boxes) > 0 && (
-                    <View style={styles.autoSchemeSection}>
-                      <View style={styles.schemeHeaderTitle}>
-                        <Ionicons name="sparkles-outline" size={16} color={COLORS.primary} />
-                        <Text style={styles.schemeTitleText}>Auto schemes</Text>
-                      </View>
-                      {keptProposals(row.id, getRowAutoProposals(row.id)).length > 0 ? (
-                        <>
-                          <Text style={styles.schemeBoxHint}>
-                            Added automatically when you confirm this item.
-                          </Text>
-                          {keptProposals(row.id, getRowAutoProposals(row.id)).map(
-                            (proposal) =>
-                              renderAutoProposal(proposal, () =>
-                                dismissAutoScheme(row.id, proposal),
-                              ),
-                          )}
-                        </>
-                      ) : (
-                        <Text style={styles.schemeBoxHint}>
-                          {draftProposalsLoading
-                            ? "Checking schemes…"
-                            : getRowAutoProposals(row.id).length > 0
-                              ? "Removed from this order."
-                              : "No auto scheme for this item at this quantity."}
-                        </Text>
-                      )}
-
-                      {getRowAutoProposals(row.id).length >
-                      keptProposals(row.id, getRowAutoProposals(row.id)).length ? (
-                        <TouchableOpacity
-                          style={styles.autoSchemeRestoreBtn}
-                          onPress={() => restoreAutoSchemes(row.id)}
-                        >
+                      Confirm so the user knows what the item already gets.
+                      The box appears ONLY when this item actually has one:
+                      an empty "no scheme" panel on every line was noise on
+                      the majority of items, which get nothing. */}
+                  {shouldAllowSchemes &&
+                    row.selectedProduct &&
+                    Number(row.boxes) > 0 &&
+                    keptProposals(row.id, getRowAutoProposals(row.id)).length > 0 && (
+                      <View style={styles.autoSchemeSection}>
+                        <View style={styles.schemeHeaderTitle}>
                           <Ionicons
-                            name="arrow-undo-outline"
-                            size={14}
+                            name="sparkles-outline"
+                            size={16}
                             color={COLORS.primary}
                           />
-                          <Text style={styles.autoSchemeRestoreText}>Undo remove</Text>
-                        </TouchableOpacity>
-                      ) : null}
-                    </View>
-                  )}
+                          <Text style={styles.schemeTitleText}>Auto schemes</Text>
+                        </View>
+                        {keptProposals(row.id, getRowAutoProposals(row.id)).map(
+                          (proposal) =>
+                            renderAutoProposal(proposal, () =>
+                              dismissAutoScheme(row.id, proposal),
+                            ),
+                        )}
+                      </View>
+                    )}
+
+                  {/* Undo lives OUTSIDE the box above: removing the last
+                      scheme hides that box, and a control inside it would
+                      vanish with the thing it undoes. */}
+                  {shouldAllowSchemes &&
+                  row.selectedProduct &&
+                  getRowAutoProposals(row.id).length >
+                    keptProposals(row.id, getRowAutoProposals(row.id)).length ? (
+                    <TouchableOpacity
+                      style={styles.autoSchemeRestoreBtn}
+                      onPress={() => restoreAutoSchemes(row.id)}
+                    >
+                      <Ionicons name="arrow-undo-outline" size={14} color={COLORS.primary} />
+                      <Text style={styles.autoSchemeRestoreText}>
+                        Auto scheme removed · Undo
+                      </Text>
+                    </TouchableOpacity>
+                  ) : null}
 
                   {/* Item subtotal */}
                   {!!(row.itemTotal && parseFloat(row.itemTotal) > 0) && (
@@ -5193,7 +5189,6 @@ const styles = StyleSheet.create({
   // distinguishable from a combo at a glance.
   schemeLine: {
     marginTop: SPACING.sm,
-    marginLeft: SPACING.md,
     paddingTop: SPACING.sm,
     paddingLeft: SPACING.sm,
     borderLeftWidth: 2,

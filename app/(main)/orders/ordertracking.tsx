@@ -22,6 +22,10 @@ import { useAuth } from "@/src/context/AuthContext";
 import StateWrapper from "@/src/components/common/StateWrapper";
 import { refreshOrderData } from "@/src/cache";
 import { fs, ms, sp } from "@/src/utils/responsive";
+import {
+  orderCategoryText,
+  usePartyCategoryMap,
+} from "@/src/features/orders/orderCategory";
 
 type TrackingStatusFilter = "Completed" | "Rejected";
 
@@ -513,12 +517,15 @@ export default function OrderTrackingScreen() {
     return `${date} ${time}`;
   };
 
-  const getCategoryText = (item: OrderItemList) => {
-    const categories = item.categories || [];
-    if (categories.length === 0) return "-";
-    if (categories.length <= 2) return categories.join(", ");
-    return `${categories.slice(0, 2).join(", ")} +${categories.length - 2}`;
-  };
+  // One fetch shared by every screen that shows order cards.
+  const partyCategoryMap = usePartyCategoryMap();
+
+  // Party-category fallback lives in one place now: these four screens
+  // each carried their own copy, and none of them resolved anything when
+  // the list payload omits `categories` and `items` -- which the deployed
+  // backend does. See features/orders/orderCategory.ts.
+  const getCategoryText = (item: OrderItemList) =>
+    orderCategoryText(item, partyCategoryMap);
 
   let partyLabel = " Party";
   if (selectedParties.length > 0) {

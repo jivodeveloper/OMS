@@ -37,6 +37,10 @@ import { useAuth } from "@/src/context/AuthContext";
 import Dropdown from "@/src/components/common/DropdownProps";
 import { refreshOrderData } from "@/src/cache";
 import { fs, ms, sp } from "@/src/utils/responsive";
+import {
+  orderCategoryText,
+  usePartyCategoryMap,
+} from "@/src/features/orders/orderCategory";
 
 // "all" is the whole list — pending AND decided — so the Status filter's
 // "All" is genuinely everything, not just orders billing has acted on.
@@ -880,23 +884,15 @@ export default function BillingOrderList() {
     return `${date} ${time}`;
   };
 
-  const getCategoryText = (item: OrderItemList) => {
-    const fromCategories = item.categories || [];
-    const categories =
-      fromCategories.length > 0
-        ? fromCategories
-        : Array.from(
-            new Set(
-              (item.items || (item as any).order_items || (item as any).orderItems || [])
-                .map((it: any) => String(it?.category || "").trim())
-                .filter(Boolean),
-            ),
-          );
+  // One fetch shared by every screen that shows order cards.
+  const partyCategoryMap = usePartyCategoryMap();
 
-    if (categories.length === 0) return "-";
-    if (categories.length <= 2) return categories.join(", ");
-    return `${categories.slice(0, 2).join(", ")} +${categories.length - 2}`;
-  };
+  // Party-category fallback lives in one place now: these four screens
+  // each carried their own copy, and none of them resolved anything when
+  // the list payload omits `categories` and `items` -- which the deployed
+  // backend does. See features/orders/orderCategory.ts.
+  const getCategoryText = (item: OrderItemList) =>
+    orderCategoryText(item, partyCategoryMap);
 
   const handleApprove = (order: OrderItemList, remarks = "") => {
     const approveAction = async () => {
