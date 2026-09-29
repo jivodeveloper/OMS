@@ -16,7 +16,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.jivo.oms",
-      "buildNumber": "9",
+      "buildNumber": "6",
       "entitlements": {
         "aps-environment": "development"
       },

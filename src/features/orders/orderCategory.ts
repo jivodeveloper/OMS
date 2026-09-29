@@ -11,6 +11,9 @@
  *   2. Nested `items[].category` -- exact, when the payload carries lines.
  *   3. The PARTY's category, by `card_code` -- the fallback that makes this
  *      work today.
+ *   4. The order's own lines, from its detail payload -- for orders whose
+ *      party is not among the signed-in user's assignments (an approver
+ *      reviewing someone else's party), where (3) has nothing to offer.
  *
  * On (3): every order names a party, and `/orders/parties/` already returns a
  * category per party, scoped to the signed-in user's assignments. That scoping
@@ -26,7 +29,7 @@
  * better than that by construction, which is why (1) and (2) are preferred
  * whenever the payload provides them.
  */
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { orderService } from "@/src/services/order.service";
 
@@ -62,10 +65,41 @@ export async function loadPartyCategoryMap(): Promise<PartyCategoryMap> {
   return inflight;
 }
 
+// Categories read from an order's detail lines, by order id. Only successful
+// reads are cached, so a failed fetch is retried next time the list loads.
+const lineCategoriesByOrderId: Record<number, string[]> = {};
+const lineInflight = new Map<number, Promise<string[]>>();
+// Approval lists can be long; don't fire one detail request per card at once.
+const DETAIL_FETCH_CONCURRENCY = 4;
+
+async function loadLineCategories(orderId: number): Promise<string[]> {
+  if (lineCategoriesByOrderId[orderId]) return lineCategoriesByOrderId[orderId];
+  const pending = lineInflight.get(orderId);
+  if (pending) return pending;
+  const request = (async () => {
+    try {
+      const res = await orderService.getorderdetailsbyid(orderId);
+      const categories = uniqueLineCategories(res?.data || res);
+      lineCategoriesByOrderId[orderId] = categories;
+      return categories;
+    } catch {
+      return [];
+    } finally {
+      lineInflight.delete(orderId);
+    }
+  })();
+  lineInflight.set(orderId, request);
+  return request;
+}
+
 /** Drop the cache so the next screen re-reads it (used on sign-out). */
 export const resetPartyCategoryMap = () => {
   cachedMap = null;
   inflight = null;
+  for (const id of Object.keys(lineCategoriesByOrderId)) {
+    delete lineCategoriesByOrderId[Number(id)];
+  }
+  lineInflight.clear();
 };
 
 export function usePartyCategoryMap(): PartyCategoryMap {
@@ -82,26 +116,83 @@ export function usePartyCategoryMap(): PartyCategoryMap {
   return map;
 }
 
-/** The text for one card's Category row. "-" when nothing resolves. */
-export function orderCategoryText(order: any, partyMap: PartyCategoryMap): string {
-  const fromApi: string[] = Array.isArray(order?.categories) ? order.categories : [];
-
-  const fromItems: string[] = Array.from(
+function uniqueLineCategories(order: any): string[] {
+  return Array.from(
     new Set(
       ((order?.items || order?.order_items || order?.orderItems || []) as any[])
         .map((line) => String(line?.category || "").trim())
         .filter(Boolean),
     ),
   );
+}
 
-  let categories = fromApi.length > 0 ? fromApi : fromItems;
+/** Steps 1-3 of the chain above; empty when none of them resolves. */
+function resolveCategories(order: any, partyMap: PartyCategoryMap): string[] {
+  const fromApi: string[] = Array.isArray(order?.categories) ? order.categories : [];
+  if (fromApi.length > 0) return fromApi;
 
-  if (categories.length === 0) {
-    const fromParty = partyMap[String(order?.card_code || "").trim()];
-    if (fromParty) categories = [fromParty];
-  }
+  const fromItems = uniqueLineCategories(order);
+  if (fromItems.length > 0) return fromItems;
 
+  const fromParty = partyMap[String(order?.card_code || "").trim()];
+  return fromParty ? [fromParty] : [];
+}
+
+function formatCategories(categories: string[]): string {
   if (categories.length === 0) return "-";
   if (categories.length <= 2) return categories.join(", ");
   return `${categories.slice(0, 2).join(", ")} +${categories.length - 2}`;
+}
+
+/** The text for one card's Category row. "-" when nothing resolves. */
+export function orderCategoryText(order: any, partyMap: PartyCategoryMap): string {
+  return formatCategories(resolveCategories(order, partyMap));
+}
+
+/**
+ * The Category text for a screen's order cards, including step 4: orders the
+ * list and party map can't place get their detail fetched once, in the
+ * background, and the card updates when it arrives.
+ */
+export function useOrderCategoryText(orders: any[]): (order: any) => string {
+  const partyMap = usePartyCategoryMap();
+  const [lineCategories, setLineCategories] = useState<Record<number, string[]>>({});
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      // Wait for the real party map first; judged against the initial empty
+      // one, every card would look unresolved and trigger a detail fetch.
+      const map = await loadPartyCategoryMap();
+      const unresolved = orders.filter(
+        (order) => order?.id != null && resolveCategories(order, map).length === 0,
+      );
+      let next = 0;
+      const worker = async () => {
+        while (!cancelled && next < unresolved.length) {
+          const orderId = Number(unresolved[next++].id);
+          const categories = await loadLineCategories(orderId);
+          if (!cancelled && categories.length > 0) {
+            setLineCategories((prev) => ({ ...prev, [orderId]: categories }));
+          }
+        }
+      };
+      await Promise.all(Array.from({ length: DETAIL_FETCH_CONCURRENCY }, worker));
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [orders]);
+
+  return useCallback(
+    (order: any) => {
+      const categories = resolveCategories(order, partyMap);
+      if (categories.length > 0) return formatCategories(categories);
+      const orderId = Number(order?.id);
+      return formatCategories(
+        lineCategories[orderId] ?? lineCategoriesByOrderId[orderId] ?? [],
+      );
+    },
+    [partyMap, lineCategories],
+  );
 }

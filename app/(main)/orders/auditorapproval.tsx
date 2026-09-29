@@ -26,8 +26,7 @@ import { useAuth } from "@/src/context/AuthContext";
 import { refreshOrderData } from "@/src/cache";
 import { fs, ms, sp } from "@/src/utils/responsive";
 import {
-  orderCategoryText,
-  usePartyCategoryMap,
+  useOrderCategoryText,
 } from "@/src/features/orders/orderCategory";
 
 type AuditorTab = "pending" | "others";
@@ -220,15 +219,11 @@ export default function AuditorApprovalScreen() {
     return `${date} ${time}`;
   };
 
-  // One fetch shared by every screen that shows order cards.
-  const partyCategoryMap = usePartyCategoryMap();
-
   // Party-category fallback lives in one place now: these four screens
   // each carried their own copy, and none of them resolved anything when
   // the list payload omits `categories` and `items` -- which the deployed
   // backend does. See features/orders/orderCategory.ts.
-  const getCategoryText = (item: OrderItemList) =>
-    orderCategoryText(item, partyCategoryMap);
+  const getCategoryText = useOrderCategoryText(orders);
 
   const [focusKey, setFocusKey] = useState(0);
 
