@@ -52,6 +52,47 @@ public class AppDelegate: ExpoAppDelegate {
   }
 }
 
+// iOS 27 requires the UIScene lifecycle. The window is still created in AppDelegate
+// (expo-dev-launcher needs it during didFinishLaunching); here we attach it to the scene.
+class SceneDelegate: UIResponder, UIWindowSceneDelegate {
+  var window: UIWindow?
+
+  private var appDelegate: AppDelegate? {
+    UIApplication.shared.delegate as? AppDelegate
+  }
+
+  func scene(
+    _ scene: UIScene,
+    willConnectTo session: UISceneSession,
+    options connectionOptions: UIScene.ConnectionOptions
+  ) {
+    guard let windowScene = scene as? UIWindowScene, let appDelegate, let window = appDelegate.window else {
+      return
+    }
+    window.windowScene = windowScene
+    window.makeKeyAndVisible()
+    self.window = window
+
+    // Links that cold-launched the app arrive here instead of in launchOptions.
+    if let url = connectionOptions.urlContexts.first?.url {
+      _ = appDelegate.application(UIApplication.shared, open: url, options: [:])
+    }
+    if let userActivity = connectionOptions.userActivities.first {
+      _ = appDelegate.application(UIApplication.shared, continue: userActivity) { _ in }
+    }
+  }
+
+  func scene(_ scene: UIScene, openURLContexts URLContexts: Set<UIOpenURLContext>) {
+    for context in URLContexts {
+      _ = appDelegate?.application(UIApplication.shared, open: context.url, options: [:])
+    }
+  }
+
+  func scene(_ scene: UIScene, continue userActivity: NSUserActivity) {
+    _ = appDelegate?.application(UIApplication.shared, continue: userActivity) { _ in }
+  }
+}
+
 class ReactNativeDelegate: ExpoReactNativeFactoryDelegate {
   // Extension point for config-plugins
 
