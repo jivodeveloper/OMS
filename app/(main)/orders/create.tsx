@@ -2695,6 +2695,17 @@ export function OrderEntryScreen({
       return;
     }
 
+    // A free line must say WHY. The server enforces this and refuses the whole
+    // order with "<item>: give a reason for making this line free." -- so
+    // without this check the order is rejected at submit, after every other
+    // line has been entered, and the app cannot say which line was at fault.
+    // OMS-Frontend blocks it on the row for the same reason; this is why the
+    // web could save these orders and the app could not.
+    if (row.isFree && !String(row.freeReason || "").trim()) {
+      appAlert("Error", "Give a reason for making this line free.");
+      return;
+    }
+
     // if ((row.isScheme || row.isComboProduct) && !row.selectedScheme) {
     //   appAlert("Error", "Please select a scheme before confirming this item");
     //   return;
@@ -3081,12 +3092,50 @@ export function OrderEntryScreen({
           // Order is on the server now — the local draft must not come back.
           discardDraft();
         } else {
-          appAlert("Error", "Something went wrong. Please try again.");
+          // `api.post` RESOLVES on failure -- it returns {success:false,
+          // message} rather than throwing -- so this branch is where a
+          // timeout, a 4xx and a network drop all land. It used to replace all
+          // of them with "Something went wrong", which threw away the only
+          // description of what actually happened.
+          //
+          // It matters more than a nicer message: the server finishes creating
+          // the order even when the app stops waiting for the answer. Telling
+          // someone to "try again" after a timeout is telling them to place
+          // the order a second time. So a lost-answer failure says to CHECK
+          // before retrying; a refusal the server actually sent (a 4xx, which
+          // means nothing was created) still says to fix it and retry.
+          const serverMessage = String(response?.message || "").trim();
+          const answerWasLost =
+            !response?.status ||
+            Number(response.status) >= 500 ||
+            /timed out|network request failed/i.test(serverMessage);
+
+          appAlert(
+            "Error",
+            answerWasLost
+              ? [
+                  serverMessage || "The order could not be confirmed.",
+                  "",
+                  "Your order MAY still have been created. Check your orders " +
+                    "list before submitting again, or you may create it twice.",
+                ].join("\n")
+              : serverMessage || "Something went wrong. Please try again.",
+          );
         }
 
       }
     } catch (error) {
-      appAlert("Error", isEditMode ? "Failed to update order" : "Failed to create order");
+      // Only a thrown error reaches here (a bug in this handler, or storage
+      // failing) -- transport failures resolve into the branch above. Keep the
+      // reason rather than discarding it.
+      const reason = error instanceof Error ? error.message : String(error ?? "");
+      console.log("Order submit failed:", reason);
+      appAlert(
+        "Error",
+        [isEditMode ? "Failed to update order" : "Failed to create order", reason]
+          .filter(Boolean)
+          .join("\n\n"),
+      );
     } finally {
       setLoading(false);
     }

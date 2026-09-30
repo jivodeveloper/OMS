@@ -32,6 +32,14 @@ const DEFAULT_REQUEST_TIMEOUT_MS = 70000;
 const ADVANCE_PAYMENT_REQUEST_TIMEOUT_MS = 120000;
 const PAYMENT_PROOF_REQUEST_TIMEOUT_MS = 180000;
 const STATUS_TRACKING_REQUEST_TIMEOUT_MS = 45000;
+// Submitting an order is the longest write the app makes: the server prices
+// every line, runs the v2 scheme engine over the whole order, writes the lines
+// and then fans notifications out to Expo's push service before it answers. A
+// 10-12 line order on a phone network can outrun the 70s default -- and when
+// it does the ORDER IS STILL CREATED, because the server finished; only the
+// answer was thrown away. Losing the response to a timeout is the worst
+// failure mode here, so this write gets the room it needs.
+const ORDER_SUBMIT_REQUEST_TIMEOUT_MS = 180000;
 const SAP_SYNC_REQUEST_TIMEOUT_MS = 0;
 const isExpoGo = Constants.appOwnership === 'expo';
 
@@ -67,6 +75,10 @@ if (process.env.EXPO_PUBLIC_API_URL?.trim() && !process.env.EXPO_PUBLIC_API_BASE
 const getTimeoutForEndpoint = (endpoint: string): number => {
   if (endpoint.startsWith('/orders/status-tracking/')) {
     return STATUS_TRACKING_REQUEST_TIMEOUT_MS;
+  }
+
+  if (endpoint.startsWith('/orders/create/')) {
+    return ORDER_SUBMIT_REQUEST_TIMEOUT_MS;
   }
 
   if (endpoint.startsWith('/advance-payments/requests/')) {
