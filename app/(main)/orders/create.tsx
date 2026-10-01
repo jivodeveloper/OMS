@@ -2047,7 +2047,14 @@ export function OrderEntryScreen({
         // Without this the row kept the PREVIOUS item's basic price, quantity
         // and free flag, so switching items silently priced the new one at the
         // old one's rate -- the numbers looked filled in and were wrong.
-        basicPrice: "",
+        //
+        // The rate is SEEDED from this item's own price list and stays
+        // editable: most lines go out at list, and the ones that do not are
+        // typed over. What matters is that it is THIS item's list price, not
+        // the previous item's.
+        basicPrice: isFocOrder
+          ? focPriceListBasic
+          : product.basic_rate?.toString() || "",
         qty: "",
         boxes: "",
         ltrs: "",
@@ -2230,11 +2237,10 @@ export function OrderEntryScreen({
     setItemRows((prev) =>
       prev.map((r) => {
         if (r.id !== rowId) return r;
-        // Ticked -> the token rate. Un-ticked -> BLANK, deliberately: the
-        // operator types the rate they agreed. Putting the price list back
-        // here looked like a decision they had made, and it is the one rate a
-        // free-then-unfreed line is least likely to be.
-        const basicPrice = value ? FOC_TOKEN_BASIC_PRICE : "";
+        // Ticked -> the token rate. Un-ticked -> back to this item's price
+        // list, the same default a freshly picked item gets, and editable
+        // from there.
+        const basicPrice = value ? FOC_TOKEN_BASIC_PRICE : r.priceListBasic || "";
         return {
           ...r,
           isFree: value,

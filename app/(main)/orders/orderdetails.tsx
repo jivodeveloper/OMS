@@ -1016,8 +1016,23 @@ export default function OrderDetailsScreen() {
                       <View style={styles.itemBody}>
                         <View style={styles.gridWrap}>
                           <View style={styles.gridCol}>
-                            <GridCell label={t("price_list", "Price List (Basic)")} value={`₹${item.price_list_basic}`} />
-                            <GridCell label="Basic Price" value={`₹${item.basic_price}`} danger={isFlagged} />
+                            {/* A free line carries NO price list: the app, the
+                                web and the server all zero it, because a
+                                giveaway billed at the list rate is the one
+                                outcome the salesperson ruled out. Printing
+                                that zero as "₹0.0000" reads like missing data
+                                sitting right above a real rate, so say it is
+                                not applicable instead. The stored value is
+                                untouched. */}
+                            <GridCell
+                              label={t("price_list", "Price List (Basic)")}
+                              value={item.is_free ? "—" : `₹${item.price_list_basic}`}
+                            />
+                            <GridCell
+                              label="Basic Price"
+                              value={`₹${item.basic_price}`}
+                              danger={isFlagged}
+                            />
                             <GridCell label="Boxes" value={item.boxes} />
                             <GridCell label="PCS/Case" value={item.pcs} />
                           </View>
@@ -1029,6 +1044,24 @@ export default function OrderDetailsScreen() {
                             <GridCell label="Total" value={`₹${item.total}`} bold />
                           </View>
                         </View>
+
+                        {/* Why this line was given away.
+                            A free line is billed at a token rate, so the money
+                            columns above cannot explain it -- the reason is
+                            the only record of WHY, and it is what the rate
+                            approver is asked to judge. Shown on the item it
+                            belongs to rather than in a note elsewhere. */}
+                        {item.is_free ? (
+                          <View style={styles.freeReasonBox}>
+                            <View style={styles.freeReasonHeader}>
+                              <Ionicons name="gift-outline" size={14} color="#B45309" />
+                              <Text style={styles.freeReasonLabel}>Free item</Text>
+                            </View>
+                            <Text style={styles.freeReasonText}>
+                              {String(item.free_reason || "").trim() || "No reason given"}
+                            </Text>
+                          </View>
+                        ) : null}
 
                         {/* The giveaways this line earned, INSIDE its card —
                             a scheme belongs to the item that earned it, and
@@ -1844,6 +1877,31 @@ const styles = StyleSheet.create({
   // A giveaway, nested inside the card of the item that earned it. Indented
   // and tinted so it reads as belonging to that item rather than as an order
   // line of its own — it has no price, no boxes and no ltrs.
+  freeReasonBox: {
+    marginTop: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#FDE68A",
+    backgroundColor: "#FFFBEB",
+  },
+  freeReasonHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  freeReasonLabel: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#B45309",
+  },
+  freeReasonText: {
+    marginTop: 3,
+    fontSize: 12.5,
+    lineHeight: 17,
+    color: "#0F172A",
+  },
   schemeCard: {
     marginTop: 8,
     backgroundColor: "#FAF8FF",
