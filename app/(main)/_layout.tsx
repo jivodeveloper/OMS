@@ -802,13 +802,33 @@ export default function MainLayout() {
           name="advance-payments/approval"
           options={{
             title: "Advance Payment Approval",
-            drawerLabel: "Advance Approvals",
+            // ONE ENTRY FOR THE MODULE, not two. The page itself asks whose
+            // work you are looking at — To Approve, My Requests, Assigned to
+            // me — so a second sidebar row for the desk was the same list
+            // behind a different name. The route stays for deep links and
+            // notification taps.
+            drawerItemStyle: hiddenStyle,
+          }}
+        />
+        <Drawer.Screen
+          name="advance-payments/dispatch"
+          options={{
+            title: "Send Bills & POs",
+            drawerLabel: "Send Bills & POs",
             drawerIcon: ({ color }) => (
-              <Ionicons name="shield-checkmark-outline" size={22} color={color} />
+              <Ionicons name="paper-plane-outline" size={22} color={color} />
             ),
-            drawerItemStyle: isVisible("advance-payments/approval")
+            drawerItemStyle: isVisible("advance-payments/dispatch")
               ? visibleStyle
               : hiddenStyle,
+          }}
+        />
+        <Drawer.Screen
+          name="advance-payments/dispatch-review"
+          options={{
+            title: "Send Bills & POs",
+            // Reached from the Next button on the page above, never the drawer.
+            drawerItemStyle: hiddenStyle,
           }}
         />
         <Drawer.Screen

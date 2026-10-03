@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import { router } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import React, { useState } from "react";
 import {
   KeyboardAvoidingView,
@@ -15,13 +15,11 @@ import { Button } from "react-native-paper";
 import { appAlert } from "@/src/components/common/AppDialog";
 import { COLORS, RADIUS, SPACING } from "@/src/constants/theme";
 import useBackToOrigin from "@/src/hooks/useBackToOrigin";
-import {
-  advancePaymentError,
-  advancePaymentProblems,
-  advancePaymentService,
-} from "@/src/services/advancePayment.service";
+import { advancePaymentService } from "@/src/services/advancePayment.service";
 
 import AdvanceRequestForm from "../components/AdvanceRequestForm";
+import { takeDraftFor } from "../draftHandover";
+import { showFailure } from "../showError";
 import {
   useBackgroundReadings,
   withReadings,
@@ -42,7 +40,17 @@ export default function AdvanceCreateScreen() {
   // page behind a progress page - never to the dashboard. See the hook.
   useBackToOrigin("/(main)/advance-payments/tracking");
 
-  const [form, setForm] = useState<RequestForm>(EMPTY_FORM);
+  /**
+   * Filled from an assigned bill or PO, when the list sent one.
+   *
+   * The LIST builds the form, because that is where the document is read live
+   * from SAP and where one no longer open has to be refused; this screen only
+   * picks it up, by the assignment id in the route. See `draftHandover`.
+   */
+  const { assignment } = useLocalSearchParams<{ assignment?: string }>();
+  const [form, setForm] = useState<RequestForm>(
+    () => takeDraftFor(Number(assignment)) ?? EMPTY_FORM,
+  );
   const [files, setFiles] = useState<FileAttachment[]>([]);
   const [saving, setSaving] = useState(false);
   /**
@@ -131,10 +139,7 @@ export default function AdvanceCreateScreen() {
       // the field — "Choose a Sub-department of Finance.", "Document 10256:
       // 2000 is more than the 1500 still open." — and a banner at the top of a
       // long scroll is a message nobody reads with a thumb on Submit.
-      appAlert(
-        "Could not submit",
-        [advancePaymentError(err), ...advancePaymentProblems(err)].join("\n"),
-      );
+      showFailure("Could not submit", err);
       // Also in the log, with the endpoint, for chasing a failure that is not
       // about the form at all (a workflow with no stages, SAP down).
       console.warn("[advance-payments] create refused", err);

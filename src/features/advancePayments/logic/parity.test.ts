@@ -33,6 +33,7 @@ import {
   validate,
   type RequestForm,
 } from "./rules.ts";
+import { requestAmount } from "./approvalData.ts";
 import { toApiRequest } from "./requestApi.ts";
 import { ownerLabel, withCodePrefix } from "./sapMapping.ts";
 
@@ -148,12 +149,12 @@ describe("the ported Advance Payment rules", () => {
       assert.equal(c.reference, null, against);
     }
 
-    // Against Bill is paid from the bills themselves, so there is no amount to
-    // type and the date keeps its own field.
+    // Against Bill is paid from the bills themselves: no amount to type, and
+    // no bill still to expect either — the bills are the expense.
     const bills = imprest("AGAINST_BILL");
     assert.equal(bills.reference, "VENDOR_BILL");
     assert.equal(bills.plainAmount, false);
-    assert.equal(bills.expectedBillDate, true);
+    assert.equal(bills.expectedBillDate, false);
   });
 
   it("refuses a date the web form would not offer", () => {
@@ -179,9 +180,10 @@ describe("the ported Advance Payment rules", () => {
     form = changeAllocation(form, "PCH-10256", { amount: "50000" });
     form = changeAllocation(form, "PCH-10271", { amount: "84000" });
     form = applyChange(form, {
-      department: "3",
-      departmentName: "Finance",
-      hasSubDepartments: false,
+      budget: "BackOff",
+      budgetName: "Back Office",
+      purpose: "RAW_MATERIAL",
+      purposeLabel: "Raw Material Purchase",
       ownership: ownerLabel({
         employee_code: "JWPL0030",
         employee_name: "PRESHIT SINGH",
@@ -197,8 +199,13 @@ describe("the ported Advance Payment rules", () => {
     assert.equal(payload.company, "OIL");
     assert.equal(payload.request_type, "VENDOR");
     assert.equal(payload.payment_against, "AGAINST_BILL");
-    assert.equal(payload.department_id, 3);
-    assert.equal(payload.sub_department_id, null);
+    // `_clean_routing` REQUIRES both, and checks the budget head against the
+    // company's SAP cost centres: a request without them is refused outright.
+    assert.equal(payload.budget_code, "BackOff");
+    assert.equal(payload.purpose_code, "RAW_MATERIAL");
+    // Sub Budget is no longer asked for at all, so it is not sent; the server
+    // clears the column itself.
+    assert.ok(!("sub_budget_code" in payload));
     assert.ok(Number(payload.amount) > 0);
     // `_OWNER_CODE` on the server is /\(([A-Za-z0-9]+)\)\s*$/ — an owner whose
     // label does not end in a bracketed code is stored as plain text and can
@@ -247,32 +254,71 @@ describe("the ported Advance Payment rules", () => {
     assert.deepEqual(missing, [
       "Company",
       "Type",
-      // The Payment Purpose sits between Type and Department, exactly where
-      // `validate` asks for it on the web.
-      "Payment Purpose (Budget)",
-      "Payment Purpose (Sub Budget)",
+      // The Department (SAP's budget head) and what the money is for, in the
+      // order `validate` names them on the web.
       "Department",
+      "Payment Purpose",
       "Ownership",
       "Payment Date",
       "Remarks",
     ]);
   });
 
-  it("asks for the Payment Purpose", () => {
+  it("asks for the Department and the Payment Purpose", () => {
     const { missing } = validate(EMPTY_FORM, "2026-09-26");
-    assert.ok(missing.includes("Payment Purpose (Budget)"));
-    assert.ok(missing.includes("Payment Purpose (Sub Budget)"));
+    assert.ok(missing.includes("Department"));
+    assert.ok(missing.includes("Payment Purpose"));
   });
 
-  it("clears the Payment Purpose when the company changes: each company has its own budgets", () => {
+  it("clears the Department when the company changes, and keeps the purpose", () => {
     // `bpl`-style scoping applies to cost centres too — "BackOff" under OIL is
     // not the same cost centre as "BackOff" under MART, and may not exist at
     // all. Carrying the code across would post the money to the wrong place.
+    // The PURPOSE is the Payment Desk's own list and means the same under every
+    // company, so it survives.
     const form = applyChange(
-      { ...EMPTY_FORM, company: "OIL", budget: "BackOff", subBudget: "IT" },
+      {
+        ...EMPTY_FORM,
+        company: "OIL",
+        budget: "BackOff",
+        budgetName: "Back Office",
+        purpose: "RENT",
+        purposeLabel: "Rent",
+      },
       { company: "MART" },
     );
-    assert.deepEqual([form.budget, form.subBudget], ["", ""]);
+    assert.deepEqual([form.budget, form.budgetName], ["", ""]);
+    assert.equal(form.purpose, "RENT");
+  });
+
+  it("nets a customer refund: credits less the invoices they owe", () => {
+    // `_clean_documents` SIGNS a customer's ledger total the way SAP nets an
+    // outgoing payment, and refuses a refund that does not come to more than
+    // nothing. The app must compute the same figure, or the requester sees a
+    // total the server will not accept.
+    const item = (id: string, open: number, direction: "CREDIT" | "DEBIT"): OpenDocument => ({
+      id,
+      number: id,
+      date: "2026-08-01",
+      partner: "CUSTA000606",
+      original: open,
+      paid: 0,
+      open,
+      ledger: { object: 24, line: 0, direction },
+    });
+    let form = applyChange(EMPTY_FORM, { company: "OIL" });
+    form = applyChange(form, { type: "CUSTOMER" });
+    form = applyChange(form, { paymentAgainst: "AGAINST_LEDGER" });
+    form = applyChange(form, { partner: "CUSTA000606", partnerName: "Acme Retail" });
+    form = applyChange(form, {
+      selected: [item("RCT-1", 50000, "CREDIT"), item("INV-9", 20000, "DEBIT")],
+    });
+    form = changeAllocation(form, "RCT-1", { amount: "50000" });
+    form = changeAllocation(form, "INV-9", { amount: "20000" });
+
+    const totals = allocationTotals(allocationRows(form));
+    assert.equal(totals.payment, 30000);
+    assert.equal(requestAmount(form), 30000);
   });
 });
 

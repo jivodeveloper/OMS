@@ -5,13 +5,14 @@ import {
   advancePaymentError,
   advancePaymentService,
   type AdvancePaymentCompany,
-  type OmsDepartment,
+  type PaymentPurpose,
   type SapBudget,
 } from "@/src/services/advancePayment.service";
 
 import type { OpenDocument, Partner } from "../logic/constants";
 import {
   invoiceToDocument,
+  ledgerToDocument,
   otherToDocument,
   ownerLabel,
   purchaseOrderToDocument,
@@ -22,40 +23,51 @@ import {
 import {
   PARTNER_CODE_PREFIX,
   REFERENCE_KINDS,
+  availableOf,
   type PartnerSource,
   type ReferenceKind,
 } from "../logic/rules";
 
 /**
- * The live lists behind the request form: departments, business partners and
- * the documents a payment is made against.
+ * The live lists behind the request form: the Department's budget heads, the
+ * Payment Purposes, the business partners and the documents a payment is made
+ * against.
  *
  * Each list is read from the SAME endpoint the web form reads, and converted by
  * the SAME mapper (`logic/sapMapping`), so a bill's open amount here is the
  * figure the web shows and the one the server will accept.
  */
 
-/** Active departments with their sub-departments. Loaded once per mount. */
-export function useDepartments() {
-  const [departments, setDepartments] = useState<OmsDepartment[]>([]);
+/**
+ * The Payment Desk's purpose list: what the money is FOR.
+ *
+ * NOT per company, unlike the budget heads — a purpose is the same list
+ * everywhere, so it is read once per mount and kept.
+ */
+export function usePurposes() {
+  const [purposes, setPurposes] = useState<PaymentPurpose[]>([]);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
   useEffect(() => {
     let alive = true;
     advancePaymentService
-      .departments()
-      .then((rows) => {
-        if (alive) setDepartments(rows);
+      .paymentPurposes()
+      .then((found) => {
+        if (alive) setPurposes(found);
       })
       .catch((err) => {
         if (alive) setError(advancePaymentError(err));
+      })
+      .finally(() => {
+        if (alive) setLoading(false);
       });
     return () => {
       alive = false;
     };
   }, []);
 
-  return { departments, error };
+  return { purposes, loading, error };
 }
 
 /**
@@ -123,6 +135,11 @@ export function usePartnerSearch(
         if (source === "SAP_EMPLOYEES") {
           const rows = await advancePaymentService.employees(company, term);
           setPartners(rows.map(employeeToPartner));
+        } else if (source === "SAP_CUSTOMERS") {
+          // A refund's payee is a CUSTOMER (OCRD CardType C): a different
+          // table from the suppliers, and no code prefix narrows it.
+          const rows = await advancePaymentService.customers(company, term, SAP_MAX_ROWS);
+          setPartners(rows.map(vendorToPartner));
         } else {
           const rows = await advancePaymentService.vendors(company, term, SAP_MAX_ROWS);
           setPartners(
@@ -178,6 +195,15 @@ export function useOpenDocuments(
       if (kind === "VENDOR_PO") {
         const rows = await advancePaymentService.openVendorPurchaseOrders(company, partner);
         return rows.map((row) => purchaseOrderToDocument(row, company));
+      }
+      if (kind === "CUSTOMER_LEDGER") {
+        // The customer's open items: payments received and credit memos are
+        // owed to them (Cr), their invoices reduce the refund (Dr). An item
+        // other OMS requests already hold in full is left out.
+        const ledger = await advancePaymentService.partnerLedger(company, partner);
+        return ledger.results
+          .map((row) => ledgerToDocument(row, partner))
+          .filter((doc): doc is OpenDocument => doc !== null && availableOf(doc) > 0);
       }
       const rows = await advancePaymentService.openOtherDocuments(company, partner);
       return rows.map((row) => otherToDocument(row, partner));

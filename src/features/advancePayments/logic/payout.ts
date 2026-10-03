@@ -178,6 +178,30 @@ export interface PayoutDetails {
   lines: PayoutLine[];
   /** Supporting the payee's bank details — a cancelled cheque, a bank letter. */
   bankAttachments: FileAttachment[];
+  /**
+   * TDS deducted at the Payment stage (vendor payments only): the SAP code
+   * it is booked under and what it comes to. The methods pay the rest.
+   */
+  tds: PayoutTds | null;
+}
+
+export interface PayoutTds {
+  code: string;
+  label: string;
+  /** A percentage: 1, 2, 10 … */
+  rate: number;
+  account: string;
+  amount: number;
+}
+
+/** TDS on `amount` at `rate` percent, rounded to the rupee — as the server rounds it. */
+export function tdsAmountFor(amount: number, rate: number): number {
+  return Math.round((amount * rate) / 100);
+}
+
+/** What the methods must pay: the request's amount less any TDS. */
+export function netPayable(payout: PayoutDetails, requestAmount: number): number {
+  return Math.round((requestAmount - (payout.tds?.amount ?? 0)) * 100) / 100;
 }
 
 let lineSeq = 0;
@@ -204,6 +228,7 @@ export const EMPTY_PAYOUT: PayoutDetails = {
   toAccountManual: false,
   lines: [],
   bankAttachments: [],
+  tds: null,
 };
 
 /**
@@ -335,9 +360,13 @@ export function validatePayout(payout: PayoutDetails, requestAmount: number): Pa
 
   if (payout.lines.length > 0 && requestAmount > 0) {
     const total = payoutTotal(payout);
-    if (paise(total) !== paise(requestAmount)) {
+    const net = netPayable(payout, requestAmount);
+    if (paise(total) !== paise(net)) {
       problems.push(
-        `The payment methods add up to ${formatINR(total)}, but the request is for ${formatINR(requestAmount)}.`,
+        payout.tds
+          ? `The payment methods add up to ${formatINR(total)}, but the request pays ${formatINR(net)} ` +
+              `after TDS of ${formatINR(payout.tds.amount)}.`
+          : `The payment methods add up to ${formatINR(total)}, but the request is for ${formatINR(requestAmount)}.`,
       );
     }
   }

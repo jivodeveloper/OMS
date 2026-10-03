@@ -134,6 +134,16 @@ export const ASSIGNABLE_PAGES: AppPage[] = [
     ],
   },
   {
+    // Send Bills & POs — hand SAP's open documents to whoever raises the
+    // payment request from them. A separate job from raising or approving one,
+    // and the backend issues the key separately
+    // (`advance_payment/permissions.py`: `DISPATCH_KEY`), so neither of the
+    // other two implies it.
+    key: "Advance_Payment_Dispatch",
+    label: "Advance Payment Dispatch",
+    screens: ["advance-payments/dispatch", "advance-payments/dispatch-review"],
+  },
+  {
     // Production Orders — SAP plans them, OMS approves them.
     //
     // There is no "create" screen to grant, and there never will be: a planner
@@ -307,6 +317,11 @@ export const SCREEN_KEYS: Record<string, string[]> = {
   // Editing is open to the creator AND to an approver correcting a request in
   // place, so both keys admit here; `can.edit` decides per request.
   "advance-payments/edit-request": ALL_ADVANCE_PAYMENT_ACTIONS,
+  // Sending documents out is its own key and admits nobody else: a requester
+  // may raise what they are sent, but not choose who else must.
+  "advance-payments/dispatch": ["Advance_Payment_Dispatch"],
+  // Step two of the same page, reached from its Next button: the same key.
+  "advance-payments/dispatch-review": ["Advance_Payment_Dispatch"],
 };
 
 /**

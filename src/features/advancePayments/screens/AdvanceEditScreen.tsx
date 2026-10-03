@@ -16,8 +16,6 @@ import { appAlert } from "@/src/components/common/AppDialog";
 import { COLORS, RADIUS, SPACING } from "@/src/constants/theme";
 import useBackToOrigin from "@/src/hooks/useBackToOrigin";
 import {
-  advancePaymentError,
-  advancePaymentProblems,
   advancePaymentService,
   type ApiRequest,
 } from "@/src/services/advancePayment.service";
@@ -28,6 +26,7 @@ import {
   withReadings,
 } from "../hooks/useAttachmentReadings";
 import type { FileAttachment } from "../logic/attachments";
+import { failureMessage, showFailure } from "../showError";
 import { fromApiRequest, toApiRequest } from "../logic/requestApi";
 import { EMPTY_FORM, validate, type RequestForm } from "../logic/rules";
 
@@ -74,7 +73,7 @@ export default function AdvanceEditScreen() {
         setFiles(entry.files);
       })
       .catch((err) => {
-        if (alive) setError(advancePaymentError(err));
+        if (alive) setError(failureMessage(err));
       })
       .finally(() => {
         if (alive) setLoading(false);
@@ -133,10 +132,7 @@ export default function AdvanceEditScreen() {
     } catch (err) {
       // Every reason the server gave, in a dialog — see the note on the create
       // screen.
-      appAlert(
-        "Could not save",
-        [advancePaymentError(err), ...advancePaymentProblems(err)].join("\n"),
-      );
+      showFailure("Could not save", err);
       console.warn("[advance-payments] edit refused", err);
     } finally {
       setSaving(false);

@@ -29,13 +29,12 @@ import { useRefreshOnFocus } from "@/src/hooks/useRefreshOnFocus";
 import { setHeaderEditHandler } from "@/src/utils/headerEdit";
 import { fs, ms, sp } from "@/src/utils/responsive";
 import {
-  advancePaymentError,
-  advancePaymentProblems,
   advancePaymentService,
   type AdvancePaymentCompany,
   type ApiRequest,
   type PaymentProofQuery,
   type PaymentProofResult,
+  type SapCheck,
   type ProofCheck,
   type StageAction,
 } from "@/src/services/advancePayment.service";
@@ -46,6 +45,7 @@ import AttachmentViewerModal, {
   type AttachmentSource,
 } from "../components/AttachmentViewerModal";
 import { DecisionDone, DecisionPrompt } from "../components/DecisionDialogs";
+import { failureMessage, showFailure } from "../showError";
 import EditChangeRows, {
   ManualAccountFlag,
 } from "../components/EditChangeRows";
@@ -65,7 +65,6 @@ import { fromApiRequest } from "../logic/requestApi";
 import {
   STATUS_LABEL,
   formatDateTime,
-  priorityLabel,
   showsBalance,
 } from "../logic/requestLabels";
 import {
@@ -175,8 +174,14 @@ export default function AdvanceDetailsScreen() {
   } | null>(null);
   /** Which document rows are open. Collapsed by default: the list is the point. */
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
-  /** The read-only Remarks &amp; Updates box. Open to start; see its comment. */
-  const [notesOpen, setNotesOpen] = useState(false);
+  /**
+   * The read-only Remarks &amp; Updates box.
+   *
+   * OPEN TO START. It sits under General Information now, and what the last
+   * person said is the thing an approver reads before the figures; a box that
+   * has to be opened to be found is a box nobody opens.
+   */
+  const [notesOpen, setNotesOpen] = useState(true);
   /** The file being looked at, if any — see `AttachmentViewerModal`. */
   const [viewing, setViewing] = useState<AttachmentSource | null>(null);
 
@@ -270,6 +275,39 @@ export default function AdvanceDetailsScreen() {
     };
   }, [lift]);
 
+  /**
+   * The request's documents against SAP as it stands.
+   *
+   * ONLY FOR THE STAGES THAT ACT ON IT (Payment, Audit, Final): it is a live
+   * SAP read, and a requester looking at their own request has nothing to do
+   * with the answer. Re-read when the flow moves, so the stage that inherits
+   * it sees today's SAP and not the last stage's.
+   */
+  const [sapCheck, setSapCheck] = useState<SapCheck | null>(null);
+  const flowRole = request?.flow?.current_role ?? "";
+  const mayCheck = SAP_CHECK_ROLES.has(flowRole) && Boolean(request?.flow?.awaiting_me);
+
+  useEffect(() => {
+    if (!mayCheck || !Number.isFinite(requestId)) {
+      setSapCheck(null);
+      return;
+    }
+    let alive = true;
+    advancePaymentService
+      .sapCheck(requestId)
+      .then((found) => {
+        if (alive) setSapCheck(found);
+      })
+      .catch(() => {
+        // SAP being unreachable must not take the page with it: the card
+        // simply does not appear, and the decision buttons still work.
+        if (alive) setSapCheck(null);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [mayCheck, requestId, request?.flow?.version]);
+
   /** Open a file the SERVER holds — a request attachment or a payment proof. */
   const openRequestFile = (name: string, serverId: number | undefined) => {
     if (serverId === undefined) return;
@@ -289,7 +327,7 @@ export default function AdvanceDetailsScreen() {
       if (can) await Linking.openURL(uri);
       else appAlert("Saved to this device", `${name} was downloaded.`);
     } catch (err) {
-      appAlert("Could not download", advancePaymentError(err));
+      showFailure("Could not download", err);
     }
   };
 
@@ -324,7 +362,7 @@ export default function AdvanceDetailsScreen() {
       try {
         setRequest(await advancePaymentService.request(requestId));
       } catch (err) {
-        setError(advancePaymentError(err));
+        setError(failureMessage(err));
       } finally {
         setLoading(false);
         setRefreshing(false);
@@ -404,10 +442,7 @@ export default function AdvanceDetailsScreen() {
     } catch (err) {
       // Every reason the server gave — `errors.problems` names the field or the
       // rule, and "The request could not be saved." alone names neither.
-      appAlert(
-        "Could not be done",
-        [advancePaymentError(err), ...advancePaymentProblems(err)].join("\n"),
-      );
+      showFailure("Could not be done", err);
       // A REFUSED POSTING IS STILL A FACT ON THE RECORD. SAP throwing out the
       // payment at Final answers 502 and leaves the request at Final, but the
       // server has written the failed voucher and the log — re-read so the SAP
@@ -476,7 +511,17 @@ export default function AdvanceDetailsScreen() {
   })();
   const open = rows.length ? allocationTotals(rows).open : 0;
   const can = request.can;
-  const updates = (request.logs ?? []).filter((log) => UPDATE_ACTIONS.has(log.action));
+  /**
+   * WHAT ANYBODY HAS SAID, and what has been CHANGED.
+   *
+   * An edit always counts, because the Was / Now rows are the only record of
+   * it; everything else counts only when somebody actually wrote something.
+   * A decision with no words is the route's business and lives on the Progress
+   * page — it would be a line here saying nothing.
+   */
+  const updates = (request.logs ?? []).filter(
+    (log) => UPDATE_ACTIONS.has(log.action) || Boolean(log.remarks?.trim()),
+  );
 
   /**
    * What this user may do, in the order the box lays them out.
@@ -675,21 +720,6 @@ export default function AdvanceDetailsScreen() {
               <Ionicons name="information-circle" size={ms(16)} color={COLORS.primary} />
             </View>
             <Text style={styles.cardTitle}>General Information</Text>
-            {/* The priority, on the card's own line — the same badge the
-                deposit page gives the banking delay, and red for High for the
-                same reason: past that point it is the point, not a footnote. */}
-            <View style={[styles.gapPill, form.priority === "HIGH" && styles.gapPillLate]}>
-              <Ionicons
-                name="flag-outline"
-                size={ms(12)}
-                color={form.priority === "HIGH" ? COLORS.error : COLORS.textSecondary}
-              />
-              <Text
-                style={[styles.gapText, form.priority === "HIGH" && styles.gapTextLate]}
-              >
-                {priorityLabel(entry)}
-              </Text>
-            </View>
           </View>
 
           {/* WHO and WHOSE BOOKS. Where the request has got to is not here:
@@ -723,11 +753,8 @@ export default function AdvanceDetailsScreen() {
             <Field
               icon="git-branch-outline"
               label="Department"
-              value={
-                form.subDepartmentName
-                  ? `${form.departmentName} · ${form.subDepartmentName}`
-                  : form.departmentName
-              }
+              value={form.budgetName || form.budget || "—"}
+              sub={form.budgetName && form.budget !== form.budgetName ? form.budget : undefined}
             />
             <Field
               icon="calendar-outline"
@@ -757,27 +784,15 @@ export default function AdvanceDetailsScreen() {
               code beneath: an approver reads "Back Office", and the code is
               what reconciles against SAP. Hidden entirely on a request raised
               before the purpose existed, rather than shown as two dashes. */}
-          {form.budget || form.subBudget ? (
+          {form.purpose || form.purposeLabel ? (
             <>
               <View style={styles.divider} />
-              <View style={styles.grid}>
-                <Field
-                  icon="pricetag-outline"
-                  label="Purpose (Budget)"
-                  value={form.budgetName || form.budget || "—"}
-                  sub={form.budgetName && form.budget !== form.budgetName ? form.budget : undefined}
-                />
-                <Field
-                  icon="pricetags-outline"
-                  label="Purpose (Sub Budget)"
-                  value={form.subBudgetName || form.subBudget || "—"}
-                  sub={
-                    form.subBudgetName && form.subBudget !== form.subBudgetName
-                      ? form.subBudget
-                      : undefined
-                  }
-                />
-              </View>
+              <Field
+                icon="pricetag-outline"
+                label="Payment Purpose"
+                value={form.purposeLabel || form.purpose}
+                full
+              />
             </>
           ) : null}
 
@@ -874,6 +889,84 @@ export default function AdvanceDetailsScreen() {
 
         {/* ── SAP Information ──────────────────────────────────────────── */}
         <SapCard request={request} />
+
+        {/* ── Remarks & Updates ───────────────────────────────────────
+            WHAT WAS SAID, and what has been CHANGED, in one box: both answer
+            "why does this request read the way it does?", and splitting them
+            made the reader check two places for one answer.
+
+            UPDATES, NEVER THE HISTORY. Approvals, returns, rejections and the
+            SAP posting are the request's history and live on the Progress
+            page, in one place, so the two pages cannot tell two stories. */}
+        {form.remarks || updates.length ? (
+          <View style={styles.card}>
+            {/* Closed to start, like the other boxes: on a request that has
+                been round the loop a few times this is the longest thing on the
+                page, and the request itself is what an approver came to read. */}
+            <TouchableOpacity
+              style={styles.cardHeader}
+              onPress={() => setNotesOpen((current) => !current)}
+              activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityState={{ expanded: notesOpen }}
+            >
+              <View style={styles.headerIcon}>
+                <Ionicons name="chatbox-ellipses" size={ms(16)} color={COLORS.primary} />
+              </View>
+              <Text style={styles.cardTitle}>
+                Remarks &amp; Updates{updates.length ? ` (${updates.length})` : ""}
+              </Text>
+              <Ionicons
+                name={notesOpen ? "chevron-up" : "chevron-down"}
+                size={20}
+                color={COLORS.textSecondary}
+              />
+            </TouchableOpacity>
+
+            {notesOpen && form.remarks ? (
+              <Field
+                icon="chatbox-ellipses-outline"
+                label={`Remarks by ${entry.requestedBy}`}
+                value={form.remarks}
+                full
+              />
+            ) : null}
+
+            {(notesOpen ? updates : []).map((log, index) => (
+              <View
+                key={log.id}
+                style={[
+                  styles.lineRow,
+                  (index > 0 || !!form.remarks) && styles.lineRowBordered,
+                ]}
+              >
+                <View style={styles.lineIcon}>
+                  <Ionicons name="create-outline" size={ms(16)} color={COLORS.primary} />
+                </View>
+                <View style={styles.lineText}>
+                  {/* WHO, then WHAT, on one line: a name is what the reader
+                      is looking for, and a surname's initial tells two people
+                      apart without a column of repeated full names. */}
+                  <Text style={styles.lineNo} numberOfLines={1}>
+                    {shortName(log.actor?.name)} · {log.label || log.action}
+                  </Text>
+                  <Text style={styles.lineParty} numberOfLines={1}>
+                    {log.stage_name ? `${log.stage_name} · ` : ""}
+                    {formatDateTime(log.created_on)}
+                  </Text>
+                  {log.remarks ? (
+                    <Text style={styles.remarkQuote}>“{log.remarks}”</Text>
+                  ) : null}
+                  {/* WHAT the edit changed, not just that it happened — the
+                      same Was / Now rows the Progress page's history shows,
+                      read from the same log row, so the two cannot disagree. */}
+                  <ManualAccountFlag log={log} />
+                  <EditChangeRows log={log} />
+                </View>
+              </View>
+            ))}
+          </View>
+        ) : null}
 
         {/* ── The documents it is paid against ─────────────────────────── */}
         {rows.length ? (
@@ -1019,80 +1112,6 @@ export default function AdvanceDetailsScreen() {
           </View>
         ) : null}
 
-        {/* ── Remarks & Updates ───────────────────────────────────────
-            WHAT WAS SAID, and what has been CHANGED, in one box: both answer
-            "why does this request read the way it does?", and splitting them
-            made the reader check two places for one answer.
-
-            UPDATES, NEVER THE HISTORY. Approvals, returns, rejections and the
-            SAP posting are the request's history and live on the Progress
-            page, in one place, so the two pages cannot tell two stories. */}
-        {form.remarks || updates.length ? (
-          <View style={styles.card}>
-            {/* Closed to start, like the other boxes: on a request that has
-                been round the loop a few times this is the longest thing on the
-                page, and the request itself is what an approver came to read. */}
-            <TouchableOpacity
-              style={styles.cardHeader}
-              onPress={() => setNotesOpen((current) => !current)}
-              activeOpacity={0.7}
-              accessibilityRole="button"
-              accessibilityState={{ expanded: notesOpen }}
-            >
-              <View style={styles.headerIcon}>
-                <Ionicons name="chatbox-ellipses" size={ms(16)} color={COLORS.primary} />
-              </View>
-              <Text style={styles.cardTitle}>
-                Remarks &amp; Updates{updates.length ? ` (${updates.length})` : ""}
-              </Text>
-              <Ionicons
-                name={notesOpen ? "chevron-up" : "chevron-down"}
-                size={20}
-                color={COLORS.textSecondary}
-              />
-            </TouchableOpacity>
-
-            {notesOpen && form.remarks ? (
-              <Field
-                icon="chatbox-ellipses-outline"
-                label={`Remarks by ${entry.requestedBy}`}
-                value={form.remarks}
-                full
-              />
-            ) : null}
-
-            {(notesOpen ? updates : []).map((log, index) => (
-              <View
-                key={log.id}
-                style={[
-                  styles.lineRow,
-                  (index > 0 || !!form.remarks) && styles.lineRowBordered,
-                ]}
-              >
-                <View style={styles.lineIcon}>
-                  <Ionicons name="create-outline" size={ms(16)} color={COLORS.primary} />
-                </View>
-                <View style={styles.lineText}>
-                  <Text style={styles.lineNo} numberOfLines={1}>
-                    {log.label || log.action}
-                  </Text>
-                  <Text style={styles.lineParty} numberOfLines={1}>
-                    {log.actor?.name ?? "System"} · {formatDateTime(log.created_on)}
-                  </Text>
-                  {log.remarks ? (
-                    <Text style={styles.lineParty}>{log.remarks}</Text>
-                  ) : null}
-                  {/* WHAT the edit changed, not just that it happened — the
-                      same Was / Now rows the Progress page's history shows,
-                      read from the same log row, so the two cannot disagree. */}
-                  <ManualAccountFlag log={log} />
-                  <EditChangeRows log={log} />
-                </View>
-              </View>
-            ))}
-          </View>
-        ) : null}
-
         {/* ── What the payment is weighed against ──────────────────────
             The payee's SAP balance and open items. `showsBalance` asks the
             server whether this viewer may see the account at all, so the card
@@ -1125,6 +1144,30 @@ export default function AdvanceDetailsScreen() {
                 sub={entry.payout.toIfsc}
               />
             </View>
+
+            {/* TDS WITHHELD AT PAYMENT. It is the difference between what the
+                request is for and what the payee actually receives, so it is
+                stated rather than left to be worked out from the method
+                amounts — and the account is what reconciles it in SAP. */}
+            {entry.payout.tds ? (
+              <>
+                <View style={styles.divider} />
+                <View style={styles.grid}>
+                  <Field
+                    icon="receipt-outline"
+                    label={`TDS at ${entry.payout.tds.rate}%`}
+                    value={money(entry.payout.tds.amount)}
+                    sub={entry.payout.tds.label || entry.payout.tds.code}
+                  />
+                  <Field
+                    icon="arrow-forward-circle-outline"
+                    label="Payee receives"
+                    value={money(amount - entry.payout.tds.amount)}
+                    sub={`Booked to ${entry.payout.tds.account}`}
+                  />
+                </View>
+              </>
+            ) : null}
 
             {/* The bank proof the paying desk attached — a cancelled cheque,
                 a bank letter. Tappable, because an approver checking the payee's
@@ -1181,7 +1224,13 @@ export default function AdvanceDetailsScreen() {
                       </Text>
                     ) : null}
                   </View>
-                  <Text style={styles.lineAmount}>{money(Number(line.amount) || 0)}</Text>
+                  {/* THE SAME COLUMN AS "To Account" ABOVE: half the row,
+                      and indented by the fields' own icon and gap, so the
+                      figure starts under that value's first character instead
+                      of against the card's right edge. */}
+                  <View style={styles.lineAmountCol}>
+                    <Text style={styles.lineAmount}>{money(Number(line.amount) || 0)}</Text>
+                  </View>
                 </View>
 
                 {/* What the payer attached against THIS method — full width. */}
@@ -1202,6 +1251,12 @@ export default function AdvanceDetailsScreen() {
             ))}
           </View>
         ) : null}
+
+        {/* SAP AS IT IS NOW, not as it was when the request was raised.
+            For Payment, Audit and Final, which is the web's own gate: a PO
+            amended, a bill part-paid outside OMS, or a document closed since
+            is then fixed at Payment rather than discovered at Final. */}
+        {sapCheck && sapCheck.results.length > 0 ? <SapCheckCard check={sapCheck} /> : null}
 
         {/* ── Record Payment ───────────────────────────
             AFTER SAP, AND ONLY FOR WHOEVER PAYS. Its own card, gated exactly as
@@ -1331,7 +1386,6 @@ export default function AdvanceDetailsScreen() {
         status={done?.status ?? ""}
         isFinal={done?.final}
         onDone={() => {
-          const action = done?.action;
           const final = done?.final;
           setDone(null);
 
@@ -1343,26 +1397,14 @@ export default function AdvanceDetailsScreen() {
             void load(true);
             return;
           }
-          // THE LIST THEY ACTED FROM. A page of buttons they can no longer
-          // press invites a second tap on a decision already taken, so the
-          // dialog ends on a list — and on the RIGHT one: an approver who has
-          // just decided is working through their desk, not reading the
-          // requests they raised themselves. Only a creator's own action
-          // (cancel, resubmit) belongs on My Requests.
-          //
-          // Whoever could take a desk action holds the approval key by
-          // definition — the server only offers those to the stage's user — so
-          // the desk page is always open to them.
-          const desk =
-            action === "approve" ||
-            action === "reject" ||
-            action === "return" ||
-            action === "send-back";
-          router.replace(
-            (desk
-              ? "/(main)/advance-payments/approval"
-              : "/(main)/advance-payments/tracking") as never,
-          );
+
+          // EVERY OTHER DECISION ENDS ON THE LIST. A page of buttons they can
+          // no longer press invites a second tap on a decision already taken.
+          // ONE LIST, now: Advance Payments opens on To Approve for anyone
+          // holding the approval key and on My Requests for anyone else, so a
+          // desk decision and a creator's cancellation both land where the
+          // request now is, with no second page to choose between.
+          router.replace("/(main)/advance-payments/tracking" as never);
         }}
       />
     </KeyboardAvoidingView>
@@ -1819,6 +1861,147 @@ function CheckLine({
   );
 }
 
+/** "Preshit Singh" -> "Preshit S." — enough to tell two people apart. */
+function shortName(full: string | undefined): string {
+  const parts = (full ?? "").trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "System";
+  if (parts.length === 1) return parts[0];
+  return `${parts[0]} ${parts[parts.length - 1][0].toUpperCase()}.`;
+}
+
+/** The stages that are asked to act on what SAP says now. */
+const SAP_CHECK_ROLES = new Set(["PAYMENT", "AUDIT", "FINAL"]);
+
+/** How SAP holds a document now, in words. */
+const SAP_STATUS: Record<string, string> = {
+  OPEN: "Open",
+  CLOSED: "Closed",
+  CANCELLED: "Cancelled",
+  GONE: "Not in SAP",
+};
+
+/**
+ * CHECKED AGAINST SAP NOW — the check Final makes before it posts, shown to
+ * the stages before it as well.
+ *
+ * One row per document: how SAP holds it, what was open when the request was
+ * raised, what is open today, what other OMS requests hold, what is left for
+ * this one, and what it pays. A row that no longer fits leads, because that is
+ * the one thing this card exists to say; the figures sit under the name rather
+ * than in columns, which is the only way seven of them fit a phone.
+ */
+function SapCheckCard({ check }: { check: SapCheck }) {
+  const palette = check.ok
+    ? check.changed
+      ? { colour: COLORS.warning, bg: COLORS.warningLight, icon: "alert-circle" as const }
+      : { colour: COLORS.success, bg: COLORS.successLight, icon: "checkmark-circle" as const }
+    : { colour: COLORS.error, bg: COLORS.errorLight, icon: "close-circle" as const };
+  const badge = check.ok ? (check.changed ? "Changed, still fits" : "Unchanged") : "Does not fit";
+  // The rows that no longer fit first, then the ones that merely moved.
+  const rank = (row: SapCheck["results"][number]) => (row.ok ? (row.changed ? 1 : 2) : 0);
+  const rows = [...check.results].sort((a, b) => rank(a) - rank(b));
+
+  return (
+    <View style={styles.card}>
+      <View style={styles.sectionHeader}>
+        <View style={[styles.sectionIcon, { backgroundColor: palette.bg }]}>
+          <Ionicons name={palette.icon} size={ms(16)} color={palette.colour} />
+        </View>
+        <Text style={styles.sectionTitle}>Checked Against SAP Now</Text>
+        <View style={[styles.sapBadge, { backgroundColor: palette.bg }]}>
+          <Text style={[styles.sapBadgeText, { color: palette.colour }]}>{badge}</Text>
+        </View>
+      </View>
+
+      {!check.ok ? (
+        <Text style={styles.checkWarning}>
+          SAP has changed since this request was raised, and Final cannot post it as it is.
+          Correct the payment, or return it to the creator.
+        </Text>
+      ) : null}
+
+      {rows.map((row, index) => (
+        <View
+          key={row.document_id}
+          style={[styles.checkRow, index > 0 && styles.lineRowBordered]}
+        >
+          <View style={styles.checkHead}>
+            <Text style={styles.lineNo} numberOfLines={1}>
+              {row.sap_doc_num || row.sap_doc_entry}
+            </Text>
+            <View
+              style={[
+                styles.sapBadge,
+                {
+                  backgroundColor: row.ok
+                    ? row.changed
+                      ? COLORS.warningLight
+                      : COLORS.successLight
+                    : COLORS.errorLight,
+                },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.sapBadgeText,
+                  {
+                    color: row.ok
+                      ? row.changed
+                        ? COLORS.warning
+                        : COLORS.success
+                      : COLORS.error,
+                  },
+                ]}
+              >
+                {SAP_STATUS[row.status] ?? row.status}
+              </Text>
+            </View>
+          </View>
+
+          {row.message ? <Text style={styles.checkRowNote}>{row.message}</Text> : null}
+
+          <View style={styles.checkFigures}>
+            <CheckFigure label="Open when raised" value={money(Number(row.open_when_raised) || 0)} />
+            <CheckFigure
+              label="Open now"
+              value={money(Number(row.open_now) || 0)}
+              tone={row.changed ? COLORS.warning : undefined}
+            />
+            <CheckFigure
+              label="Held by others"
+              value={money(Number(row.held_by_others) || 0)}
+            />
+            <CheckFigure label="Left for this" value={money(Number(row.available_now) || 0)} />
+            <CheckFigure
+              label="This request pays"
+              value={money(Number(row.amount) || 0)}
+              tone={row.ok ? COLORS.text : COLORS.error}
+            />
+          </View>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+/** One figure of a SAP-check row: its name, and the money under it. */
+function CheckFigure({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: string;
+  tone?: string;
+}) {
+  return (
+    <View style={styles.checkFigure}>
+      <Text style={styles.checkFigureLabel}>{label}</Text>
+      <Text style={[styles.checkFigureValue, tone ? { color: tone } : null]}>{value}</Text>
+    </View>
+  );
+}
+
 /** One transfer line: its proof, the checks, and the UTR that is recorded. */
 function UtrLine({
   line,
@@ -1864,7 +2047,7 @@ function UtrLine({
       setResult(found);
       if (found.utr) setUtr(cleanUtr(found.utr));
     } catch (err) {
-      appAlert("The proof could not be read", advancePaymentError(err));
+      showFailure("The proof could not be read", err);
     } finally {
       setReading(false);
     }
@@ -1902,7 +2085,7 @@ function UtrLine({
       setProof([]);
       setUtr("");
     } catch (err) {
-      appAlert("Could not record the UTR", advancePaymentError(err));
+      showFailure("Could not record the UTR", err);
     } finally {
       setSaving(false);
     }
@@ -2420,13 +2603,23 @@ const styles = StyleSheet.create({
   lineNo: { fontSize: fs(13), fontWeight: "700", color: COLORS.text },
   lineParty: { fontSize: fs(11), color: COLORS.textSecondary, marginTop: sp(2) },
   dueFlag: { fontSize: fs(10.5), fontWeight: "800", color: "#E25555", marginTop: sp(2) },
+  // Half the row, indented by `fieldIcon` + the field's gap, so a method's
+  // figure sits in the same column as the grid's right-hand values.
+  lineAmountCol: { width: "50%", paddingLeft: ms(17) + sp(8), flexShrink: 0 },
   lineAmount: {
     fontSize: fs(13),
     fontWeight: "800",
     color: COLORS.text,
-    flexShrink: 0,
   },
   lineRight: { flexDirection: "row", alignItems: "center", gap: sp(6), flexShrink: 0 },
+  // Somebody's own words, set apart from the row's facts.
+  remarkQuote: {
+    fontSize: fs(12),
+    color: COLORS.text,
+    fontStyle: "italic",
+    marginTop: sp(4),
+    lineHeight: fs(17),
+  },
   lineUtr: { fontSize: fs(11), color: COLORS.success, fontWeight: "700", marginTop: sp(2) },
   proofRow: { marginTop: sp(2), marginBottom: sp(2) },
   // Copied from `approval/components/AttachmentCard` — one attachment card.
@@ -2520,6 +2713,25 @@ const styles = StyleSheet.create({
     paddingVertical: sp(3),
     borderRadius: sp(6),
   },
+  checkWarning: {
+    fontSize: fs(12),
+    color: COLORS.error,
+    lineHeight: fs(18),
+    marginBottom: sp(8),
+  },
+  checkRow: { paddingVertical: sp(10) },
+  checkHead: { flexDirection: "row", alignItems: "center", gap: sp(8) },
+  checkRowNote: { fontSize: fs(11.5), color: COLORS.error, marginTop: sp(4) },
+  // Five figures per document: two to a row on a phone, wrapping.
+  checkFigures: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    marginTop: sp(8),
+    rowGap: sp(8),
+  },
+  checkFigure: { width: "50%", paddingRight: sp(8) },
+  checkFigureLabel: { fontSize: fs(10.5), color: COLORS.textMuted },
+  checkFigureValue: { fontSize: fs(12.5), fontWeight: "800", color: COLORS.text, marginTop: 1 },
   sapBadgeText: { fontSize: fs(10), fontWeight: "800", letterSpacing: 0.3 },
   sapHeadline: {
     fontSize: fs(12),

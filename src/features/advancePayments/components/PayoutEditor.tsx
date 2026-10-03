@@ -24,6 +24,7 @@ import {
   methodsFor,
   newPayoutLine,
   noteRowsTotal,
+  netPayable,
   payoutTotal,
   startPayout,
   validatePayout,
@@ -36,6 +37,7 @@ import { payoutFileChanges, payoutToApi } from "../logic/requestApi";
 import { formatINR } from "../logic/rules";
 import { DateField, Field, Input, Notice, NoticeText, Section, Select } from "./AdvanceUi";
 import ManualAccountPassword from "./ManualAccountPassword";
+import TdsSection from "./TdsSection";
 import PickedFileViewer from "./PickedFileViewer";
 
 /**
@@ -204,7 +206,30 @@ export default function PayoutEditor({
   const { missing, problems } = validatePayout(payout, amount);
   const ready = missing.length === 0 && problems.length === 0;
   const allocated = payoutTotal(payout);
-  const balanced = Math.round(allocated * 100) === Math.round(amount * 100);
+  /**
+   * What the METHODS must add up to: the request's amount, less any TDS.
+   *
+   * Not the request's amount — once TDS is withheld the payee receives the
+   * net, and this chip has to agree with `validatePayout`, which compares the
+   * methods against the same figure.
+   */
+  const net = netPayable(payout, amount);
+  const balanced = Math.round(allocated * 100) === Math.round(net * 100);
+
+  /**
+   * TDS IS FOR A VENDOR'S BILLS. The DocEntries of the bills being paid are
+   * what the server checks for a deduction SAP has already made on one.
+   */
+  const tdsContext =
+    request.request_type === "VENDOR" && request.company
+      ? {
+          company: request.company,
+          cardCode: request.partner_code,
+          bills: (request.documents ?? [])
+            .filter((doc) => doc.kind === "BILL")
+            .map((doc) => doc.sap_doc_entry),
+        }
+      : null;
 
   /**
    * Edited since the last save.
@@ -321,6 +346,19 @@ export default function PayoutEditor({
           }
         />
       </Section>
+
+      {/* TDS, A VENDOR PAYMENT ONLY. An employee's imprest and a customer's
+          refund are not payments for a service, so nothing is withheld — the
+          same gate the web applies. */}
+      {tdsContext ? (
+        <TdsSection
+          value={payout}
+          onChange={setPayout}
+          requestAmount={amount}
+          context={tdsContext}
+          readOnly={false}
+        />
+      ) : null}
 
       {/* ── Payment Methods ─────────────────────────────────────────── */}
       <Section
@@ -481,9 +519,9 @@ function PayToAccount({
           ? "SAP has no bank account for this payee. Type the details."
           : typing
             ? "Typed by hand, not one of the payee's SAP accounts."
-            : chosen?.is_default
-              ? "The payee's default account in SAP."
-              : "One of the payee's accounts in SAP.";
+            // A picked account names itself in the option, down to
+            // "(default)" — repeating it underneath said nothing twice.
+            : "";
 
   return (
     <>
@@ -518,7 +556,7 @@ function PayToAccount({
         </Field>
       )}
 
-      <Text style={styles.note}>{note}</Text>
+      {note ? <Text style={styles.note}>{note}</Text> : null}
 
       {/* The typed number, when the picker is showing "Enter another account…". */}
       {typing && accounts.length > 0 ? (
@@ -551,6 +589,7 @@ function PayToAccount({
           autoCapitalize="characters"
           // From SAP with the account: never retyped against a known account.
           editable={typing && !locked}
+          code
         />
       </Field>
 
@@ -644,8 +683,8 @@ function MethodCard({
           <Ionicons name={METHOD_ICON[line.method]} size={18} color={COLORS.primary} />
         </View>
         <View style={styles.methodTitleWrap}>
-          <Text style={styles.methodKicker}>PAYMENT METHOD {number}</Text>
-          <Text style={styles.methodName}>
+          <Text style={styles.methodKicker}>METHOD {number}</Text>
+          <Text style={styles.methodName} numberOfLines={1}>
             {PAYOUT_METHODS.find((method) => method.value === line.method)?.label}
           </Text>
         </View>
@@ -913,15 +952,23 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  methodTitleWrap: { flex: 1 },
+  // The kicker and the name on ONE line: the kicker keeps its width, the
+  // name takes what is left and ellipsises, and the amount is never pushed.
+  methodTitleWrap: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: "row",
+    alignItems: "baseline",
+    gap: SPACING.xs,
+  },
   methodKicker: {
     fontSize: 10,
     fontWeight: "600",
     letterSpacing: 0.8,
     color: COLORS.textMuted,
   },
-  methodName: { fontSize: 15, fontWeight: "700", color: COLORS.text, marginTop: 1 },
-  methodRight: { flexDirection: "row", alignItems: "center", gap: SPACING.sm },
+  methodName: { flex: 1, minWidth: 0, fontSize: 15, fontWeight: "700", color: COLORS.text },
+  methodRight: { flexDirection: "row", alignItems: "center", gap: SPACING.sm, flexShrink: 0 },
   methodAmount: { fontSize: 14, fontWeight: "700", color: COLORS.primaryDark },
   methodAmountOff: { fontSize: 14, fontWeight: "600", color: COLORS.textMuted },
   methodBody: {

@@ -196,6 +196,7 @@ export function Input({
   autoCapitalize,
   invalid,
   prefix,
+  code,
 }: {
   value: string;
   onChangeText: (value: string) => void;
@@ -207,6 +208,13 @@ export function Input({
   invalid?: boolean;
   /** "₹" on a money field, as the payment cards show it. */
   prefix?: string;
+  /**
+   * A CODE, not prose: letter-spaced, bold and in the brand colour.
+   *
+   * An IFSC or a SAP identifier is checked against another screen one
+   * character at a time, and a code set in body text invites a misread.
+   */
+  code?: boolean;
 }) {
   return (
     <TextInput
@@ -224,7 +232,7 @@ export function Input({
       autoCapitalize={autoCapitalize}
       error={invalid}
       textColor={editable ? COLORS.black : COLORS.textSecondary}
-      style={[styles.input, multiline && styles.inputMultiline]}
+      style={[styles.input, multiline && styles.inputMultiline, code && styles.inputCode]}
       outlineStyle={styles.inputOutline}
       outlineColor={COLORS.border}
       activeOutlineColor={COLORS.primary}
@@ -445,6 +453,7 @@ const styles = StyleSheet.create({
   // field must not sit two pixels higher than it.
   input: { backgroundColor: COLORS.surface, fontSize: 14, height: 56 },
   inputMultiline: { height: undefined, minHeight: 90, paddingTop: SPACING.sm },
+  inputCode: { fontWeight: "800", letterSpacing: 1.2, color: COLORS.primaryDark },
   inputOutline: { borderRadius: RADIUS.md, borderWidth: 1.5 },
   affix: { color: COLORS.textSecondary, fontSize: 14 },
 

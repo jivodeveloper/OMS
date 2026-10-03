@@ -412,7 +412,10 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 6,
     height: 56,
-    minWidth: 96,
+    // FILLS ITS CELL, so picking "03 Oct 2026" does not widen the control and
+    // push the field beside it out of line. `minWidth` is gone with it: a
+    // width of 100% in a flex cell needs no floor.
+    width: "100%",
     paddingHorizontal: 12,
     borderRadius: 12,
     borderWidth: 1.5,
@@ -424,6 +427,9 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.primaryLight,
   },
   fieldText: {
+    // `flex: 1` so a long label ellipsises inside the box instead of growing
+    // it, and the clear cross keeps its place on the right.
+    flex: 1,
     fontSize: 13,
     fontWeight: "600",
     color: COLORS.primary,

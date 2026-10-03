@@ -136,11 +136,11 @@ export interface MasterEmployee {
 
 export type NewMasterEmployee = Omit<MasterEmployee, "id" | "role_label" | "created_on">;
 
-/** A department, with its sub-departments (OMS's own list, copied from JSAP). */
-export interface OmsDepartment {
-  id: number;
-  name: string;
-  sub_departments: Array<{ id: number; name: string }>;
+/** A Payment Purpose choice: the Payment Desk's list (`/payment-purposes/`). */
+export interface PaymentPurpose {
+  code: string;
+  label: string;
+  group: string;
 }
 
 /** One active employee from the master, as the request form's pickers read it. */
@@ -185,42 +185,105 @@ export interface AttachmentReading {
   };
 }
 
-/** A Payment Purpose choice: SAP's Budget (dimension 3) or Sub Budget (4) cost centre. */
-export interface SapBudget {
-  kind: "BUDGET" | "SUB_BUDGET";
-  code: string;
-  name: string;
-}
-
 /**
- * A partner's open ledger (`/open-documents/`), with its totals.
- *
- * `net_open_means` is the server's own words for which way the balance runs
- * — a signed figure alone is read backwards about half the time.
- */
-export interface SapPartnerLedger {
-  summary: {
-    open_count: number;
-    open_debit: string;
-    open_credit: string;
-    net_open: string;
-    net_open_means: string;
-    overdue_count: number;
-  };
-  results: (SapLedgerDocument & { days_overdue: number | null })[];
-}
-
-/**
- * A document's attachment reading as SAVED WITH THE REQUEST: what
+ * A document's attachment reading as saved with the request: what
  * `/document-attachment/read/` answered when it was raised, or why it could
- * not be read. Read once, at submission, so the approvers see what the
- * requester's document said without the file being opened again — and without
- * the answer changing under them if the attachment is replaced later.
+ * not be read. Shown to the approvers from Payment on.
  */
 export type AttachmentCheck = AttachmentReading | { error: string };
 
-/** The document kinds `/document-attachment/` reads. */
+/** The document kinds `/document-attachment/` reads, and whose attachments are listed. */
 export type SapAttachmentKind = "po" | "bill";
+
+/** Any document an attachment can sit on: a bill's GRPO too. */
+export type SapAttachmentSource = SapAttachmentKind | "grpo";
+
+/**
+ * One SAP attachment related to a document (`/document-attachments/`): a
+ * bill's own, its GRPOs' or the POs behind them. Opened by kind, document and
+ * line; the server takes the file name from SAP.
+ */
+export interface SapRelatedAttachment {
+  kind: SapAttachmentSource;
+  kind_label: string;
+  doc_entry: number;
+  doc_num: number | null;
+  line: number;
+  file_name: string;
+  date: string | null;
+  note: string;
+}
+
+/** One PO as SAP holds it (`/purchase-order/`). Amounts and quantities are strings. */
+export interface SapPurchaseOrder {
+  header: {
+    doc_entry: number;
+    doc_num: number | null;
+    status: string;
+    doc_date: string | null;
+    delivery_date: string | null;
+    document_date: string | null;
+    created_on: string | null;
+    card_code: string;
+    card_name: string;
+    vendor_ref: string;
+    currency: string;
+    rate: string | null;
+    doc_total: string;
+    tax: string;
+    discount_percent: string | null;
+    discount: string;
+    freight: string;
+    rounding: string;
+    tds: string;
+    paid_to_date: string;
+    down_payment: string;
+    branch: string;
+    pay_to: string;
+    ship_to: string;
+    payment_terms: string;
+    buyer: string;
+    owner: string;
+    created_by: string;
+    remarks: string;
+    journal_memo: string;
+  };
+  lines: Array<{
+    line: number;
+    item_code: string;
+    description: string;
+    quantity: string | null;
+    open_quantity: string | null;
+    unit: string;
+    price_before_discount: string;
+    discount_percent: string | null;
+    price: string;
+    line_total: string;
+    tax_code: string;
+    tax_percent: string | null;
+    tax: string;
+    gross_total: string;
+    warehouse: string;
+    delivery_date: string | null;
+    status: string;
+    account: string;
+    budget: string;
+    sub_budget: string;
+    note: string;
+  }>;
+  /** What was made from it: GRPOs, and the bills made from those GRPOs. */
+  follow_on: Array<{
+    kind: "grpo" | "bill";
+    kind_label: string;
+    doc_entry: number;
+    doc_num: number | null;
+    doc_date: string | null;
+    doc_total: string;
+    status: string;
+    vendor_ref: string;
+  }>;
+  attachments: SapRelatedAttachment[];
+}
 
 export interface SapOpenInvoice {
   doc_entry: number;
@@ -236,6 +299,8 @@ export interface SapOpenInvoice {
   paid_to_date: string;
   balance_due: string;
   attachment: SapAttachment | null;
+  /** What OMS already holds against it. */
+  oms?: SapOmsUsage;
 }
 
 /**
@@ -263,6 +328,8 @@ export interface SapOpenPurchaseOrder {
   open_amount: string;
   remarks: string;
   attachment: SapAttachment | null;
+  /** What OMS already holds against it. */
+  oms?: SapOmsUsage;
 }
 
 /**
@@ -273,8 +340,44 @@ export interface SapOpenPurchaseOrder {
  * receipt, like the bill it will become); DEBIT is owed BY them (a credit
  * memo, a payment already made on account, a goods return).
  */
+/** What OMS already holds against a SAP document (amounts as strings). */
+export interface SapOmsUsage {
+  reserved: string;
+  paid: string;
+  /** A PO: how much of `paid` SAP still holds on account (not yet set off against a bill). */
+  unadjusted?: string;
+  available: string;
+  requests: number;
+}
+
+/** One line of a request against SAP as it is now (`/requests/<id>/sap-check/`). */
+export interface SapCheckRow {
+  document_id: number;
+  kind: "BILL" | "PO" | "LEDGER";
+  sap_doc_entry: number;
+  sap_line: number;
+  sap_doc_num: string;
+  status: "OPEN" | "CLOSED" | "CANCELLED" | "GONE";
+  open_when_raised: string;
+  open_now: string;
+  held_by_others: string;
+  available_now: string;
+  amount: string;
+  changed: boolean;
+  ok: boolean;
+  message: string;
+}
+
+export interface SapCheck {
+  ok: boolean;
+  changed: boolean;
+  results: SapCheckRow[];
+}
+
 export interface SapLedgerDocument {
   trans_id: number | null;
+  /** The JDT1 line: what a receipt or journal entry is addressed by. */
+  line_id: number | null;
   doc_type_code: number | null;
   /** "Goods Receipt PO", "A/P Credit Memo", "Outgoing Payment", … */
   doc_type: string;
@@ -290,6 +393,79 @@ export interface SapLedgerDocument {
   settled_amount: string;
   currency: string;
   remarks: string;
+  /** Items a customer refund can be applied to carry what OMS holds against them. */
+  oms?: SapOmsUsage;
+}
+
+/** A SAP bill or PO sent to an Advance Payment User or Approver to raise a request from. */
+export interface ApiAssignment {
+  id: number;
+  company: AdvancePaymentCompany;
+  kind: "BILL" | "PO";
+  sap_doc_entry: number;
+  sap_doc_num: string;
+  card_code: string;
+  card_name: string;
+  vendor_ref: string;
+  doc_date: string | null;
+  due_date: string | null;
+  doc_total: string;
+  /** SAP's open amount when it was sent. */
+  open_amount: string;
+  note: string;
+  status: "OPEN" | "RAISED" | "DISMISSED" | "WITHDRAWN";
+  assigned_to: ApiUser;
+  assigned_by: ApiUser;
+  request: { id: number; request_no: string; status: string } | null;
+  created_on: string;
+}
+
+/** Someone a bill or PO may be sent to: an active Advance Payment User or Approver. */
+export interface AssignmentRecipient {
+  id: number;
+  name: string;
+  username: string;
+}
+
+/** A SAP TDS code the Payment desk may deduct under (`/tds-options/`). */
+export interface TdsCode {
+  code: string;
+  name: string;
+  /** "1", "2", "10" — a percentage. */
+  rate: string;
+  /** The 2133xxx payable account it books to. */
+  account: string;
+  account_name: string;
+  /** Assigned to this vendor in SAP: listed first. */
+  assigned: boolean;
+}
+
+export interface TdsOptions {
+  rates: string[];
+  codes: TdsCode[];
+  /** The request's bills SAP already deducted TDS on: TDS is blocked then. */
+  bills_with_tds: Array<{ doc_entry: number; doc_num: number | null; tds: string }>;
+}
+
+/** One OMS request that reserved or paid against a document (`/document-history/`). */
+export interface DocumentHistoryRow {
+  request_id: number;
+  request_no: string;
+  status: string;
+  effect: "RESERVED" | "PAID" | "RELEASED";
+  amount: string;
+  open_amount: string;
+  original_amount: string;
+  raised_on: string | null;
+  raised_by: string;
+  sap_payment: number | null;
+  /** A paid PO advance: how much SAP still holds on account; null otherwise. */
+  unadjusted: string | null;
+}
+
+export interface DocumentHistory {
+  summary: { reserved: string; paid: string; requests: number };
+  results: DocumentHistoryRow[];
 }
 
 /**
@@ -334,6 +510,10 @@ export interface SapCashAccount {
   balance: string;
 }
 
+
+
+
+
 /* ------------------------------------------------------------------ *
  * Payment requests — mirror advance_payment/serializers.py `request_data`
  * ------------------------------------------------------------------ */
@@ -356,8 +536,12 @@ export interface ApiUser {
 
 export interface ApiRequestDocument {
   id?: number;
-  kind: "BILL" | "PO";
+  kind: "BILL" | "PO" | "LEDGER";
   sap_doc_entry: number;
+  /** A ledger item: its journal line (0 for an invoice or credit memo), object type and side. */
+  sap_line?: number;
+  sap_object?: number | null;
+  direction?: "DEBIT" | "CREDIT" | "";
   sap_doc_num: string;
   vendor_ref: string;
   doc_date: string | null;
@@ -400,11 +584,22 @@ export interface ApiPayoutLine {
   utr_recorded_on?: string | null;
 }
 
+/** TDS deducted at the Payment stage: the SAP code, and what it came to. */
+export interface ApiPayoutTds {
+  code: string;
+  label?: string;
+  rate?: string | null;
+  account?: string;
+  amount?: string | null;
+}
+
 export interface ApiPayout {
   beneficiary_name: string;
   to_account_number: string;
   to_ifsc: string;
   to_account_manual: boolean;
+  /** Sent as `{code}` (or null for none); read back with what it came to. */
+  tds?: ApiPayoutTds | null;
   lines: ApiPayoutLine[];
   updated_by?: ApiUser | null;
   updated_on?: string | null;
@@ -464,15 +659,34 @@ export interface RequestAbilities {
   record_utr: boolean;
   /**
    * The payee's account — payment details, proofs, their change log, the SAP
-   * balance and ledger — is sent to Payment and later stages only. Before
-   * that the server omits them, so a screen must ask rather than assume.
+   * balance and ledger — is sent to Payment and later stages only.
    */
   see_account: boolean;
 }
 
+/** A cost centre of SAP's Budget (dimension 3, the form's Department) or Sub Budget (4). */
+export interface SapBudget {
+  kind: "BUDGET" | "SUB_BUDGET";
+  code: string;
+  name: string;
+}
+
+/** A partner's open ledger (`/open-documents/`), with its totals. */
+export interface SapPartnerLedger {
+  summary: {
+    open_count: number;
+    open_debit: string;
+    open_credit: string;
+    net_open: string;
+    net_open_means: string;
+    overdue_count: number;
+  };
+  results: Array<SapLedgerDocument & { days_overdue: number | null }>;
+}
+
 export interface ApiRequestFields {
   company: AdvancePaymentCompany;
-  request_type: "VENDOR" | "EMPLOYEE_ADVANCE" | "EMPLOYEE_IMPREST";
+  request_type: "VENDOR" | "EMPLOYEE_ADVANCE" | "EMPLOYEE_IMPREST" | "CUSTOMER";
   payment_against: string;
   payment_against_other: string;
   partner_code: string;
@@ -487,32 +701,35 @@ export interface ApiRequestFields {
   expected_from_date: string | null;
   expected_to_date: string | null;
   payment_date: string | null;
-  priority: "LOW" | "MEDIUM" | "HIGH";
   remarks: string;
   owner_label: string;
-  /** Payment Purpose: SAP's Budget and Sub Budget cost-centre codes. */
+  /** The Department: SAP's budget-head (dimension 3) cost-centre code. */
   budget_code: string;
-  sub_budget_code: string;
+  /** Payment Purpose: a code of the Payment Desk's list. */
+  purpose_code: string;
 }
 
 /** What the form sends to raise or edit a request. */
 export interface ApiRequestInput extends ApiRequestFields {
-  department_id: number | null;
-  sub_department_id: number | null;
   documents: ApiRequestDocument[];
+  /** Raised from a bill / PO sent to the creator: closes that assignment. */
+  assignment_id?: number;
 }
 
 export interface ApiRequest extends ApiRequestFields {
   id: number;
   request_no: string;
-  department: { id: number; name: string };
+  /** The OMS department of a request raised before budget heads; null since. */
+  department: { id: number; name: string } | null;
   sub_department: { id: number; name: string } | null;
   partner_not_in_sap: boolean;
   currency: string;
   owner_employee_id: number | null;
-  /** The Budget / Sub Budget names as SAP had them when the request was raised. */
   budget_name: string;
+  /** Sub Budget: only on requests raised before it stopped being asked. */
+  sub_budget_code: string;
   sub_budget_name: string;
+  purpose_label: string;
   status: ApiRequestStatus;
   created_by: ApiUser;
   created_on: string;
@@ -532,23 +749,13 @@ export interface ApiRequest extends ApiRequestFields {
     awaiting_me: boolean;
   } | null;
   can: RequestAbilities;
-  /**
-   * What THIS caller last did to it: APPROVED, REJECTED, RETURNED, SENT_BACK,
-   * or "" if they have never decided it.
-   *
-   * The approval desk filters on this rather than on `status`: a request the
-   * reader approved at stage 1 is still IN_APPROVAL while stage 2 holds it, so
-   * the document's own status cannot say who has already dealt with it.
-   */
-  my_action: string;
   /** The SAP outgoing payment, once Final's approval has posted it. */
   voucher: ApiVoucher | null;
   /** The latest return, send-back or rejection: what someone must act on. */
   last_decision: ApiRequestLog | null;
   /**
    * The viewer's OWN latest approve / reject / return / send-back on it, or
-   * null. `my_action` beside it is the same fact as a bare action string,
-   * which is what `deskStatus` files a request under.
+   * null. What the desk files a request under — never another approver's.
    */
   my_decision?: ApiRequestLog | null;
   /* Detail only. */
@@ -788,9 +995,152 @@ export const advancePaymentService = {
       ),
     ),
 
-  /** Active departments with their sub-departments, by name. */
-  departments: async (): Promise<OmsDepartment[]> =>
-    rows<OmsDepartment>(guard(await api.get(`${BASE}/departments/`))),
+  /**
+   * The Payment Desk's purpose list: what a payment is FOR.
+   *
+   * Not per company — a purpose is the same everywhere, unlike the budget
+   * heads, which are one company's SAP cost centres.
+   */
+  paymentPurposes: async (): Promise<PaymentPurpose[]> =>
+    rows<PaymentPurpose>(guard(await api.get(`${BASE}/payment-purposes/`))),
+
+  /** SAP's customers (OCRD CardType C): who a refund is paid to. */
+  customers: async (
+    company: AdvancePaymentCompany,
+    search = "",
+    limit = PICKER_LIMIT,
+  ): Promise<SapVendor[]> =>
+    rows<SapVendor>(
+      guard(await api.get(`${BASE}/customers/${query({ company, search, limit })}`)),
+    ),
+
+  /** One PO in full: its lines, what has been received, and what is still open. */
+  purchaseOrder: async (
+    company: AdvancePaymentCompany,
+    docEntry: number,
+  ): Promise<SapPurchaseOrder> =>
+    unwrap<SapPurchaseOrder>(
+      guard(await api.get(`${BASE}/purchase-order/${query({ company, doc_entry: docEntry })}`)),
+    ),
+
+  /** Every file SAP holds against one document, and against what it came from. */
+  documentAttachments: async (
+    company: AdvancePaymentCompany,
+    kind: SapAttachmentKind,
+    docEntry: number,
+  ): Promise<SapRelatedAttachment[]> =>
+    rows<SapRelatedAttachment>(
+      guard(
+        await api.get(`${BASE}/document-attachments/${query({ company, kind, doc_entry: docEntry })}`),
+      ),
+    ),
+
+  /** Every OMS request that reserved or paid against one SAP document. */
+  documentHistory: async (
+    company: AdvancePaymentCompany,
+    kind: "po" | "bill" | "ledger",
+    docEntry: number,
+    line = 0,
+  ): Promise<DocumentHistory> =>
+    unwrap<DocumentHistory>(
+      guard(
+        await api.get(
+          `${BASE}/document-history/${query({ company, kind, doc_entry: docEntry, line })}`,
+        ),
+      ),
+    ),
+
+  /** What TDS the Payment desk may deduct on a vendor payment. */
+  tdsOptions: async (
+    company: AdvancePaymentCompany,
+    cardCode: string,
+    bills: number[],
+  ): Promise<TdsOptions> =>
+    unwrap<TdsOptions>(
+      guard(
+        await api.get(
+          `${BASE}/tds-options/${query({
+            company,
+            card_code: cardCode,
+            bills: bills.length ? bills.join(",") : undefined,
+          })}`,
+        ),
+      ),
+    ),
+
+  /**
+   * The request's documents against SAP AS IT IS NOW — what Final checks
+   * before posting: a bill already paid, or one whose open amount has moved
+   * since the request was raised.
+   */
+  sapCheck: async (id: number): Promise<SapCheck> =>
+    unwrap<SapCheck>(guard(await api.get(`${BASE}/requests/${id}/sap-check/`, undefined, FRESH))),
+
+  /* --- Bills & POs sent to a user ----------------------------------- */
+
+  /** Who a bill or PO may be sent to. */
+  assignmentRecipients: async (): Promise<AssignmentRecipient[]> =>
+    rows<AssignmentRecipient>(guard(await api.get(`${BASE}/assignment-recipients/`))),
+
+  /** `mine`: sent to me. `sent`: what I sent. */
+  assignments: async (
+    scope: "mine" | "sent",
+    status?: ApiAssignment["status"],
+  ): Promise<ApiAssignment[]> =>
+    rows<ApiAssignment>(
+      guard(await api.get(`${BASE}/assignments/${query({ scope, status })}`, undefined, FRESH)),
+    ),
+
+  /** Send documents to one user, with a note. */
+  sendAssignments: async (body: {
+    company: AdvancePaymentCompany;
+    assigned_to: number;
+    documents: { kind: "BILL" | "PO"; sap_doc_entry: number }[];
+    note?: string;
+  }): Promise<ApiAssignment[]> =>
+    rows<ApiAssignment>(guard(await api.post(`${BASE}/assignments/`, body))),
+
+  /** Dismiss one sent to me, or withdraw one I sent. */
+  assignmentAction: async (
+    id: number,
+    action: "dismiss" | "withdraw",
+  ): Promise<ApiAssignment> =>
+    unwrap<ApiAssignment>(guard(await api.post(`${BASE}/assignments/${id}/${action}/`, {}))),
+
+  /**
+   * One page of open bills or POs for "Send Bills & POs": one vendor's, or
+   * every vendor's, posted on or after `fromDate`, with how many in all.
+   */
+  openForDispatch: async (
+    kind: "BILL" | "PO",
+    company: AdvancePaymentCompany,
+    page: {
+      cardCode?: string;
+      search?: string;
+      fromDate?: string;
+      offset?: number;
+      limit?: number;
+    } = {},
+  ): Promise<{ rows: (SapOpenInvoice | SapOpenPurchaseOrder)[]; total: number }> => {
+    const params = {
+      company,
+      card_code: page.cardCode,
+      search: page.search,
+      from_date: page.fromDate,
+      offset: page.offset ?? 0,
+      limit: page.limit ?? 50,
+    };
+    const path =
+      kind === "BILL"
+        ? `${BASE}/open-invoices/${query({ ...params, party_type: "vendor" })}`
+        : `${BASE}/open-purchase-orders/${query(params)}`;
+    const body = unwrap<{
+      results?: (SapOpenInvoice | SapOpenPurchaseOrder)[];
+      total?: number;
+    } | null>(guard(await api.get(path)));
+    const found = body?.results ?? [];
+    return { rows: found, total: body?.total ?? found.length };
+  },
 
   /** Active employees from the master, for the request form's pickers. */
   employeeDirectory: async (q: DirectoryQuery = {}): Promise<DirectoryEmployee[]> =>

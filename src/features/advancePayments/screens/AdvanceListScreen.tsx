@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { router, useLocalSearchParams } from "expo-router";
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
@@ -17,20 +17,28 @@ import {
 
 import Dropdown from "@/src/components/common/DropdownProps";
 import { can } from "@/src/constants/permissions";
+import useAndroidBackOverride from "@/src/hooks/useAndroidBackOverride";
 import { useAuth } from "@/src/context/AuthContext";
 import InlineOrderDateFilter from "@/src/components/common/InlineOrderDateFilter";
 import { COLORS } from "@/src/constants/theme";
 import { fs, ms, sp } from "@/src/utils/responsive";
 
+import { useAssignments } from "../assignments";
 import AdvanceRequestCard from "../components/AdvanceRequestCard";
-import { DESK_LABEL, type DeskStatus } from "../deskStatus";
+import AssignedList from "../components/AssignedList";
+
 import {
   useAdvanceRequests,
   type RequestListScope,
 } from "../hooks/useAdvanceRequests";
 import type { AdvanceRequestEntry } from "../logic/approvalData";
 import { COMPANIES } from "../logic/constants";
-import { STATUS_LABEL, type StatusFilter } from "../logic/requestLabels";
+import {
+  DESK_STATUS_OPTIONS,
+  STATUS_LABEL,
+  type DeskFilter,
+  type StatusFilter,
+} from "../logic/requestLabels";
 
 /**
  * Every Advance Payment request this user can see — theirs, their desk's, or
@@ -63,12 +71,45 @@ export default function AdvanceListScreen({ scope }: { scope?: RequestListScope 
    * module: they would have no way to their own approval queue at all.
    */
   const { user } = useAuth();
-  const [view, setView] = useState<RequestListScope>(
-    // THE DESK FIRST for anyone who holds the approval key: work waiting on
-    // them outranks the requests they raised themselves. A route that names a
-    // side (Advance Approvals) wins; a user with one key only ever sees theirs.
-    scope ?? (can(user, "Advance_Payment_Approval") ? "desk" : "mine"),
+  /**
+   * THE DESK FIRST for anyone who holds the approval key: work waiting on them
+   * outranks the requests they raised themselves. A user with one key only ever
+   * sees theirs.
+   */
+  const defaultView: ListView = can(user, "Advance_Payment_Approval") ? "desk" : "mine";
+  const [listView, setListView] = useState<RequestListScope>(
+    scope ?? (defaultView === "desk" ? "desk" : "mine"),
   );
+
+  /**
+   * WHICH OF THE THREE IS SHOWING.
+   *
+   * "assigned" is not a scope of the requests endpoint at all — it is the
+   * documents somebody sent for a request to be raised — so it is held apart
+   * from the scope the list reads, and switching back to either list does not
+   * re-read it.
+   */
+  const [view, setView] = useState<ListView>(scope ?? defaultView);
+
+  /**
+   * BACK LEAVES THE VIEW BEFORE IT LEAVES THE PAGE.
+   *
+   * The dropdown changes what the page is showing without navigating, so a
+   * Back from "Assigned to me" that went straight to the dashboard would throw
+   * away the step the user actually took. The first Back returns to the view
+   * this page opens on; the next one leaves, through the same history the
+   * header arrow follows.
+   */
+  useAndroidBackOverride(
+    useCallback(() => {
+      if (view === (scope ?? defaultView)) return false;
+      setView(scope ?? defaultView);
+      return true;
+    }, [view, scope, defaultView]),
+  );
+
+  /** The requests list always reads a real scope, whatever is on screen. */
+  const listScope: RequestListScope = view === "assigned" ? listView : view;
 
   const {
     rows,
@@ -85,7 +126,7 @@ export default function AdvanceListScreen({ scope }: { scope?: RequestListScope 
     canApprove,
     holdsMine,
     holdsDesk,
-  } = useAdvanceRequests(view);
+  } = useAdvanceRequests(listScope);
 
   const [filterOpen, setFilterOpen] = useState(false);
 
@@ -109,6 +150,27 @@ export default function AdvanceListScreen({ scope }: { scope?: RequestListScope 
       pathname: "/(main)/advance-payments/details",
       params: { id: String(entry.serverId) },
     } as never);
+
+  /** The bills and POs sent to this user and still waiting. */
+  const assigned = useAssignments("mine", "OPEN");
+
+  /**
+   * The views this user may choose between, in the order they matter.
+   *
+   * ASSIGNED TO ME IS ALWAYS THERE: anyone who may raise a request may be sent
+   * a document to raise it from, so the answer is "none yet" rather than "not
+   * for you" — and the count on the option says which before it is opened.
+   */
+  const viewOptions = [
+    ...(holdsDesk ? [{ label: VIEW_LABEL.desk, value: "desk" as ListView }] : []),
+    ...(holdsMine ? [{ label: VIEW_LABEL.mine, value: "mine" as ListView }] : []),
+    {
+      label: assigned.rows.length
+        ? `${VIEW_LABEL.assigned} (${assigned.rows.length})`
+        : VIEW_LABEL.assigned,
+      value: "assigned" as ListView,
+    },
+  ];
 
   const openProgress = (entry: AdvanceRequestEntry) =>
     router.push({
@@ -144,45 +206,43 @@ export default function AdvanceListScreen({ scope }: { scope?: RequestListScope 
 
   return (
     <View style={styles.container}>
-      {/* ONE ROW THAT SAYS WHOSE LIST THIS IS. Only for somebody who holds
-          both keys — with one key there is only one list and a switch with a
-          dead half is worse than none. */}
-      {holdsMine && holdsDesk ? (
-        <View style={styles.scopeRow}>
-          {SCOPES.map((option) => {
-            const active = view === option.value;
-            return (
-              <TouchableOpacity
-                key={option.value}
-                style={[styles.scopeTab, active && styles.scopeTabActive]}
-                onPress={() => {
-                  // The two sides filter on different things — an approver's
-                  // "Pending" is `AWAITING`, a requester's is the document's
-                  // own status — so the status is re-read for the new side
-                  // rather than carried across.
-                  setView(option.value);
-                  patchFilters({
-                    status: option.value === "desk" ? "AWAITING" : "PENDING",
-                  });
-                }}
-                activeOpacity={0.85}
-                accessibilityRole="button"
-                accessibilityState={{ selected: active }}
-              >
-                <Ionicons
-                  name={option.icon}
-                  size={15}
-                  color={active ? COLORS.primary : COLORS.textSecondary}
-                />
-                <Text style={[styles.scopeText, active && styles.scopeTextActive]}>
-                  {option.label}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
-      ) : null}
+      {/* WHOSE WORK AM I LOOKING AT? Three answers, one control, and the
+          options are only the ones this user has: an approver's desk, their own
+          requests, and the documents somebody sent them to raise. With a single
+          permission the dropdown still shows, because "Assigned to me" is
+          always one of the answers. */}
+      <View style={styles.viewRow}>
+        <Dropdown
+          label="Show"
+          data={viewOptions}
+          value={view}
+          onChange={(picked: string) => {
+            const next = picked as ListView;
+            setView(next);
+            if (next !== "assigned") {
+              setListView(next);
+              // The two lists filter on different things — an approver's
+              // "Pending" is what waits AT THEIR STAGE, a requester's is the
+              // document's own status — so each side opens on its own
+              // pending rather than carrying a bucket across.
+              patchFilters({ status: "PENDING" });
+            }
+          }}
+          searchable={false}
+          floatingLabel
+          noBottomSpacing
+        />
+      </View>
 
+      {view === "assigned" ? (
+        <AssignedList
+          rows={assigned.rows}
+          loading={assigned.loading}
+          error={assigned.error}
+          onChanged={() => void assigned.reload()}
+        />
+      ) : (
+        <>
       {/* Status + Search — identical geometry to payment tracking. */}
       <View style={styles.tabContainer}>
         <View style={styles.statusDropdownWrap}>
@@ -296,6 +356,9 @@ export default function AdvanceListScreen({ scope }: { scope?: RequestListScope 
         />
       )}
 
+        </>
+      )}
+
       {/* Filter sheet — company only; status lives in the header dropdown and
           the date on the bar, exactly as on payment tracking. */}
       <Modal
@@ -364,30 +427,26 @@ export default function AdvanceListScreen({ scope }: { scope?: RequestListScope 
 }
 
 /** The two sides of the module, for the switch. */
-const SCOPES: {
-  value: RequestListScope;
-  label: string;
-  icon: keyof typeof Ionicons.glyphMap;
-}[] = [
-  { value: "mine", label: "My Requests", icon: "person-outline" },
-  { value: "desk", label: "To Approve", icon: "shield-checkmark-outline" },
-];
+/** The three views one page offers. "assigned" is not a requests scope. */
+export type ListView = RequestListScope | "assigned";
 
-/**
- * The desk's own statuses: what THIS approver did, not what the document is.
- *
- * A request they approved at stage 1 is still `IN_APPROVAL` while stage 2 holds
- * it — filtering on the document status left everything they had cleared in
- * their Pending list, which is the complaint this answers.
- */
-const DESK_OPTIONS: { label: string; value: "" | DeskStatus }[] = [
-  { label: "All", value: "" },
-  { label: DESK_LABEL.AWAITING, value: "AWAITING" },
-  { label: DESK_LABEL.APPROVED, value: "APPROVED" },
-  { label: DESK_LABEL.REJECTED, value: "REJECTED" },
-  { label: DESK_LABEL.RETURNED, value: "RETURNED" },
-  { label: DESK_LABEL.WATCHING, value: "WATCHING" },
-];
+const VIEW_LABEL: Record<ListView, string> = {
+  desk: "To Approve",
+  mine: "My Requests",
+  assigned: "Assigned to me",
+};
+
+const DESK_LABEL: Record<DeskFilter, string> = {
+  "": "All",
+  PENDING: "Pending",
+  APPROVED: "Approved",
+  REJECTED: "Reject",
+  RETURNED: "Returned",
+};
+
+const DESK_OPTIONS: { label: string; value: DeskFilter }[] = DESK_STATUS_OPTIONS.map(
+  (option) => ({ label: DESK_LABEL[option.value] ?? option.label, value: option.value }),
+);
 
 const STATUS_OPTIONS: { label: string; value: StatusFilter }[] = [
   { label: "All", value: "" },
@@ -405,6 +464,13 @@ const titleCase = (value: string) => value.charAt(0) + value.slice(1).toLowerCas
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.background },
 
+  // The view dropdown's own row, with the breathing space the tab row had.
+  viewRow: {
+    backgroundColor: COLORS.surface,
+    paddingHorizontal: 14,
+    paddingTop: 12,
+    paddingBottom: 2,
+  },
   scopeRow: {
     flexDirection: "row",
     gap: sp(8),

@@ -23,11 +23,19 @@ import type {
   SapEmployee,
   SapLedgerDocument,
   SapOpenInvoice,
+  SapOmsUsage,
   SapOpenPurchaseOrder,
   SapVendor,
 } from "../../../services/advancePayment.service";
 
-import { NOT_IN_SAP_PREFIX, type DocumentAttachment, type OpenDocument, type Partner } from "./constants";
+import {
+  NOT_IN_SAP_PREFIX,
+  type DocumentAttachment,
+  type OmsUsage,
+  type OpenDocument,
+  type Partner,
+} from "./constants";
+import { formatINR } from "./rules";
 
 /**
  * SAP money arrives as a string (`numeric(19,6)`). Parsed here and rounded to
@@ -118,6 +126,7 @@ export function invoiceToDocument(
     dueDate: invoice.due_date || undefined,
     currency: invoice.currency || undefined,
     attachment: toAttachment(invoice.attachment, company, "bill", invoice.doc_entry),
+    oms: omsOf(invoice.oms),
   };
 }
 
@@ -145,6 +154,83 @@ export function purchaseOrderToDocument(
     dueDate: po.due_date || undefined,
     currency: po.currency || undefined,
     attachment: toAttachment(po.attachment, company, "po", po.doc_entry),
+    oms: omsOf(po.oms),
+  };
+}
+
+/** What OMS holds against a document, as numbers; none when the server sent nothing. */
+export function omsOf(usage: SapOmsUsage | undefined): OmsUsage | undefined {
+  if (!usage) return undefined;
+  return {
+    reserved: sapAmount(usage.reserved),
+    paid: sapAmount(usage.paid),
+    unadjusted: sapAmount(usage.unadjusted ?? "0"),
+    available: sapAmount(usage.available),
+    requests: usage.requests,
+  };
+}
+
+/**
+ * The customer ledger items a refund can be applied to, by SAP object type,
+ * and whether SAP addresses each through the journal (TransId + line).
+ * Payments already made out to the customer are not refunded against.
+ */
+export const REFUNDABLE_OBJECTS: Readonly<Record<number, { byJournal: boolean }>> = {
+  13: { byJournal: false },
+  14: { byJournal: false },
+  24: { byJournal: true },
+  30: { byJournal: true },
+};
+
+/**
+ * A customer's open ledger item as a document a refund is applied to.
+ *
+ * CREDIT items (payments received, credit memos) are owed to the customer and
+ * add to the refund; DEBIT items (their invoices) subtract — SAP nets the two
+ * the same way. Null for an item that cannot be refunded against.
+ */
+export function ledgerToDocument(doc: SapLedgerDocument, partner: string): OpenDocument | null {
+  const object = doc.doc_type_code ?? -1;
+  const rule = REFUNDABLE_OBJECTS[object];
+  if (!rule || doc.trans_id === null) return null;
+  const entry = rule.byJournal ? doc.trans_id : (doc.doc_entry ?? doc.trans_id);
+  const line = rule.byJournal ? (doc.line_id ?? 0) : 0;
+  return {
+    id: `LDG-${object}-${entry}-${line}`,
+    number: doc.doc_num,
+    date: doc.document_date || doc.posting_date || "",
+    partner,
+    original: sapAmount(doc.total_amount),
+    paid: sapAmount(doc.settled_amount),
+    open: sapAmount(doc.open_amount),
+    docType: doc.doc_type,
+    note: doc.direction === "CREDIT" ? "Owed to the customer" : "Owed by the customer — reduces the refund",
+    reference: doc.party_ref || undefined,
+    dueDate: doc.due_date || undefined,
+    currency: doc.currency || undefined,
+    ledger: { object, entry, line, direction: doc.direction },
+    oms: omsOf(doc.oms),
+  };
+}
+
+const COMPANY_CODES: readonly string[] = ["OIL", "BEVERAGES", "MART"];
+
+/**
+ * Which SAP document a chosen bill or PO is: its company, kind and DocEntry,
+ * read back from its namespaced id (`PCH-` / `POR-`). Null for anything else
+ * (sample data, the "All" list's other kinds) or without a company.
+ */
+export function sapDocumentOf(
+  doc: OpenDocument,
+  company?: string,
+): { company: AdvancePaymentCompany; kind: SapAttachmentKind; docEntry: number } | null {
+  const match = /^(PCH|POR)-(\d+)$/.exec(doc.id);
+  const co = doc.attachment?.company ?? company;
+  if (!match || !co || !COMPANY_CODES.includes(co)) return null;
+  return {
+    company: co as AdvancePaymentCompany,
+    kind: match[1] === "PCH" ? "bill" : "po",
+    docEntry: Number(match[2]),
   };
 }
 
@@ -194,4 +280,39 @@ export function otherToDocument(doc: SapLedgerDocument, partner: string): OpenDo
     dueDate: doc.due_date || undefined,
     currency: doc.currency || undefined,
   };
+}
+
+/* ── OMS's own record against a document ──────────────────────────────── */
+
+export interface HistoryTarget {
+  company: AdvancePaymentCompany;
+  kind: "po" | "bill" | "ledger";
+  docEntry: number;
+  line: number;
+}
+
+/** Which SAP document a chosen bill, PO or ledger item is, for its history. Null for anything else. */
+export function historyTargetOf(doc: OpenDocument, company: string): HistoryTarget | null {
+  if (!COMPANY_CODES.includes(company)) return null;
+  const co = company as AdvancePaymentCompany;
+  if (doc.ledger) return { company: co, kind: "ledger", docEntry: doc.ledger.entry, line: doc.ledger.line };
+  const match = /^(PCH|POR)-(\d+)$/.exec(doc.id);
+  if (!match) return null;
+  return { company: co, kind: match[1] === "PCH" ? "bill" : "po", docEntry: Number(match[2]), line: 0 };
+}
+
+/** "₹10 reserved · ₹40 paid via OMS · ₹50 available", for a picker line; "" when OMS holds nothing. */
+export function omsSummary(doc: OpenDocument): string {
+  const oms = doc.oms;
+  if (!oms || (!oms.reserved && !oms.paid)) return "";
+  return [
+    oms.reserved ? `${formatINR(oms.reserved)} reserved` : null,
+    oms.paid
+      ? `${formatINR(oms.paid)} paid via OMS` +
+        (doc.id.startsWith("POR-") ? ` (${formatINR(oms.unadjusted)} still on account)` : "")
+      : null,
+    `${formatINR(oms.available)} available`,
+  ]
+    .filter(Boolean)
+    .join(" · ");
 }

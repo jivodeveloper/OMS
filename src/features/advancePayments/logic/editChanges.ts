@@ -1,10 +1,10 @@
 /**
  * PORTED FROM THE WEB CLIENT — `OMS-Frontend/src/pages/advancePayments/editChanges.ts`.
  *
- * Kept identical on purpose, like the rest of `logic/`: what an edit changed is
- * the same fact on both clients, and two hand-written copies drift. Only this
- * header differs. Change it on the web first, then re-copy; `parity.test.ts`
- * asserts the same rows the web's own tests do.
+ * Kept identical on purpose: the rules that decide what a request may be, what
+ * it comes to and what may be done to it are the same product on both clients,
+ * and two hand-written copies drift. Only the imports and the file type differ
+ * (React Native has no `File`). Change it on the web first, then re-copy.
  */
 /**
  * What an edit changed, as rows a person reads: Field · Was · Now.

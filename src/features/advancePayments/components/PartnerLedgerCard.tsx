@@ -83,15 +83,20 @@ export default function PartnerLedgerCard({ entry }: { entry: AdvanceRequestEntr
   const rows = ledger?.results ?? [];
   const side = balance === null ? null : balanceSide(balance, who);
 
+  // TAP ANYWHERE. The header chevron was the only way in — a target the width
+  // of a thumbnail on a card the width of the screen — and it needed a line of
+  // text underneath explaining where to press. The card itself is the button
+  // now, and that line is gone with it.
   return (
-    <View style={styles.card}>
-      <TouchableOpacity
-        style={styles.head}
-        onPress={() => setOpen((current) => !current)}
-        activeOpacity={0.7}
-        accessibilityRole="button"
-        accessibilityState={{ expanded: open }}
-      >
+    <TouchableOpacity
+      style={styles.card}
+      onPress={() => setOpen((current) => !current)}
+      activeOpacity={0.85}
+      accessibilityRole="button"
+      accessibilityState={{ expanded: open }}
+      accessibilityLabel={`Ledger in SAP, ${open ? "collapse" : "expand"}`}
+    >
+      <View style={styles.head}>
         <View style={styles.headIcon}>
           <Ionicons name="library" size={ms(16)} color={COLORS.primary} />
         </View>
@@ -108,7 +113,7 @@ export default function PartnerLedgerCard({ entry }: { entry: AdvanceRequestEntr
           size={20}
           color={COLORS.textSecondary}
         />
-      </TouchableOpacity>
+      </View>
 
       {/* The balance stays visible whether or not the items are expanded: it is
           the figure an approver actually decides on. */}
@@ -182,24 +187,34 @@ export default function PartnerLedgerCard({ entry }: { entry: AdvanceRequestEntr
             );
           })}
         </View>
-      ) : (
-        <Text style={styles.muted}>
-          {rows.length} open {rows.length === 1 ? "item" : "items"} — tap to see them.
-        </Text>
-      )}
-    </View>
+      ) : null}
+    </TouchableOpacity>
   );
 }
 
 const OVERDUE_RED = "#E25555";
 
 const styles = StyleSheet.create({
+  /**
+   * THE DETAIL PAGE'S CARD, to the pixel (`AdvanceDetailsScreen.styles.card`).
+   *
+   * It had its own smaller geometry and NO side margin, so it ran edge to edge
+   * while every box above it sat inside a 14pt gutter — which read as one
+   * wide slab joined to the card above rather than as a box of its own.
+   */
   card: {
     backgroundColor: COLORS.surface,
-    borderRadius: ms(12),
+    borderRadius: sp(16),
+    padding: sp(16),
+    marginHorizontal: sp(14),
+    marginBottom: sp(14),
     borderWidth: 1,
-    borderColor: COLORS.border,
-    padding: sp(12),
+    borderColor: COLORS.borderLight,
+    shadowColor: COLORS.shadowColor,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    elevation: 2,
     gap: sp(8),
   },
   head: { flexDirection: "row", alignItems: "center", gap: sp(8) },

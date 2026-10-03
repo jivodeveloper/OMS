@@ -10,13 +10,15 @@ import {
   type ApiRequest,
 } from "@/src/services/advancePayment.service";
 
-import { filterDesk, type DeskFilter } from "../deskStatus";
+
 import type { AdvanceRequestEntry } from "../logic/approvalData";
 import { fromApiRequest } from "../logic/requestApi";
 import {
   NO_FILTERS,
+  deskBucket,
   filterRequests,
   requestCounts,
+  type DeskFilter,
   type RequestFilterState,
   type StatusFilter,
 } from "../logic/requestLabels";
@@ -26,9 +28,9 @@ import {
  *
  * `status` is WIDER than the shared logic's, because the two sides mean
  * different things by it: a requester's is the document's status, an approver's
- * is what they themselves did (`DeskFilter`). The shared module is a verbatim
- * copy of the web client's and knows only the first, so the widening lives here
- * rather than in it.
+ * is what they themselves did (`DeskFilter`). Both come from the shared
+ * module, which the web client's desk filters by the same way; only this union
+ * is the app's, because one control on one screen selects either.
  */
 export interface ListFilterState extends Omit<RequestFilterState, "status"> {
   status: StatusFilter | DeskFilter;
@@ -119,7 +121,9 @@ export function useAdvanceRequests(want?: RequestListScope) {
    */
   const [filters, setFilters] = useState<ListFilterState>({
     ...NO_FILTERS,
-    status: want === "desk" ? "AWAITING" : "PENDING",
+    // "PENDING" on both sides now, and it still means two different things:
+    // the document is pending, or it is pending AT THIS USER'S STAGE.
+    status: "PENDING",
   });
   /**
    * Applied HERE, not sent to the server: the two scopes accept no date filter,
@@ -214,7 +218,7 @@ export function useAdvanceRequests(want?: RequestListScope) {
    * rejected. An approver's is filtered on what THEY did with it, because a
    * request they approved at stage 1 stays "pending" as a document for as long
    * as the rest of the route runs, and it has no business sitting in their
-   * pending list while it does. `deskStatus` makes that distinction; the search
+   * pending list while it does. `deskBucket` makes that distinction; the search
    * and the company narrow both lists the same way.
    */
   const rows = useMemo(() => {
@@ -226,7 +230,9 @@ export function useAdvanceRequests(want?: RequestListScope) {
         status: want === "desk" ? "" : (filters.status as StatusFilter),
       }),
     );
-    return want === "desk" ? filterDesk(narrowed, filters.status as DeskFilter) : narrowed;
+    return want === "desk"
+      ? filterRequests(narrowed, { ...filters, status: filters.status as DeskFilter }, deskBucket)
+      : narrowed;
   }, [entries, filters, inWindow, want]);
 
   return {

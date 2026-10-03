@@ -29,10 +29,9 @@
  *
  * The rules that decide which of these a case uses live in `rules.ts`.
  */
+import type { AttachmentCheck } from "../../../services/advancePayment.service";
 
 /** The three operating companies, as the rest of OMS names them. */
-import type { AttachmentCheck } from "@/src/services/advancePayment.service";
-
 export const COMPANIES = ["OIL", "MART", "BEVERAGES"] as const;
 export type Company = (typeof COMPANIES)[number];
 
@@ -53,6 +52,8 @@ export const PARTNER_TYPES = [
   // is not a reason to rename a key.
   { value: "EMPLOYEE_ADVANCE", label: "Employee" },
   { value: "EMPLOYEE_IMPREST", label: "Employee Imprest" },
+  // A REFUND: what a customer is owed back. Paid to the customer (rCustomer).
+  { value: "CUSTOMER", label: "Customer" },
 ] as const;
 export type PartnerType = (typeof PARTNER_TYPES)[number]["value"];
 
@@ -69,6 +70,9 @@ export const PAYMENT_AGAINST_OPTIONS = [
   // contracts. Deliberately NOT bills or POs: those have their own answers
   // above, and listing them twice would let one bill be paid from two places.
   { value: "ALL", label: "All" },
+  // Customer refunds: against their open ledger items, or a typed amount.
+  { value: "AGAINST_LEDGER", label: "Against Ledger" },
+  { value: "ON_ACCOUNT", label: "On Account" },
   { value: "OTHER", label: "Other" },
 ] as const;
 export type PaymentAgainst = (typeof PAYMENT_AGAINST_OPTIONS)[number]["value"];
@@ -169,6 +173,37 @@ export interface OpenDocument {
    * request so the approvers see it without the file being read again.
    */
   reading?: AttachmentCheck | null;
+  /**
+   * A customer's ledger item (refunds): which side of their account it is on,
+   * and how SAP addresses it — an invoice or credit memo by its DocEntry, a
+   * receipt or journal entry by its journal TransId and line.
+   */
+  ledger?: LedgerKey;
+  /**
+   * What OMS already holds against the document (`reservations.py`): reserved
+   * by requests in approval, paid by completed ones, and what is left. A line
+   * may not take more than `available`.
+   */
+  oms?: OmsUsage;
+}
+
+export interface LedgerKey {
+  /** SAP object type: 13 A/R invoice, 14 A/R credit memo, 24 incoming payment, 30 journal entry. */
+  object: number;
+  entry: number;
+  line: number;
+  /** CREDIT: owed to the customer. DEBIT: owed by them — it reduces the refund. */
+  direction: "DEBIT" | "CREDIT";
+}
+
+export interface OmsUsage {
+  reserved: number;
+  paid: number;
+  /** A PO: the part of `paid` SAP still holds on account — what still counts against it. */
+  unadjusted: number;
+  available: number;
+  /** How many OMS requests have touched it, whatever became of them. */
+  requests: number;
 }
 
 export interface DocumentAttachment {
@@ -214,37 +249,6 @@ export const VENDOR_OTHER_DOCUMENTS: OpenDocument[] = [
 ];
 
 /* ── Everything else ─────────────────────────────────────────────────────── */
-
-/**
- * Priority, with the colour it carries WHEN CHOSEN.
- *
- * Unchosen options are deliberately colourless — a grey ring and grey text —
- * so the one that is chosen is the only coloured thing in the row. With a
- * coloured dot on all three, the chosen card differed from the others only by
- * a faint border, and the choice did not read at a glance.
- *
- * The tones are the app's semantic tokens, and the same ones the priority
- * BADGES use on the lists (ok / hold / bad), so "High" is the same red on the
- * form as on the approval desk.
- */
-export const PRIORITIES = [
-  {
-    value: "LOW",
-    label: "Low",
-    active: "border-ok bg-ok-soft text-ok ring-ok/20",
-  },
-  {
-    value: "MEDIUM",
-    label: "Medium",
-    active: "border-hold bg-hold-soft text-hold ring-hold/20",
-  },
-  {
-    value: "HIGH",
-    label: "High",
-    active: "border-danger bg-danger-soft text-danger ring-danger/20",
-  },
-] as const;
-export type Priority = (typeof PRIORITIES)[number]["value"];
 
 export const PAYMENT_MODES = [
   { value: "FIXED", label: "Fixed Amount" },

@@ -11,7 +11,7 @@ import {
   typeLabel,
   type AdvanceRequestEntry,
 } from "../logic/approvalData";
-import { PRIORITY_TONE, STATUS_LABEL, priorityLabel } from "../logic/requestLabels";
+import { STATUS_LABEL } from "../logic/requestLabels";
 import { allocationRows, allocationTotals, formatDate, resolveCase } from "../logic/rules";
 
 /**
@@ -33,12 +33,6 @@ const STATUS_TONE: Record<string, { bg: string; fg: string }> = {
   CANCELLED: { bg: "#F3F4F6", fg: "#6B7280" },
 };
 
-const PRIORITY_COLOR = {
-  ok: COLORS.success,
-  hold: COLORS.warning,
-  bad: COLORS.error,
-} as const;
-
 const formatMoney = (value: number) =>
   `₹${value.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
@@ -59,7 +53,6 @@ export default function AdvanceRequestCard({
   // for — the same "is this settled?" question the payment card's invoice strip
   // answers. A typed-amount request has nothing to compare, so it shows a total.
   const open = c.reference ? allocationTotals(allocationRows(form)).open : 0;
-  const priorityColour = PRIORITY_COLOR[PRIORITY_TONE[form.priority]];
   const awaitingMe = entry.api.flow?.awaiting_me ?? false;
 
   return (
@@ -97,12 +90,17 @@ export default function AdvanceRequestCard({
               {form.company}
             </Text>
           </View>
-          <View style={[styles.chip, { borderColor: priorityColour }]}>
-            <Ionicons name="flag-outline" size={13} color={priorityColour} />
-            <Text style={[styles.chipText, { color: priorityColour }]} numberOfLines={1}>
-              {priorityLabel(entry)}
-            </Text>
-          </View>
+          {/* WHAT THE MONEY IS FOR, where the priority flag used to be:
+              priority is no longer asked for, and the purpose is the thing a
+              reader of the list is actually scanning for. */}
+          {form.purposeLabel ? (
+            <View style={styles.chip}>
+              <Ionicons name="pricetag-outline" size={13} color={COLORS.primary} />
+              <Text style={styles.chipText} numberOfLines={1}>
+                {form.purposeLabel}
+              </Text>
+            </View>
+          ) : null}
         </View>
       </View>
 

@@ -6,15 +6,14 @@ import type { PickedFile as PaymentsPickedFile } from "@/app/(main)/payments/_li
 
 import {
   useBudgets,
-  useDepartments,
   useOpenDocuments,
   useOwners,
+  usePurposes,
 } from "../hooks/useAdvanceMasters";
 import { attachFile, type FileAttachment } from "../logic/attachments";
 import {
   COMPANIES,
   PARTNER_TYPES,
-  PRIORITIES,
   RETURN_METHODS,
   type OpenDocument,
 } from "../logic/constants";
@@ -100,8 +99,8 @@ export default function AdvanceRequestForm({
 }) {
   const c = resolveCase(form);
   const today = todayIso();
-  const { departments } = useDepartments();
   const budgets = useBudgets(form.company);
+  const purposes = usePurposes();
   /** The attachment being looked at, if any — see `PickedFileViewer`. */
   const [viewing, setViewing] = useState<FileAttachment | null>(null);
   const owners = useOwners();
@@ -111,9 +110,6 @@ export default function AdvanceRequestForm({
 
   const emi = calculateEmi(form.amount, form.installments);
   const fromEmi = installmentsFromEmi(form.amount, form.emiAmount);
-
-  const department = departments.find((row) => String(row.id) === form.department);
-  const subDepartments = department?.sub_departments ?? [];
 
   /**
    * Employee Imprest asks for an AMOUNT and the date its bills are expected,
@@ -152,8 +148,9 @@ export default function AdvanceRequestForm({
 
   /** The date questions this case asks, all answered. */
   const datesDone = !missing.some((label) => DATE_LABELS.has(label));
-  const departmentDone =
-    form.department !== "" && (!form.hasSubDepartments || form.subDepartment !== "");
+  /** The Department (SAP's budget head) and what the money is for. */
+  const departmentDone = form.budget !== "";
+  const purposeDone = departmentDone && form.purpose !== "";
   /**
    * The message for one field.
    *
@@ -503,13 +500,13 @@ export default function AdvanceRequestForm({
 
       {/* ── Who it belongs to ──────────────────────────────────────── */}
       <Card title="Additional Information">
-        {/* What the money is FOR, in SAP's own terms: its Budget and Sub
-            Budget cost centres. Both belong to one company's SAP, so they
-            wait on the company and clear with it — picking a code under OIL
-            and then switching to MART would otherwise send a code that names
-            a different cost centre, or none. */}
+        {/* THE DEPARTMENT IS SAP'S BUDGET HEAD (cost-centre dimension 3),
+            which is what the Workflow Engine routes the request on. It belongs
+            to ONE company's SAP, so it waits on the company and clears with
+            it: a code picked under OIL names a different cost centre under
+            MART, or none at all. */}
         <Select
-          label="Payment Purpose (Budget)"
+          label="Department"
           required
           searchable
           data={budgets.optionsFor("BUDGET", form.budget, form.budgetName)}
@@ -522,81 +519,44 @@ export default function AdvanceRequestForm({
             })
           }
           placeholder={
-            !form.company
-              ? "Choose the company first"
+            !datesDone
+              ? "Answer the dates first"
               : budgets.loading
-                ? "Loading budgets…"
-                : "Select budget"
+                ? "Loading departments…"
+                : "Select department"
           }
-          disabled={!form.company}
-          error={errorFor("Payment Purpose (Budget)") ?? budgets.error ?? undefined}
+          disabled={!datesDone}
+          error={errorFor("Department") ?? budgets.error ?? undefined}
         />
 
+        {/* WHAT THE MONEY IS FOR: the Payment Desk's own list, the same for
+            every company, which is why it does not clear with one. */}
         <Select
-          label="Payment Purpose (Sub Budget)"
+          label="Payment Purpose"
           required
           searchable
-          data={budgets.optionsFor("SUB_BUDGET", form.subBudget, form.subBudgetName)}
-          value={form.subBudget}
+          data={purposes.purposes.map((purpose) => ({
+            label: purpose.label,
+            value: purpose.code,
+          }))}
+          value={form.purpose}
           onChange={(value) =>
             change({
-              subBudget: value,
-              subBudgetName:
-                budgets
-                  .optionsFor("SUB_BUDGET", "", "")
-                  .find((o) => o.value === value)?.label ?? "",
+              purpose: value,
+              purposeLabel:
+                purposes.purposes.find((purpose) => purpose.code === value)?.label ?? "",
             })
           }
           placeholder={
-            !form.company
-              ? "Choose the company first"
-              : budgets.loading
-                ? "Loading sub budgets…"
-                : "Select sub budget"
+            !departmentDone
+              ? "Pick the department first"
+              : purposes.loading
+                ? "Loading purposes…"
+                : "Select purpose"
           }
-          disabled={!form.company}
-          error={errorFor("Payment Purpose (Sub Budget)") ?? budgets.error ?? undefined}
+          disabled={!departmentDone}
+          error={errorFor("Payment Purpose") ?? purposes.error ?? undefined}
         />
-
-        <Select
-          label="Department"
-          required
-          searchable
-          data={departments.map((row) => ({ label: row.name, value: String(row.id) }))}
-          value={form.department}
-          onChange={(value) => {
-            const picked = departments.find((row) => String(row.id) === value);
-            change({
-              department: value,
-              departmentName: picked?.name ?? "",
-              hasSubDepartments: (picked?.sub_departments.length ?? 0) > 0,
-              subDepartment: "",
-              subDepartmentName: "",
-            });
-          }}
-          placeholder={datesDone ? "Select department" : "Answer the dates first"}
-          disabled={!datesDone}
-          error={errorFor("Department")}
-        />
-
-        {form.hasSubDepartments ? (
-          <Select
-            label="Sub-department"
-            required
-            searchable
-            data={subDepartments.map((row) => ({ label: row.name, value: String(row.id) }))}
-            value={form.subDepartment}
-            onChange={(value) =>
-              change({
-                subDepartment: value,
-                subDepartmentName:
-                  subDepartments.find((row) => String(row.id) === value)?.name ?? "",
-              })
-            }
-            placeholder="Select sub-department"
-            error={errorFor("Sub-department")}
-          />
-        ) : null}
 
         <Select
           label="Ownership"
@@ -606,42 +566,28 @@ export default function AdvanceRequestForm({
           value={form.ownership}
           onChange={(ownership) => change({ ownership })}
           placeholder={
-            !departmentDone
-              ? "Pick the department first"
+            !purposeDone
+              ? "Pick the purpose first"
               : owners.loading
                 ? "Loading owners…"
                 : "Select owner"
           }
-          disabled={!departmentDone}
+          disabled={!purposeDone}
           error={errorFor("Ownership") ?? owners.error ?? undefined}
         />
 
-        <Row>
-          <Field
-            label="Payment Date"
-            required
-            error={errorFor("Payment Date")}
-          >
-            <DateField
-              value={form.paymentDate}
-              onChange={(paymentDate) => change({ paymentDate })}
-              minDate={today}
-              editable={form.ownership !== ""}
-              invalid={Boolean(errorFor("Payment Date"))}
-            />
-          </Field>
-          <Select
-            label="Priority"
-            required
-            data={PRIORITIES.map((priority) => ({
-              label: priority.label,
-              value: priority.value,
-            }))}
-            value={form.priority}
-            onChange={(priority) => change({ priority: priority as RequestForm["priority"] })}
-            disabled={form.paymentDate === ""}
+        {/* PAYMENT DATE ALONE ON ITS ROW. Priority used to sit beside it and
+            is no longer asked for (2026-10-01): a request is routed by its
+            department and purpose, not by what the requester called urgent. */}
+        <Field label="Payment Date" required error={errorFor("Payment Date")}>
+          <DateField
+            value={form.paymentDate}
+            onChange={(paymentDate) => change({ paymentDate })}
+            minDate={today}
+            editable={form.ownership !== ""}
+            invalid={Boolean(errorFor("Payment Date"))}
           />
-        </Row>
+        </Field>
 
         <Field label="Remarks" required error={errorFor("Remarks")}>
           <Input

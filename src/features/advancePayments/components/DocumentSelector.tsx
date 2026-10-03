@@ -17,6 +17,7 @@ import { QUICK_PERCENTAGES, type OpenDocument } from "../logic/constants";
 import {
   REFERENCE_KINDS,
   allocationRows,
+  availableOf,
   allocationTotals,
   formatDate,
   formatINR,
@@ -67,6 +68,8 @@ export default function DocumentSelector({
   const totals = allocationTotals(rows);
   const chosen = new Set(form.selected.map((doc) => doc.id));
   const [open, setOpen] = useState(false);
+  /** A customer's ledger has two sides; a vendor's bills and POs have one. */
+  const ledgerKind = kind === "CUSTOMER_LEDGER";
 
   const toggle = (id: string) => {
     onPick(
@@ -156,13 +159,26 @@ export default function DocumentSelector({
       {rows.length > 0 ? (
         <View style={styles.total}>
           <Text style={styles.totalLabel}>
-            {rows.length} {rows.length === 1 ? def.noun : `${def.noun}s`} · open{" "}
-            {formatINR(totals.open)}
+            {rows.length} {rows.length === 1 ? def.noun : `${def.noun}s`} ·{" "}
+            {ledgerKind ? "net" : "open"} {formatINR(totals.open)}
           </Text>
           <Text style={[styles.totalValue, !totals.complete && styles.totalValueOff]}>
             {formatINR(totals.payment)}
           </Text>
         </View>
+      ) : null}
+
+      {/* A REFUND IS THE CREDITS LESS THE DEBITS, which is how SAP nets an
+          outgoing payment to a customer — and the server refuses one that
+          does not come to more than nothing. Saying so here is cheaper than
+          earning that refusal on submit. */}
+      {ledgerKind && rows.length > 0 && totals.payment <= 0 ? (
+        <Notice tone="hold">
+          <NoticeText
+            tone="hold"
+            text="The credits chosen must come to more than the invoices: the refund is the credits less the debits."
+          />
+        </Notice>
       ) : null}
     </Card>
   );
@@ -186,6 +202,20 @@ function DocumentRow({
 }) {
   const def = REFERENCE_KINDS[kind];
   const canPercent = def.modes.includes("PERCENT");
+  const available = availableOf(document);
+  /**
+   * WHICH SIDE OF THE LEDGER, for a customer's open items.
+   *
+   * A credit (a payment they made, a credit memo) is owed TO them and adds to
+   * the refund; a debit (their own invoice) is owed BY them and comes off it.
+   * Without the tag two rows of identical figures mean opposite things.
+   */
+  const side =
+    document.ledger?.direction === "CREDIT"
+      ? { label: "Cr", colour: COLORS.success, hint: "Owed to the customer" }
+      : document.ledger?.direction === "DEBIT"
+        ? { label: "Dr", colour: COLORS.error, hint: "Owed by the customer" }
+        : null;
 
   return (
     <View style={[styles.doc, picked && styles.docPicked]}>
@@ -196,10 +226,18 @@ function DocumentRow({
           color={picked ? COLORS.primary : COLORS.textMuted}
         />
         <View style={styles.docBody}>
-          <Text style={styles.docNumber}>
-            {def.label} {document.number}
-            {document.docType ? ` · ${document.docType}` : ""}
-          </Text>
+          <View style={styles.docTitleRow}>
+            <Text style={styles.docNumber} numberOfLines={1}>
+              {def.label} {document.number}
+              {document.docType ? ` · ${document.docType}` : ""}
+            </Text>
+            {side ? (
+              <View style={[styles.sideTag, { borderColor: side.colour }]}>
+                <Text style={[styles.sideTagText, { color: side.colour }]}>{side.label}</Text>
+              </View>
+            ) : null}
+          </View>
+          {side ? <Text style={styles.docMeta}>{side.hint}</Text> : null}
           <Text style={styles.docMeta}>
             {formatDate(document.date)}
             {document.reference ? ` · ${document.reference}` : ""}
@@ -208,7 +246,19 @@ function DocumentRow({
             {def.originalLabel} {formatINR(document.original)} · {def.paidLabel}{" "}
             {formatINR(document.paid)}
           </Text>
-          <Text style={styles.docOpen}>Open {formatINR(document.open)}</Text>
+          <Text style={styles.docOpen}>
+            {side ? `${side.label} ` : "Open "}
+            {formatINR(document.open)}
+          </Text>
+          {/* WHAT IS LEFT, not what SAP shows open: another live OMS request
+              can already hold part of it, and only the remainder may be asked
+              for (`availableOf`, the same figure the server reserves on). */}
+          {available < document.open ? (
+            <Text style={styles.docHeld}>
+              {formatINR(available)} available · {formatINR(document.open - available)} held by
+              other requests
+            </Text>
+          ) : null}
           {document.note ? <Text style={styles.docNote}>{document.note}</Text> : null}
         </View>
       </TouchableOpacity>
@@ -282,7 +332,9 @@ function AmountBox({
           value={shown}
           onChangeText={(amount) => onAllocationChange({ amount })}
           editable={!percent}
-          placeholder={percent ? "Pick a percentage" : `Up to ${formatINR(row.document.open)}`}
+          placeholder={
+            percent ? "Pick a percentage" : `Up to ${formatINR(availableOf(row.document))}`
+          }
           placeholderTextColor={COLORS.textMuted}
           keyboardType="decimal-pad"
         />
@@ -387,6 +439,16 @@ const styles = StyleSheet.create({
   docNumber: { fontSize: 14, fontWeight: "800", color: COLORS.text },
   docMeta: { fontSize: 11, color: COLORS.textSecondary, marginTop: 2 },
   docOpen: { fontSize: 13, fontWeight: "800", color: COLORS.primary, marginTop: 4 },
+  docHeld: { fontSize: 11, color: COLORS.warning, marginTop: 2 },
+  docTitleRow: { flexDirection: "row", alignItems: "center", gap: 6 },
+  // Cr / Dr, the one thing that tells two identical figures apart.
+  sideTag: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+  },
+  sideTagText: { fontSize: 10, fontWeight: "900" },
   docNote: { fontSize: 11, color: COLORS.warning, fontWeight: "700", marginTop: 2 },
 
   line: {

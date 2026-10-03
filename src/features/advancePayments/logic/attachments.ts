@@ -7,11 +7,6 @@
  * (React Native has no `File`). Change it on the web first, then re-copy.
  */
 /**
- * A file on a request or a payout: one just chosen (`file`, not yet sent) or
- * one the server already holds (`serverId`). The lists show both alike; saving
- * sends the new ones and removes the saved ones that were taken off.
- */
-/**
  * A file as this app gets one: `expo-document-picker` and `expo-image-picker`
  * both hand back a uri, and that — with a name and type — is what React
  * Native's FormData sends. The web's `File` does not exist here.
@@ -23,6 +18,11 @@ export interface PickedFile {
   mimeType: string;
 }
 
+/**
+ * A file on a request or a payout: one just chosen (`file`, not yet sent) or
+ * one the server already holds (`serverId`). The lists show both alike; saving
+ * sends the new ones and removes the saved ones that were taken off.
+ */
 export interface FileAttachment {
   id: string;
   name: string;
