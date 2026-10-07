@@ -14,6 +14,9 @@ import {
 } from "react-native";
 
 import { appAlert } from "@/src/components/common/AppDialog";
+import AttachmentViewerModal, {
+  type AttachmentSource,
+} from "@/src/features/advancePayments/components/AttachmentViewerModal";
 import ApprovalLoadingDialog from "@/src/features/approval/components/dialogs/ApprovalLoadingDialog";
 import ApproveDialog from "@/src/features/approval/components/dialogs/ApproveDialog";
 import RejectDialog from "@/src/features/approval/components/dialogs/RejectDialog";
@@ -27,6 +30,7 @@ import {
   creditLimitError,
   creditLimitProblems,
   creditLimitService,
+  type CreditLimitAttachment,
 } from "@/src/services/creditLimit.service";
 
 import {
@@ -66,6 +70,8 @@ export default function CreditLimitDetailsScreen() {
   const [asking, setAsking] = useState<"approve" | "reject" | null>(null);
   const [acting, setActing] = useState<"approve" | "reject" | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  /** The file being looked at, if any — see `AttachmentViewerModal`. */
+  const [viewing, setViewing] = useState<AttachmentSource | null>(null);
 
   useRefreshOnFocus(() => {
     void reload(true);
@@ -146,6 +152,20 @@ export default function CreditLimitDetailsScreen() {
   };
 
   const sapSaid = request.flow?.sap_response ?? "";
+
+  /**
+   * The documents on this request. A submission's files are shared by every
+   * request it raised, so the same list appears on each of them.
+   */
+  const files = request.attachments ?? [];
+
+  /** Open one in the app's viewer — the advance payment screen's own. */
+  const openFile = (file: CreditLimitAttachment) =>
+    setViewing({
+      name: file.name,
+      load: () => creditLimitService.attachmentImage(request.id, file.id),
+      save: () => creditLimitService.saveAttachment(request.id, file.id, file.name),
+    });
 
   /**
    * WHAT SOMEBODY SAID OR CHANGED, which is not the same as what the route
@@ -389,18 +409,43 @@ export default function CreditLimitDetailsScreen() {
           </View>
         ) : null}
 
-        {/* The attachment is named here; the server streams it from
-            `requests/<id>/attachment/`, which needs the bearer token — so it
-            is stated rather than linked until that download exists. */}
-        {request.attachment_name ? (
+        {/* THE DOCUMENTS, AND THEY OPEN. An approver deciding on a limit is
+            deciding on the evidence attached to it, so naming the file and
+            stopping there asked them to take it on trust. Each row opens the
+            file in the app's own viewer — an image zooms, anything else is
+            handed to whatever opens that kind. The bytes come through the
+            service, which sends the bearer token these endpoints require. */}
+        {files.length ? (
           <View style={styles.card}>
             <View style={styles.cardHeader}>
               <View style={styles.headerIcon}>
                 <Ionicons name="attach" size={ms(16)} color={COLORS.primary} />
               </View>
-              <Text style={styles.cardTitle}>Attachment</Text>
+              <Text style={styles.cardTitle}>
+                {files.length > 1 ? `Attachments (${files.length})` : "Attachment"}
+              </Text>
             </View>
-            <Text style={styles.muted}>{request.attachment_name}</Text>
+
+            {files.map((file, index) => (
+              <TouchableOpacity
+                key={file.id}
+                style={[styles.fileRow, index > 0 && styles.fileRowBordered]}
+                onPress={() => openFile(file)}
+                activeOpacity={0.7}
+                accessibilityRole="button"
+                accessibilityLabel={`Open ${file.name}`}
+              >
+                <Ionicons
+                  name={isImage(file.name) ? "image-outline" : "document-text-outline"}
+                  size={ms(16)}
+                  color={COLORS.primary}
+                />
+                <Text style={styles.fileName} numberOfLines={2}>
+                  {file.name}
+                </Text>
+                <Ionicons name="open-outline" size={ms(15)} color={COLORS.textSecondary} />
+              </TouchableOpacity>
+            ))}
           </View>
         ) : null}
       </ScrollView>
@@ -446,9 +491,13 @@ export default function CreditLimitDetailsScreen() {
         visible={acting !== null}
         decision={acting === "reject" ? "reject" : "approve"}
       />
+      <AttachmentViewerModal source={viewing} onClose={() => setViewing(null)} />
     </View>
   );
 }
+
+/** Which icon a file gets — the same extensions the viewer renders inline. */
+const isImage = (name: string) => /\.(jpe?g|png|gif|webp|bmp|heic)$/i.test(name);
 
 /** One labelled fact of the grid — the advance payment page's own field. */
 function Field({
@@ -594,6 +643,17 @@ const styles = StyleSheet.create({
     marginTop: sp(4),
     lineHeight: fs(17),
   },
+
+  fileRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: sp(10),
+    paddingVertical: sp(10),
+  },
+  fileRowBordered: { borderTopWidth: 1, borderTopColor: COLORS.borderLight },
+  // `minWidth: 0` so a long name wraps inside the row rather than pushing the
+  // open icon off it.
+  fileName: { flex: 1, minWidth: 0, fontSize: fs(13), fontWeight: "600", color: COLORS.text },
 
   actionBox: {
     flexDirection: "row",

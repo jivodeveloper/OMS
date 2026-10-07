@@ -15,12 +15,15 @@ import {
 import AttachmentPicker from "@/app/(main)/payments/_components/AttachmentPicker";
 import type { AttachmentStub } from "@/app/(main)/payments/_lib/types";
 import { appAlert } from "@/src/components/common/AppDialog";
+import PickedFileViewer from "@/src/features/advancePayments/components/PickedFileViewer";
+import type { FileAttachment } from "@/src/features/advancePayments/logic/attachments";
 import Dropdown from "@/src/components/common/DropdownProps";
 import { COLORS } from "@/src/constants/theme";
 import useBackToOrigin from "@/src/hooks/useBackToOrigin";
 import { fs, ms, sp } from "@/src/utils/responsive";
 import {
   CREDIT_LIMIT_COMPANIES,
+  MAX_CREDIT_LIMIT_ATTACHMENTS,
   MAX_CREDIT_LIMIT_LINES,
   attachmentRequired,
   creditLimitError,
@@ -109,6 +112,8 @@ export default function CreditLimitCreateScreen() {
   const [lines, setLines] = useState<Line[]>([newLine()]);
   const [remarks, setRemarks] = useState("");
   const [files, setFiles] = useState<AttachmentStub[]>([]);
+  /** A chosen file being checked before it is sent. */
+  const [viewing, setViewing] = useState<FileAttachment | null>(null);
   const [saving, setSaving] = useState(false);
   const [showErrors, setShowErrors] = useState(false);
   /** Raised: how many, so the Done dialog can say it. */
@@ -174,7 +179,6 @@ export default function CreditLimitCreateScreen() {
     setLines((current) => [...current.map((line) => ({ ...line, open: false })), newLine()]);
 
   const needsFile = attachmentRequired(lines.length);
-  const picked = files[0];
 
   /** What is wrong, row by row and then overall. */
   const rowProblems = lines.map((line) =>
@@ -194,7 +198,7 @@ export default function CreditLimitCreateScreen() {
         ? "Each party can appear once per submission."
         : lines.some((line) => !line.customer)
           ? "One of the parties could not be read from SAP."
-          : needsFile && !picked
+          : needsFile && files.length === 0
             ? "A supporting document is required for a single-party request."
             : "");
 
@@ -228,14 +232,14 @@ export default function CreditLimitCreateScreen() {
           valid_till: line.validTill,
         })),
         remarks: remarks.trim() || undefined,
-        attachment: picked
-          ? {
-              uri: picked.uri,
-              name: picked.name,
-              size: picked.size,
-              mimeType: picked.mimeType,
-            }
-          : null,
+        // EVERY FILE, shared by every party: one submission argues one case,
+        // and a file per party would be the same file attached fifty times.
+        attachments: files.map((file) => ({
+          uri: file.uri,
+          name: file.name,
+          size: file.size,
+          mimeType: file.mimeType,
+        })),
       });
       // The Done dialog takes it from here, and Done leads to the list.
       setRaised(created.length || lines.length);
@@ -542,27 +546,54 @@ export default function CreditLimitCreateScreen() {
           {/* REQUIRED FOR ONE PARTY, optional for several — the server's own
               rule, said here so the requester learns it before the refusal. */}
           <View style={styles.fileBox}>
+            {/* SEVERAL DOCUMENTS, each pick ADDING to the list rather than
+                replacing it — evidence for a limit arrives as a letter and a
+                statement and a photograph, not as one file. */}
             <AttachmentPicker
-              label={needsFile ? "Attachment (required)" : "Attachment"}
+              label={needsFile ? "Attachments (required)" : "Attachments"}
               attachments={files}
-              maxFiles={1}
+              maxFiles={MAX_CREDIT_LIMIT_ATTACHMENTS}
               onAdd={(added) =>
-                setFiles(
-                  added.slice(0, 1).map((file) => ({
-                    id: `${file.name}-${file.size}`,
-                    name: file.name,
-                    uri: file.uri,
-                    mimeType: file.mimeType,
-                    size: file.size,
-                  })),
-                )
+                setFiles((current) => {
+                  const next = [...current];
+                  for (const file of added) {
+                    if (next.length >= MAX_CREDIT_LIMIT_ATTACHMENTS) break;
+                    // The same file twice is a mis-tap, not a second document.
+                    if (next.some((f) => f.name === file.name && f.size === file.size)) {
+                      continue;
+                    }
+                    next.push({
+                      id: `${file.name}-${file.size}`,
+                      name: file.name,
+                      uri: file.uri,
+                      mimeType: file.mimeType,
+                      size: file.size,
+                    });
+                  }
+                  return next;
+                })
               }
-              onRemove={() => setFiles([])}
+              onRemove={(id) => setFiles((current) => current.filter((f) => f.id !== id))}
+              // Tapping a tile opens it: somebody who has just photographed
+              // three pages needs to check which ones they attached.
+              onOpen={(stub) =>
+                setViewing({
+                  id: stub.id,
+                  name: stub.name,
+                  size: stub.size,
+                  file: {
+                    uri: stub.uri,
+                    name: stub.name,
+                    size: stub.size,
+                    mimeType: stub.mimeType,
+                  },
+                })
+              }
             />
             <Text style={styles.hint}>
               {needsFile
-                ? "A single-party request needs a supporting document."
-                : "Optional for a submission of several parties."}
+                ? `A single-party request needs at least one document. Up to ${MAX_CREDIT_LIMIT_ATTACHMENTS}.`
+                : `Optional for a submission of several parties. Up to ${MAX_CREDIT_LIMIT_ATTACHMENTS}.`}
             </Text>
           </View>
         </Card>
@@ -629,6 +660,8 @@ export default function CreditLimitCreateScreen() {
       {/* IN FLIGHT, then raised. The second dismisses to the list — there is
           nothing left to do on a form whose request is already with its
           approver, and leaving it filled in invites a second submission. */}
+      <PickedFileViewer attachment={viewing} onClose={() => setViewing(null)} />
+
       <CreditLimitSubmittingDialog visible={saving} />
       {raised > 0 ? (
         <CreditLimitSubmittedDialog

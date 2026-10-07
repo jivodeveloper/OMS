@@ -48,6 +48,10 @@ export const BACKDATE_DETAILS_ROUTE =
 // "View Details" (ProductionTrackingScreen.openDetails). Keyed by { id, from }.
 export const PRODUCTION_DETAILS_ROUTE =
   "/(main)/production/tracking-details" as const;
+// Credit Limit detail: the SAME screen the list cards open on "View Details"
+// (CreditLimitListScreen.openDetails). Keyed by { id }.
+export const CREDIT_LIMIT_DETAILS_ROUTE =
+  "/(main)/credit-limit/details" as const;
 
 /**
  * Map a backend `entity_type` (Django model name) to the exact mobile detail
@@ -92,6 +96,19 @@ const ENTITY_ROUTES: Record<
   // the details screen asks the approval queue rather than assuming either way.
   productionorder: {
     pathname: PRODUCTION_DETAILS_ROUTE,
+    params: (id, from) => ({ id, ...(from ? { from } : {}) }),
+  },
+  // `creditlimitrequest` — one word, no underscores. Verified against
+  // ContentType.objects.get_for_model(CreditLimitRequest), not guessed.
+  //
+  // ONE SCREEN FOR BOTH SIDES, unlike the web client's two pages: this screen
+  // shows Approve and Reject when the request really is this user's to act on
+  // and omits them otherwise, so the approver and the requester can be sent to
+  // the same place. A multi-party submission's batch notification carries NO
+  // entity, and the generic router already falls back to the inbox for that —
+  // which is right, because no single request is what it was about.
+  creditlimitrequest: {
+    pathname: CREDIT_LIMIT_DETAILS_ROUTE,
     params: (id, from) => ({ id, ...(from ? { from } : {}) }),
   },
 };

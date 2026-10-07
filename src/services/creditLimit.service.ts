@@ -1,4 +1,5 @@
-import { api } from "./api";
+import { API_BASE_URL, api } from "./api";
+import { storage } from "../utils/storage";
 
 /**
  * Credit Limit — ask for a customer's SAP credit limit to be changed.
@@ -58,13 +59,19 @@ export interface CreditLimitRequest {
   new_credit_limit: string;
   valid_till: string;
   remarks: string;
-  /** Empty when the request has no file. */
-  attachment_name: string;
+  /** Supporting documents — shared by every request of one submission. */
+  attachments: CreditLimitAttachment[];
   invoice_log: unknown;
   created_by?: number;
   created_by_username: string;
   created_at: string;
   flow: CreditLimitFlow | null;
+}
+
+/** One supporting document on a request. The bytes are fetched separately. */
+export interface CreditLimitAttachment {
+  id: number;
+  name: string;
 }
 
 export interface CreditLimitActionRow {
@@ -116,15 +123,20 @@ export interface NewCreditLimitRequest {
   lines: CreditLimitLine[];
   /** Shared by every line of the submission. */
   remarks?: string;
-  attachment?: PickedFile | null;
+  /** Shared by every line too. At most `MAX_CREDIT_LIMIT_ATTACHMENTS`. */
+  attachments?: PickedFile[];
 }
 
 /** At most this many parties in one submission (`flow.MAX_LINES`). */
 export const MAX_CREDIT_LIMIT_LINES = 50;
 
+/** At most this many documents in one submission (`flow.MAX_ATTACHMENTS`). */
+export const MAX_CREDIT_LIMIT_ATTACHMENTS = 10;
+
 /**
  * THE RULE, as `flow.attachment_required` states it: a single-party request
- * needs a supporting document; a multi-party submission may go without.
+ * needs AT LEAST ONE supporting document; a multi-party submission may go
+ * without.
  *
  * One change is argued on its own evidence. A batch is argued on the covering
  * note, and asking for a file per party would mean one file repeated fifty
@@ -323,11 +335,13 @@ export const creditLimitService = {
     form.append("company", body.company);
     form.append("lines", JSON.stringify(body.lines));
     if (body.remarks) form.append("remarks", body.remarks);
-    if (body.attachment) {
-      form.append("attachment", {
-        uri: body.attachment.uri,
-        name: body.attachment.name,
-        type: body.attachment.mimeType || "application/octet-stream",
+    // SEVERAL FILES UNDER ONE KEY, which is what the view reads
+    // (`request.FILES.getlist("attachments")`).
+    for (const file of body.attachments ?? []) {
+      form.append("attachments", {
+        uri: file.uri,
+        name: file.name,
+        type: file.mimeType || "application/octet-stream",
       } as unknown as Blob);
     }
     return rows<CreditLimitRequest>(guard(await api.post(`${BASE}/requests/`, form)));
@@ -376,6 +390,29 @@ export const creditLimitService = {
     ),
 
   /**
+   * ONE DOCUMENT'S BYTES, as a `data:` URI an `<Image>` can render.
+   *
+   * Fetched WITH the bearer token: the endpoint is permission-checked, so
+   * handing its URL to `<Image>` or `openURL` would send an unauthenticated
+   * request and come back 401.
+   */
+  attachmentImage: async (requestId: number, attachmentId: number): Promise<string> =>
+    fetchDataUri(
+      `${API_BASE_URL}${BASE}/requests/${requestId}/attachments/${attachmentId}/`,
+    ),
+
+  /** The same bytes, written to a file the OS can hand to a PDF viewer. */
+  saveAttachment: async (
+    requestId: number,
+    attachmentId: number,
+    name: string,
+  ): Promise<string> =>
+    download(
+      `${API_BASE_URL}${BASE}/requests/${requestId}/attachments/${attachmentId}/`,
+      name,
+    ),
+
+  /**
    * The company's parties, from the SYNCED SAP table.
    *
    * The same list the web's picker reads (`/sap/parties/category/`), and it
@@ -387,5 +424,60 @@ export const creditLimitService = {
       guard(await api.get(`/sap/parties/category/${query({ category: company })}`)),
     ),
 };
+
+/* ------------------------------------------------------------------ *
+ * Files
+ *
+ * THE SAME TWO HELPERS the advance payment service carries, and for the same
+ * reason: these endpoints need the bearer token, so the bytes have to be
+ * fetched rather than linked.
+ * ------------------------------------------------------------------ */
+
+/** What a failed file read means, in words a reader can act on. */
+function fileError(status: number): string {
+  if (status === 403) return "You do not have permission to open this file.";
+  if (status === 404) return "That file is no longer on the server.";
+  return `The file could not be opened (status ${status}).`;
+}
+
+/** The bytes, as a `data:` URI an `<Image>` can render. */
+async function fetchDataUri(url: string): Promise<string> {
+  const token = await storage.getAccessToken();
+  const res = await fetch(url, {
+    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+  });
+  if (!res.ok) throw new Error(fileError(res.status));
+  const blob = await res.blob();
+  return await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("That file could not be read."));
+    reader.onloadend = () => resolve(reader.result as string);
+    reader.readAsDataURL(blob);
+  });
+}
+
+/**
+ * The bytes, written to a file the OS can open.
+ *
+ * `documentDirectory` rather than the cache, which the OS may purge while the
+ * viewer app is still holding the file; on Android the path is handed over as
+ * a `content://` URI, because a `file://` one throws FileUriExposedException
+ * in the app that receives it.
+ */
+async function download(url: string, name: string): Promise<string> {
+  const FileSystem = await import("expo-file-system/legacy");
+  const { Platform } = await import("react-native");
+  const token = await storage.getAccessToken();
+
+  const dir = FileSystem.documentDirectory || FileSystem.cacheDirectory;
+  const safe = name.replace(/[^\w.\- ]+/g, "_") || "attachment";
+  const result = await FileSystem.downloadAsync(url, `${dir}${safe}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+  });
+  if (result.status !== 200) throw new Error(fileError(result.status));
+  return Platform.OS === "android"
+    ? await FileSystem.getContentUriAsync(result.uri)
+    : result.uri;
+}
 
 export default creditLimitService;

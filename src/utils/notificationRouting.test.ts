@@ -14,6 +14,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
+  CREDIT_LIMIT_DETAILS_ROUTE,
   DEPOSIT_DETAILS_ROUTE,
   PAYMENT_DETAILS_ROUTE,
   resolveNotificationRoute,
@@ -84,6 +85,31 @@ describe("payment vs deposit notification routing", () => {
         `entity_id ${String(bad)} should not open a deposit`,
       );
     }
+  });
+
+  it("opens a CREDIT LIMIT notification on the request it names", () => {
+    const href = routeOf(
+      push({
+        entity_type: "creditlimitrequest",
+        entity_id: 77,
+        event_type: "CREDIT_LIMIT_AWAITING_APPROVAL",
+      }),
+    );
+    assert.equal(href?.pathname, CREDIT_LIMIT_DETAILS_ROUTE);
+    assert.equal(href?.params?.id, "77");
+  });
+
+  it("sends the credit limit batch notification to the inbox, not a request", () => {
+    // A multi-party submission tells each approver ONCE and names no entity;
+    // opening one arbitrary request of the batch would be a guess.
+    const href = routeOf(
+      push({
+        entity_type: "creditlimitrequest",
+        entity_id: null,
+        event_type: "CREDIT_LIMIT_AWAITING_APPROVAL",
+      }),
+    );
+    assert.notEqual(href?.pathname, CREDIT_LIMIT_DETAILS_ROUTE);
   });
 
   it("carries the originating screen through, when given", () => {
