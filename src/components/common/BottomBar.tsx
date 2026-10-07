@@ -1,5 +1,12 @@
 import React, { useMemo, useState } from "react";
-import { Modal, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import {
+  Modal,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { usePathname, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -260,7 +267,13 @@ export default function BottomBar({
             <View style={styles.sheetHandle} />
             <Text style={styles.sheetTitle}>Create new</Text>
 
-            {createTargets.map((target) => (
+            <ScrollView
+              style={styles.sheetList}
+              contentContainerStyle={styles.sheetListContent}
+              showsVerticalScrollIndicator={false}
+              bounces={false}
+            >
+              {createTargets.map((target) => (
               <TouchableOpacity
                 key={target.key}
                 style={styles.sheetRow}
@@ -283,8 +296,9 @@ export default function BottomBar({
                   size={18}
                   color={COLORS.textSecondary}
                 />
-              </TouchableOpacity>
-            ))}
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
           </TouchableOpacity>
         </TouchableOpacity>
       </Modal>
@@ -421,7 +435,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
     paddingTop: 10,
     paddingBottom: 34,
+    // Never taller than most of the screen: the backdrop stays tappable, so
+    // the sheet can always be dismissed without choosing something.
+    maxHeight: "78%",
   },
+  sheetList: { flexGrow: 0 },
+  sheetListContent: { paddingBottom: 4 },
   sheetHandle: {
     alignSelf: "center",
     width: 40,

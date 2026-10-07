@@ -535,14 +535,15 @@ export default function MainLayout() {
         <Drawer.Screen
           name="orders/create"
           options={{
-            drawerLabel: "Create Order",
             title: "Create Order",
             drawerIcon: ({ color }) => (
               <Ionicons name="add-circle-outline" size={22} color={color} />
             ),
-            drawerItemStyle: isVisible("orders/create")
-              ? visibleStyle
-              : hiddenStyle,
+            // RAISED FROM THE "+", not the sidebar. The footer button lists
+            // exactly what this user may create and asks which when there is
+            // more than one; a second way in doubled each module's rows and
+            // made the names too long to read on a narrow drawer.
+            drawerItemStyle: hiddenStyle,
           }}
           listeners={({ navigation }) => ({
             drawerItemPress: (e: { preventDefault: () => void }) => {
@@ -598,13 +599,14 @@ export default function MainLayout() {
           name="payments/receive-payment"
           options={{
             title: "Receive Payment",
-            drawerLabel: "New Payment",
             drawerIcon: ({ color }) => (
               <Ionicons name="wallet-outline" size={22} color={color} />
             ),
-            drawerItemStyle: isVisible("payments/receive-payment")
-              ? visibleStyle
-              : hiddenStyle,
+            // RAISED FROM THE "+", not the sidebar. The footer button lists
+            // exactly what this user may create and asks which when there is
+            // more than one; a second way in doubled each module's rows and
+            // made the names too long to read on a narrow drawer.
+            drawerItemStyle: hiddenStyle,
           }}
         />
         {/* Payment Requests has been REMOVED. The tracking screens serve
@@ -625,14 +627,15 @@ export default function MainLayout() {
         <Drawer.Screen
           name="payments/bank-deposit"
           options={{
-            drawerLabel: "Bank Deposit",
             title: "Bank Deposit",
             drawerIcon: ({ color }) => (
               <Ionicons name="business-outline" size={22} color={color} />
             ),
-            drawerItemStyle: isVisible("payments/bank-deposit")
-              ? visibleStyle
-              : hiddenStyle,
+            // RAISED FROM THE "+", not the sidebar. The footer button lists
+            // exactly what this user may create and asks which when there is
+            // more than one; a second way in doubled each module's rows and
+            // made the names too long to read on a narrow drawer.
+            drawerItemStyle: hiddenStyle,
           }}
         />
         <Drawer.Screen
@@ -724,13 +727,14 @@ export default function MainLayout() {
           name="backdate/create"
           options={{
             title: "BackDate Request",
-            drawerLabel: "New BackDate",
             drawerIcon: ({ color }) => (
               <Ionicons name="time-outline" size={22} color={color} />
             ),
-            drawerItemStyle: isVisible("backdate/create")
-              ? visibleStyle
-              : hiddenStyle,
+            // RAISED FROM THE "+", not the sidebar. The footer button lists
+            // exactly what this user may create and asks which when there is
+            // more than one; a second way in doubled each module's rows and
+            // made the names too long to read on a narrow drawer.
+            drawerItemStyle: hiddenStyle,
           }}
         />
         <Drawer.Screen
@@ -776,20 +780,21 @@ export default function MainLayout() {
           name="advance-payments/create"
           options={{
             title: "Advance Payment Request",
-            drawerLabel: "New Advance Payment",
             drawerIcon: ({ color }) => (
               <Ionicons name="wallet-outline" size={22} color={color} />
             ),
-            drawerItemStyle: isVisible("advance-payments/create")
-              ? visibleStyle
-              : hiddenStyle,
+            // RAISED FROM THE "+", not the sidebar. The footer button lists
+            // exactly what this user may create and asks which when there is
+            // more than one; a second way in doubled each module's rows and
+            // made the names too long to read on a narrow drawer.
+            drawerItemStyle: hiddenStyle,
           }}
         />
         <Drawer.Screen
           name="advance-payments/tracking"
           options={{
             title: "Advance Payments",
-            drawerLabel: "Advance Payments",
+            drawerLabel: "Advances",
             drawerIcon: ({ color }) => (
               <Ionicons name="card-outline" size={22} color={color} />
             ),
@@ -814,7 +819,7 @@ export default function MainLayout() {
           name="advance-payments/dispatch"
           options={{
             title: "Send Bills & POs",
-            drawerLabel: "Send Bills & POs",
+            drawerLabel: "Send Bills",
             drawerIcon: ({ color }) => (
               <Ionicons name="paper-plane-outline" size={22} color={color} />
             ),
@@ -853,6 +858,44 @@ export default function MainLayout() {
             title: "Edit Advance Payment",
             drawerItemStyle: hiddenStyle,
           }}
+        />
+
+        {/* ── Credit Limit ──────────────────────────────────────────────
+            ONE DRAWER ENTRY for the module: the page itself asks whose work
+            you are looking at — To Approve or My Requests — so a second row
+            for the desk would be the same list behind another name. */}
+        <Drawer.Screen
+          name="credit-limit/tracking"
+          options={{
+            title: "Credit Limit",
+            drawerLabel: "Credit Limit",
+            drawerIcon: ({ color }) => (
+              <Ionicons name="card-outline" size={22} color={color} />
+            ),
+            drawerItemStyle: isVisible("credit-limit/tracking")
+              ? visibleStyle
+              : hiddenStyle,
+          }}
+        />
+        <Drawer.Screen
+          name="credit-limit/approval"
+          options={{
+            title: "Credit Limit Approval",
+            // Reached by a deep link or a push, never from the drawer.
+            drawerItemStyle: hiddenStyle,
+          }}
+        />
+        <Drawer.Screen
+          name="credit-limit/create"
+          options={{ title: "New Credit Limit", drawerItemStyle: hiddenStyle }}
+        />
+        <Drawer.Screen
+          name="credit-limit/details"
+          options={{ title: "Credit Limit Details", drawerItemStyle: hiddenStyle }}
+        />
+        <Drawer.Screen
+          name="credit-limit/progress"
+          options={{ title: "Credit Limit Progress", drawerItemStyle: hiddenStyle }}
         />
 
         {/* ── Production Orders ─────────────────────────────────────────
@@ -1002,7 +1045,7 @@ export default function MainLayout() {
           name="sap/party-assignment"
           options={{
             title: "Sap Party Assignment",
-            drawerLabel: "Party Assignment",
+            drawerLabel: "Assign Parties",
             drawerIcon: ({ color }) => (
               <Ionicons name="business-outline" size={22} color={color} />
             ),

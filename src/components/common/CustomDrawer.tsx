@@ -337,7 +337,7 @@ export default function CustomDrawer(props: DrawerContentComponentProps) {
                 </View>
                 <Text
                   style={[styles.itemLabel, focused && styles.itemLabelActive]}
-                  numberOfLines={1}
+                  numberOfLines={2}
                 >
                   {label}
                 </Text>
@@ -686,6 +686,10 @@ const styles = StyleSheet.create({
   },
   itemLabel: {
     flex: 1,
+    // `minWidth: 0` so a long word wraps inside the row instead of widening
+    // it past the icon and the badge.
+    minWidth: 0,
+    lineHeight: fs(18),
     // `fs()`, not a fixed 15: the drawer is a fraction of the screen width, so
     // on a small phone a hardcoded size truncates labels that fit everywhere
     // else. Slightly smaller as well — a menu row is scanned, not read.

@@ -134,6 +134,33 @@ export const ASSIGNABLE_PAGES: AppPage[] = [
     ],
   },
   {
+    // Credit Limit — ask for a customer's SAP credit limit to be changed.
+    // The grant opens the form AND the list it feeds, plus the two screens a
+    // card leads to: granting the form alone would leave the requester unable
+    // to see what became of what they raised.
+    key: "Credit_Limit",
+    label: "Credit Limit",
+    screens: [
+      "credit-limit/create",
+      "credit-limit/tracking",
+      "credit-limit/details",
+      "credit-limit/progress",
+    ],
+  },
+  {
+    // Opens the credit-limit desk. NOT sufficient to decide any given request
+    // — the server also requires the holder to be that stage's effective
+    // user, so this grant shows the desk and nothing more.
+    key: "Credit_Limit_Approval",
+    label: "Credit Limit Approval",
+    screens: [
+      "credit-limit/approval",
+      "credit-limit/tracking",
+      "credit-limit/details",
+      "credit-limit/progress",
+    ],
+  },
+  {
     // Send Bills & POs — hand SAP's open documents to whoever raises the
     // payment request from them. A separate job from raising or approving one,
     // and the backend issues the key separately
@@ -199,6 +226,7 @@ const ALL_PAYMENT_ACTIONS = Object.values(PAYMENT_ACTIONS);
 const ALL_BACKDATE_ACTIONS = ["BackDate", "BackDate_Approval"];
 const ALL_PRODUCTION_ACTIONS = ["Production_Order", "Production_Order_Approval"];
 const ALL_ADVANCE_PAYMENT_ACTIONS = ["Advance_Payment", "Advance_Payment_Approval"];
+const ALL_CREDIT_LIMIT_ACTIONS = ["Credit_Limit", "Credit_Limit_Approval"];
 
 export type PaymentAction =
   (typeof PAYMENT_ACTIONS)[keyof typeof PAYMENT_ACTIONS];
@@ -322,6 +350,19 @@ export const SCREEN_KEYS: Record<string, string[]> = {
   "advance-payments/dispatch": ["Advance_Payment_Dispatch"],
   // Step two of the same page, reached from its Next button: the same key.
   "advance-payments/dispatch-review": ["Advance_Payment_Dispatch"],
+
+  // Credit Limit — two keys, spelled as the backend registry issues them
+  // (`credit_limit/permissions.py`). Raising and approving are unrelated jobs,
+  // so neither implies the other, and the SAP lookups the form needs are gated
+  // on `Credit_Limit` alone.
+  "credit-limit/create": ["Credit_Limit"],
+  // One list serves both sides, showing what the viewer is entitled to.
+  "credit-limit/tracking": ALL_CREDIT_LIMIT_ACTIONS,
+  "credit-limit/approval": ["Credit_Limit_Approval"],
+  // Reached from a card or a deep link, never the drawer. Which ACTIONS it
+  // offers is the server's answer — opening it is not consent.
+  "credit-limit/details": ALL_CREDIT_LIMIT_ACTIONS,
+  "credit-limit/progress": ALL_CREDIT_LIMIT_ACTIONS,
 };
 
 /**
@@ -438,9 +479,9 @@ export const isOrderCreatorApprover = (
 
 const CREATOR_APPROVER_LABELS: Record<string, string> = {
   "orders/ordertracking": "My Orders",
-  "orders/orderlist": "Billing Approvals",
-  "approver/pending_approval": "Order Approvals",
-  "orders/auditorapproval": "Auditor Approvals",
+  "orders/orderlist": "Billing",
+  "approver/pending_approval": "Approvals",
+  "orders/auditorapproval": "Audit Approvals",
 };
 
 /**
@@ -512,7 +553,7 @@ export const resolveOrdersRoute = (
 
 /** One thing a user can create, for the Create chooser sheet. */
 export interface CreateTarget {
-  key: "payment" | "deposit" | "order" | "backdate" | "advancePayment";
+  key: "payment" | "deposit" | "order" | "backdate" | "advancePayment" | "creditLimit";
   label: string;
   description: string;
   icon: string;
@@ -560,6 +601,14 @@ const CREATE_TARGETS: CreateTarget[] = [
     icon: "wallet-outline",
     screen: "advance-payments/create",
     route: "/(main)/advance-payments/create",
+  },
+  {
+    key: "creditLimit",
+    label: "Credit Limit",
+    description: "Ask for a customer's SAP credit limit to be changed",
+    icon: "card-outline",
+    screen: "credit-limit/create",
+    route: "/(main)/credit-limit/create",
   },
   // Production is deliberately absent. SAP originates a production order;
   // OMS only approves what SAP already has, so there is nothing to raise —

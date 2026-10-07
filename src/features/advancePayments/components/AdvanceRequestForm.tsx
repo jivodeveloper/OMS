@@ -228,10 +228,9 @@ export default function AdvanceRequestForm({
           <Select
             label="Payment Against"
             required
-            data={c.paymentAgainstOptions.map((option) => ({
-              label: option.label,
-              value: option.value,
-            }))}
+            data={c.paymentAgainstOptions
+              .filter((option) => option.value !== "OTHER")
+              .map((option) => ({ label: option.label, value: option.value }))}
             value={form.paymentAgainst}
             onChange={(paymentAgainst) =>
               change({ paymentAgainst: paymentAgainst as RequestForm["paymentAgainst"] })
@@ -241,21 +240,6 @@ export default function AdvanceRequestForm({
             error={errorFor("Payment Against")}
           />
         </Row>
-
-        {form.paymentAgainst === "OTHER" ? (
-          <Field
-            label="What is it for"
-            required
-            error={errorFor("Payment Against (what it is)")}
-          >
-            <Input
-              value={form.paymentAgainstOther}
-              onChangeText={(paymentAgainstOther) => change({ paymentAgainstOther })}
-              placeholder="Say what the payment is against"
-              invalid={Boolean(errorFor("Payment Against (what it is)"))}
-            />
-          </Field>
-        ) : null}
 
         {c.decided ? (
           <PartnerPicker
