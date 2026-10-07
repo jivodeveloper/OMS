@@ -4,7 +4,7 @@ import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 
 import { COLORS } from "@/src/constants/theme";
 import type { BackDateRequest } from "@/src/services/backdate.service";
-import { formatDate, formatInstant } from "@/src/utils/datetime";
+import { formatDate, splitInstant } from "@/src/utils/datetime";
 import { fs, ms, sp } from "@/src/utils/responsive";
 import { stageLabel, statusOf, type BackDateStatus } from "../types";
 
@@ -62,6 +62,8 @@ function BackDateRequestCard({
   const tone = STATUS_TONE[status];
   const stage = stageLabel(request);
   const expiry = expiryState(request.time_limit);
+  // The day and the time apart, so neither has to be cut to fit one line.
+  const expiresAt = splitInstant(request.time_limit);
 
   return (
     <View style={styles.card}>
@@ -137,10 +139,9 @@ function BackDateRequestCard({
         </View>
         <View style={styles.invoiceCol}>
           <Text style={styles.invoiceLabel}>Posting Window</Text>
-          <Text style={styles.invoiceValue} numberOfLines={1}>
-            {formatDate(request.from_date)} – {formatDate(request.to_date)}
-          </Text>
-          <Text style={styles.invoiceNo} numberOfLines={1}>
+          <Text style={styles.invoiceValue}>{formatDate(request.from_date)}</Text>
+          <Text style={styles.invoiceValue}>to {formatDate(request.to_date)}</Text>
+          <Text style={styles.invoiceNo} numberOfLines={2}>
             {request.action_label}
           </Text>
         </View>
@@ -152,14 +153,10 @@ function BackDateRequestCard({
         </View>
         <View style={styles.invoiceCol}>
           <Text style={styles.invoiceLabel}>Rights Expire</Text>
-          <Text style={styles.expiryValue} numberOfLines={1}>
-            {formatInstant(request.time_limit)}
-          </Text>
+          <Text style={styles.expiryValue}>{expiresAt.date}</Text>
+          <Text style={styles.expiryValue}>{expiresAt.time}</Text>
           <View style={[styles.invoiceChip, { backgroundColor: expiry.bg }]}>
-            <Text
-              style={[styles.invoiceChipText, { color: expiry.fg }]}
-              numberOfLines={1}
-            >
+            <Text style={[styles.invoiceChipText, { color: expiry.fg }]}>
               {expiry.label}
             </Text>
           </View>
@@ -354,7 +351,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   expiryIcon: { backgroundColor: COLORS.successLight },
-  invoiceCol: { flex: 1, minWidth: ms(110) },
+  invoiceCol: { flex: 1, minWidth: ms(104) },
   invoiceDivider: {
     width: 1,
     alignSelf: "stretch",

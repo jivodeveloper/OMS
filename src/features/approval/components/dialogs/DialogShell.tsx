@@ -1,5 +1,15 @@
 import React, { useEffect, useRef } from "react";
-import { Animated, Modal, StyleSheet, View } from "react-native";
+import {
+  Animated,
+  Keyboard,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  View,
+} from "react-native";
 
 interface DialogShellProps {
   visible: boolean;
@@ -57,11 +67,44 @@ export default function DialogShell({
         if (dismissable) onRequestClose?.();
       }}
     >
-      <Animated.View style={[styles.backdrop, { opacity }]}>
-        <Animated.View style={[styles.card, { transform: [{ scale }] }]}>
-          {children}
+      <KeyboardAvoidingView
+        style={styles.fill}
+        // iOS does not resize the window for the keyboard; Android does.
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+      >
+        <Animated.View style={[styles.backdrop, { opacity }]}>
+          {/*
+            THE DIM AREA IS A BUTTON. With a text box in the dialog the
+            keyboard covers the footer, and the first thing anybody does is tap
+            the blank space — which did nothing, because this was a plain
+            View. One tap now puts the keyboard away and the buttons back.
+
+            It does NOT close the dialog: a half-typed reason thrown away by a
+            stray tap is worse than the keyboard.
+          */}
+          <Pressable
+            style={StyleSheet.absoluteFill}
+            onPress={Keyboard.dismiss}
+            accessible={false}
+          />
+
+          {/*
+            And the card SCROLLS. On a short screen a dialog with a remarks box
+            is taller than what the keyboard leaves, so the footer has to be
+            reachable by scrolling rather than only by closing the keyboard.
+          */}
+          <ScrollView
+            style={styles.scroll}
+            contentContainerStyle={styles.scrollContent}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+          >
+            <Animated.View style={[styles.card, { transform: [{ scale }] }]}>
+              {children}
+            </Animated.View>
+          </ScrollView>
         </Animated.View>
-      </Animated.View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
@@ -75,6 +118,11 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     padding: 24,
   },
+  fill: { flex: 1 },
+  // The scroll takes the backdrop's width so the card keeps its own margins,
+  // and centres the card while it is short enough to fit.
+  scroll: { width: "100%" },
+  scrollContent: { flexGrow: 1, justifyContent: "center", alignItems: "center" },
   card: {
     width: "100%",
     maxWidth: 380,
