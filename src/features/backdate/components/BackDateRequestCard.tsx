@@ -46,11 +46,11 @@ const STATUS_LABEL: Record<BackDateStatus, string> = {
  * One BackDate request in the tracking list.
  *
  * Built to the payment tracking card exactly: document number and status pill,
- * the subject and its chips on one row, who raised it, a two-column strip, and
- * the green Progress / blue Details pair. The strip answers the BackDate
- * equivalent of "is this settled?" — what window was asked for, and whether
- * the rights are still live — because that is what a person scanning a list
- * needs before deciding whether to open anything.
+ * the subject and its chips on one row, who raised it, the rights expiry, and
+ * the green Progress / blue Details pair. The expiry answers the BackDate
+ * equivalent of "is this settled?" — whether the rights are still live —
+ * because that is what a person scanning a list needs before deciding whether
+ * to open anything.
  */
 function BackDateRequestCard({
   request,
@@ -130,33 +130,21 @@ function BackDateRequestCard({
 
       <View style={styles.divider} />
 
-      {/* What was asked for, and whether it is still good. A window alone
-          cannot answer "can this person post today?" — the expiry can, and it
-          is the half people forget to check. */}
-      <View style={styles.invoiceRow}>
-        <View style={styles.invoiceIcon}>
-          <Ionicons name="calendar" size={ms(16)} color={COLORS.primary} />
-        </View>
-        <View style={styles.invoiceCol}>
-          <Text style={styles.invoiceLabel}>Posting Window</Text>
-          <Text style={styles.invoiceValue}>{formatDate(request.from_date)}</Text>
-          <Text style={styles.invoiceValue}>to {formatDate(request.to_date)}</Text>
-          <Text style={styles.invoiceNo} numberOfLines={2}>
-            {request.action_label}
-          </Text>
-        </View>
-
-        <View style={styles.invoiceDivider} />
-
-        <View style={[styles.invoiceIcon, styles.expiryIcon]}>
-          <Ionicons name="alarm" size={ms(16)} color={COLORS.success} />
-        </View>
-        <View style={styles.invoiceCol}>
-          <Text style={styles.invoiceLabel}>Rights Expire</Text>
-          <Text style={styles.expiryValue}>{expiresAt.date}</Text>
-          <Text style={styles.expiryValue}>{expiresAt.time}</Text>
-          <View style={[styles.invoiceChip, { backgroundColor: expiry.bg }]}>
-            <Text style={[styles.invoiceChipText, { color: expiry.fg }]}>
+      {/* Whether the rights are still good -- the half people forget to
+          check. The posting window itself is on the details screen. */}
+      <View style={styles.windowPanel}>
+        <View style={styles.windowRow}>
+          <View style={[styles.windowIcon, styles.expiryIcon]}>
+            <Ionicons name="alarm" size={ms(14)} color={COLORS.success} />
+          </View>
+          <View style={styles.windowBody}>
+            <Text style={styles.windowLabel}>Rights Expire</Text>
+            <Text style={styles.expiryValue} numberOfLines={1}>
+              {expiresAt.time ? `${expiresAt.date}, ${expiresAt.time}` : expiresAt.date}
+            </Text>
+          </View>
+          <View style={[styles.expiryChip, { backgroundColor: expiry.bg }]}>
+            <Text style={[styles.expiryChipText, { color: expiry.fg }]} numberOfLines={1}>
               {expiry.label}
             </Text>
           </View>
@@ -335,45 +323,46 @@ const styles = StyleSheet.create({
 
   divider: { height: 1, backgroundColor: COLORS.border, marginVertical: sp(12) },
 
-  invoiceRow: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    flexWrap: "wrap",
-    gap: sp(8),
-    paddingVertical: sp(10),
+  windowPanel: {
+    backgroundColor: COLORS.background,
+    borderRadius: sp(12),
+    paddingHorizontal: sp(12),
+    paddingVertical: sp(4),
+    marginBottom: sp(10),
   },
-  invoiceIcon: {
-    width: ms(34),
-    height: ms(34),
-    borderRadius: sp(9),
+  windowRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: sp(10),
+    paddingVertical: sp(8),
+  },
+  windowIcon: {
+    width: ms(30),
+    height: ms(30),
+    borderRadius: sp(8),
     backgroundColor: COLORS.primaryLighter,
     alignItems: "center",
     justifyContent: "center",
   },
   expiryIcon: { backgroundColor: COLORS.successLight },
-  invoiceCol: { flex: 1, minWidth: ms(104) },
-  invoiceDivider: {
-    width: 1,
-    alignSelf: "stretch",
-    backgroundColor: COLORS.borderLight,
-    marginHorizontal: sp(2),
-  },
-  invoiceLabel: {
-    fontSize: fs(11),
+  windowBody: { flex: 1, minWidth: 0 },
+  windowLabel: {
+    fontSize: fs(10),
+    fontWeight: "600",
     color: COLORS.textSecondary,
+    textTransform: "uppercase",
+    letterSpacing: 0.4,
     marginBottom: sp(2),
   },
-  invoiceValue: { fontSize: fs(14), fontWeight: "800", color: COLORS.primary },
-  expiryValue: { fontSize: fs(13), fontWeight: "800", color: COLORS.success },
-  invoiceNo: { fontSize: fs(10), color: COLORS.textMuted, marginTop: sp(2) },
-  invoiceChip: {
-    alignSelf: "flex-start",
+  expiryValue: { fontSize: fs(12), fontWeight: "700", color: COLORS.success },
+  expiryChip: {
+    flexShrink: 0,
+    maxWidth: "45%",
     borderRadius: 999,
     paddingHorizontal: sp(8),
-    paddingVertical: sp(2),
-    marginTop: sp(4),
+    paddingVertical: sp(3),
   },
-  invoiceChipText: { fontSize: fs(10), fontWeight: "700" },
+  expiryChipText: { fontSize: fs(10), fontWeight: "700" },
 
   stageRow: { flexDirection: "row", alignItems: "center", gap: sp(5) },
   stageText: { fontSize: fs(11), color: COLORS.textMuted, fontWeight: "600" },

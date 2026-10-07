@@ -26,10 +26,55 @@ export function messageFrom(err: unknown, fallback = "Something went wrong"): st
   if (err instanceof BackDateApiError) {
     if (err.status === 403) return "You do not have permission to do this.";
     if (err.status === 404) return "Not found.";
+    // A 400 names the field and why. The envelope `message` beside it is only
+    // "Please correct the highlighted fields", and nothing on a phone form is
+    // highlighted -- so the per-field text is the part the user needs.
+    const details = fieldErrorLines(err.errors);
+    if (details.length > 0) return details.join("\n");
     if (err.message) return err.message;
   }
   const anyErr = err as { message?: string };
   return anyErr?.message || fallback;
+}
+
+/** Server field names as the form labels them. */
+const FIELD_LABELS: Record<string, string> = {
+  company: "Company",
+  sap_username: "SAP User",
+  document_type_name: "Document Type",
+  action: "Action",
+  from_date: "From Date",
+  to_date: "To Date",
+  time_limit: "Rights Expire",
+  remarks: "Reason",
+};
+
+/**
+ * `{"company": ["..."], "non_field_errors": ["..."]}` as display lines.
+ *
+ * Values come as a string, a list of strings, or (for nested serializers) an
+ * object of the same; anything else is skipped rather than printed raw.
+ * `sap` is left out: the approval screens render that one themselves.
+ */
+function fieldErrorLines(errors: unknown): string[] {
+  if (!errors || typeof errors !== "object") return [];
+  const lines: string[] = [];
+  for (const [field, value] of Object.entries(errors as Record<string, unknown>)) {
+    if (field === "sap") continue;
+    const texts = Array.isArray(value)
+      ? value.filter((v): v is string => typeof v === "string")
+      : typeof value === "string"
+        ? [value]
+        : value && typeof value === "object"
+          ? fieldErrorLines(value)
+          : [];
+    const label =
+      field === "non_field_errors" || field === "detail"
+        ? ""
+        : FIELD_LABELS[field] ?? field.replace(/_/g, " ");
+    for (const text of texts) lines.push(label ? `${label}: ${text}` : text);
+  }
+  return lines;
 }
 
 /**
