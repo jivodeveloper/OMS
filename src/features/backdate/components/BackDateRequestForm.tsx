@@ -13,6 +13,7 @@ import { Checkbox, Surface, TextInput } from "react-native-paper";
 
 import FormField from "@/app/(main)/payments/_components/FormField";
 import DateTimeField from "@/src/components/common/DateTimeField";
+import IosDatePickerSheet from "@/src/components/common/IosDatePickerSheet";
 import Dropdown from "@/src/components/common/DropdownProps";
 import { COLORS, RADIUS, SPACING } from "@/src/constants/theme";
 import {
@@ -216,6 +217,20 @@ export default function BackDateRequestForm({ form, setForm, mode }: Props) {
 
   const set = (patch: Partial<BackDateFormState>) =>
     setForm({ ...form, ...patch });
+
+  const commitPicked = (target: "from" | "to", picked: Date) => {
+    if (target === "from") {
+      // Moving the start past the end would leave an impossible window on
+      // screen; clearing the end asks for it again rather than silently
+      // keeping a pair that cannot be submitted.
+      set({
+        from_date: picked,
+        ...(form.to_date && form.to_date < picked ? { to_date: null } : {}),
+      });
+      return;
+    }
+    set({ to_date: picked });
+  };
 
   /**
    * Replace the chosen companies, and clear what depended on them.
@@ -437,32 +452,35 @@ export default function BackDateRequestForm({ form, setForm, mode }: Props) {
           />
         </Step>
 
-        {picking !== null ? (
+        {Platform.OS === "ios" ? (
+          <IosDatePickerSheet
+            visible={picking !== null}
+            title={picking === "to" ? "To Date" : "From Date"}
+            mode="date"
+            value={picking === "to" ? form.to_date : form.from_date}
+            minimumDate={
+              picking === "to" ? (form.from_date ?? undefined) : undefined
+            }
+            onCancel={() => setPicking(null)}
+            onConfirm={(picked) => {
+              setPicking(null);
+              if (picking) commitPicked(picking, picked);
+            }}
+          />
+        ) : picking !== null ? (
           <DateTimePicker
             value={
               (picking === "from" ? form.from_date : form.to_date) ?? new Date()
             }
             mode="date"
-            display={Platform.OS === "ios" ? "spinner" : "default"}
+            display="default"
             minimumDate={
               picking === "to" ? (form.from_date ?? undefined) : undefined
             }
             onChange={(event, picked) => {
               setPicking(null);
               if (event?.type === "dismissed" || !picked) return;
-              if (picking === "from") {
-                // Moving the start past the end would leave an impossible
-                // window on screen; clearing the end asks for it again rather
-                // than silently keeping a pair that cannot be submitted.
-                set({
-                  from_date: picked,
-                  ...(form.to_date && form.to_date < picked
-                    ? { to_date: null }
-                    : {}),
-                });
-                return;
-              }
-              set({ to_date: picked });
+              commitPicked(picking, picked);
             }}
           />
         ) : null}

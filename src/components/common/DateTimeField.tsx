@@ -3,6 +3,7 @@ import React, { useRef, useState } from "react";
 import { Platform, Text, TouchableOpacity, View } from "react-native";
 import { TextInput } from "react-native-paper";
 
+import IosDatePickerSheet from "@/src/components/common/IosDatePickerSheet";
 import { COLORS, RADIUS, SPACING } from "@/src/constants/theme";
 import { formatInstant } from "@/src/utils/datetime";
 
@@ -57,12 +58,6 @@ export default function DateTimeField({
     if (disabled) return;
     draft.current = null;
     setStep(Platform.OS === "ios" ? "time" : "date");
-  };
-
-  /** iOS: one combined spinner, so a single change is the whole answer. */
-  const handleIos = (_event: unknown, picked?: Date) => {
-    setStep(null);
-    if (picked) onChange(zeroSeconds(picked));
   };
 
   const handleDate = (event: { type?: string }, picked?: Date) => {
@@ -121,21 +116,28 @@ export default function DateTimeField({
         />
       </TouchableOpacity>
 
-      {step !== null ? (
+      {Platform.OS === "ios" ? (
+        <IosDatePickerSheet
+          visible={step !== null}
+          title={label}
+          mode="datetime"
+          value={value}
+          minimumDate={minimumDate}
+          onCancel={() => setStep(null)}
+          onConfirm={(picked) => {
+            setStep(null);
+            onChange(zeroSeconds(picked));
+          }}
+        />
+      ) : step !== null ? (
         <DateTimePicker
           // The time step continues from the date the user just chose, so the
-          // spinner opens on the right day rather than on today.
+          // dialog opens on the right day rather than on today.
           value={draft.current ?? value ?? new Date()}
-          mode={Platform.OS === "ios" ? "datetime" : step}
-          display={Platform.OS === "ios" ? "spinner" : "default"}
+          mode={step}
+          display="default"
           minimumDate={step === "date" ? minimumDate : undefined}
-          onChange={
-            Platform.OS === "ios"
-              ? handleIos
-              : step === "date"
-                ? handleDate
-                : handleTime
-          }
+          onChange={step === "date" ? handleDate : handleTime}
         />
       ) : null}
     </View>

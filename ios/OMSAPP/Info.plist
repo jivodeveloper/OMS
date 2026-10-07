@@ -51,6 +51,12 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
+	<key>NSCameraUsageDescription</key>
+	<string>Take a photo of a cheque, UPI screenshot or deposit slip to attach to a payment.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>OMSAPP does not record audio; this is required by the photo picker library.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Attach a cheque image, UPI screenshot or deposit slip from your photos.</string>
 	<key>NSUserActivityTypes</key>
 	<array>
 		<string>$(PRODUCT_BUNDLE_IDENTIFIER).expo.index_route</string>

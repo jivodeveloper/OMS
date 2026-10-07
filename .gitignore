@@ -54,3 +54,6 @@ Thumbs.db
 .idea/
 *.swp
 *.swo
+
+# Xcode "Distribute App" export output
+ios/OMSAPP 20*/
