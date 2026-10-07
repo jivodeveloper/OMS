@@ -770,6 +770,17 @@ export const resolveWorkQueueRoute = (
       // The SAME icon the sidebar gives the list.
       icon: "card-outline",
     },
+    // Credit Limit ranks below every module that already owned a home, so it
+    // is the last candidate here too — and for the same reason as the entry
+    // above: without it a Credit-Limit-only user read "Orders" on the tab and
+    // got the no-permission dialog on every tap.
+    {
+      screen: "credit-limit/tracking",
+      route: "/(main)/credit-limit/tracking",
+      label: "Credit",
+      // The SAME icon the sidebar gives Credit Limit.
+      icon: "card-outline",
+    },
   ];
   for (const candidate of candidates) {
     if (reach(candidate.screen)) return candidate;

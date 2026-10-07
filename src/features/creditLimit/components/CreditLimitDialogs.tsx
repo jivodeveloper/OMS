@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import React, { useEffect, useRef } from "react";
-import { Animated, Easing, Modal, StyleSheet, Text, View } from "react-native";
+import { Animated, Easing, StyleSheet, Text, View } from "react-native";
 
 import DialogFooter from "@/src/features/approval/components/dialogs/DialogFooter";
 import DialogHeader from "@/src/features/approval/components/dialogs/DialogHeader";
@@ -11,15 +11,15 @@ import { fs, sp } from "@/src/utils/responsive";
 /**
  * Raising a credit-limit request, confirmed the way a decision is.
  *
- * The same two dialogs the rest of the app uses — a blocking spinner while the
- * submission is in flight, then a Done sheet built from
- * `approval/components/dialogs`, so the sheet, the circled icon and the button
- * row are identical. A submission raises one request per party and cannot be
- * taken back, which is worth the same confirmation an approval gets.
+ * BUILT FROM THE SAME PIECES, part for part. The spinner is
+ * `ApprovalLoadingDialog`'s ring and info card; the Done sheet is
+ * `DecisionDone`'s header, info card and single-button footer. Nothing here
+ * invents its own geometry — a submission is one of the app's confirmations
+ * and must look like the rest of them.
  */
 
 /**
- * In flight: NO CLOSE AND NO BACKDROP DISMISSAL.
+ * In flight: NO CLOSE AND NO BACKDROP DISMISSAL (`dismissable={false}`).
  *
  * One tap is one submission. A second would raise the same parties twice, and
  * the server would take both — they are different requests to it.
@@ -32,7 +32,7 @@ export function CreditLimitSubmittingDialog({ visible }: { visible: boolean }) {
       spin.setValue(0);
       return;
     }
-    const loop = Animated.loop(
+    const animation = Animated.loop(
       Animated.timing(spin, {
         toValue: 1,
         duration: 900,
@@ -40,26 +40,41 @@ export function CreditLimitSubmittingDialog({ visible }: { visible: boolean }) {
         useNativeDriver: true,
       }),
     );
-    loop.start();
-    return () => loop.stop();
+    animation.start();
+    return () => animation.stop();
   }, [visible, spin]);
 
   const rotate = spin.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "360deg"] });
 
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={() => {}}>
-      <View style={styles.backdrop}>
-        <View style={styles.sheet}>
-          <Animated.View style={[styles.spinner, { transform: [{ rotate }] }]}>
-            <Ionicons name="card" size={26} color={COLORS.primary} />
-          </Animated.View>
-          <Text style={styles.title}>Submitting…</Text>
-          <Text style={styles.hint}>
-            Reading each customer from SAP and routing the request.
-          </Text>
+    <DialogShell visible={visible} dismissable={false}>
+      <View style={styles.center}>
+        {/* Ring with a coloured arc — rotating it reads as a smooth spinner. */}
+        <Animated.View
+          style={[styles.ring, { borderTopColor: COLORS.primary, transform: [{ rotate }] }]}
+        />
+
+        <Text style={styles.title}>Submitting Request</Text>
+        <Text style={styles.subtitle}>
+          Please wait while we read each customer from SAP and route the request.
+        </Text>
+      </View>
+
+      <View style={styles.waitCard}>
+        <Ionicons name="shield-checkmark-outline" size={18} color={COLORS.primary} />
+        <View style={styles.waitText}>
+          <Text style={styles.waitTitle}>This may take a few seconds.</Text>
+          <Text style={styles.waitSubtitle}>Please don&apos;t close this window.</Text>
         </View>
       </View>
-    </Modal>
+
+      <DialogFooter
+        confirmLabel="Submitting..."
+        onConfirm={() => {}}
+        accent={COLORS.primary}
+        loading
+      />
+    </DialogShell>
   );
 }
 
@@ -90,6 +105,8 @@ export function CreditLimitSubmittedDialog({
         animateIcon
       />
 
+      {/* `DecisionDone`'s info card, down to the inset and the right-aligned
+          values, so the two read as one dialog with different words. */}
       <View style={styles.infoCard}>
         <Ionicons name="card-outline" size={18} color={COLORS.primary} />
         <View style={styles.infoText}>
@@ -124,35 +141,40 @@ export function CreditLimitSubmittedDialog({
 }
 
 const styles = StyleSheet.create({
-  backdrop: {
-    flex: 1,
-    backgroundColor: "rgba(15,23,42,0.45)",
-    alignItems: "center",
-    justifyContent: "center",
-    padding: sp(32),
+  // ── ApprovalLoadingDialog's own geometry ───────────────────────────
+  center: { alignItems: "center", paddingTop: 6 },
+  ring: {
+    width: 62,
+    height: 62,
+    borderRadius: 31,
+    borderWidth: 4,
+    borderColor: "#E2E8F0",
+    marginBottom: 16,
   },
-  sheet: {
-    width: "100%",
-    maxWidth: 320,
-    alignItems: "center",
-    gap: sp(10),
-    backgroundColor: COLORS.surface,
-    borderRadius: sp(20),
-    paddingVertical: sp(28),
-    paddingHorizontal: sp(20),
+  title: { fontSize: 19, fontWeight: "800", color: COLORS.text, textAlign: "center" },
+  subtitle: {
+    fontSize: 14,
+    lineHeight: 20,
+    color: COLORS.textSecondary,
+    textAlign: "center",
+    marginTop: 6,
   },
-  spinner: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
+  waitCard: {
+    flexDirection: "row",
     alignItems: "center",
-    justifyContent: "center",
+    gap: 10,
+    marginTop: 18,
     backgroundColor: COLORS.primaryLighter,
+    borderWidth: 1,
+    borderColor: COLORS.borderBlue,
+    borderRadius: 12,
+    padding: 12,
   },
-  title: { fontSize: fs(15), fontWeight: "800", color: COLORS.text },
-  hint: { fontSize: fs(12), color: COLORS.textSecondary, textAlign: "center" },
+  waitText: { flex: 1 },
+  waitTitle: { fontSize: 12, fontWeight: "700", color: COLORS.primaryDark },
+  waitSubtitle: { fontSize: 11, color: COLORS.textSecondary, marginTop: 2 },
 
-  // The decision dialogs' own info card, so the two read alike.
+  // ── DecisionDone's own geometry ────────────────────────────────────
   infoCard: {
     flexDirection: "row",
     gap: sp(10),
@@ -162,9 +184,14 @@ const styles = StyleSheet.create({
     borderRadius: sp(12),
     backgroundColor: COLORS.background,
   },
-  // `minWidth: 0` so a long value ellipsises inside the row.
   infoText: { flex: 1, minWidth: 0, gap: sp(4) },
-  infoRow: { flexDirection: "row", alignItems: "center", gap: sp(8) },
-  infoLabel: { flex: 1, fontSize: fs(11.5), color: COLORS.textSecondary },
-  infoValue: { flexShrink: 1, fontSize: fs(12.5), fontWeight: "800", color: COLORS.text },
+  infoRow: { flexDirection: "row", justifyContent: "space-between", gap: sp(10) },
+  infoLabel: { fontSize: fs(11), color: COLORS.textSecondary },
+  infoValue: {
+    flex: 1,
+    fontSize: fs(12),
+    fontWeight: "700",
+    color: COLORS.text,
+    textAlign: "right",
+  },
 });

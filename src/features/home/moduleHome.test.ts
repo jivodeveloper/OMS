@@ -35,11 +35,12 @@ const VERIFY = "payments/verification";
 const DEPOSITS = "payments/deposit-tracking";
 const PRODUCTION = "production/tracking";
 const BACKDATE = "backdate/tracking";
+const CREDIT_LIMIT = "credit-limit/tracking";
 
 const keys = (can: CanReach) => modulesFor(can).map((m) => m.key);
 
 describe("the priority order itself", () => {
-  it("is Orders, Payments, Deposits, Production, BackDate", () => {
+  it("is Orders, Payments, Deposits, Production, BackDate, Advances, Credit Limit", () => {
     // THE DECISION. Changing this list is changing where users land, so it is
     // asserted literally rather than derived from the table under test.
     assert.deepEqual(
@@ -51,6 +52,7 @@ describe("the priority order itself", () => {
         "production",
         "backdate",
         "advancePayments",
+        "creditLimit",
       ],
     );
   });
@@ -139,7 +141,40 @@ describe("a user holding several modules", () => {
     assert.equal(homeModuleFor(everybody)?.key, "orders");
     assert.deepEqual(
       sidebarModulesFor(everybody).map((m) => m.key),
-      ["payments", "deposits", "production", "backdate", "advancePayments"],
+      [
+        "payments",
+        "deposits",
+        "production",
+        "backdate",
+        "advancePayments",
+        "creditLimit",
+      ],
+    );
+  });
+});
+
+describe("Credit Limit ranks below every module that already had a home", () => {
+  it("is the home of somebody who holds only it", () => {
+    const can = reaching(CREDIT_LIMIT);
+    assert.equal(homeModuleFor(can)?.key, "creditLimit");
+    assert.equal(isSingleModuleUser(can), true);
+  });
+
+  it("never takes the home from an older module", () => {
+    // THE DECISION. A new module must not move anybody off the page they have
+    // been landing on, so every pairing keeps the older module's home.
+    for (const older of [ORDERS, PAYMENTS, DEPOSITS, PRODUCTION, BACKDATE]) {
+      const home = homeModuleFor(reaching(CREDIT_LIMIT, older))?.key;
+      assert.notEqual(home, "creditLimit", older);
+    }
+  });
+
+  it("goes to the drawer for anybody who also holds an older module", () => {
+    const can = reaching(BACKDATE, CREDIT_LIMIT);
+    assert.equal(homeModuleFor(can)?.key, "backdate");
+    assert.deepEqual(
+      sidebarModulesFor(can).map((m) => m.key),
+      ["creditLimit"],
     );
   });
 });

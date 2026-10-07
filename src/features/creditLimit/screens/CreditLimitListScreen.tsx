@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
-import { router } from "expo-router";
-import React, { useCallback, useState } from "react";
+import { router, useLocalSearchParams } from "expo-router";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
@@ -101,6 +101,21 @@ export default function CreditLimitListScreen({ scope }: { scope?: ListView }) {
   useRefreshOnFocus(() => void reload());
 
   const [filterOpen, setFilterOpen] = useState(false);
+
+  /**
+   * PRESELECT WHAT THE HOME PAGE'S CARD COUNTED.
+   *
+   * The card sends the STATUS itself, because this list filters on exactly
+   * that field — so a card reading "Pending 4" opens the same four rows.
+   * Applied once: re-applying it would undo the next filter the user chose.
+   */
+  const { status: statusParam } = useLocalSearchParams<{ status?: string }>();
+  const applied = useRef(false);
+  useEffect(() => {
+    if (applied.current || !statusParam) return;
+    applied.current = true;
+    patchFilters({ status: statusParam as CreditLimitStatus | "" });
+  }, [statusParam, patchFilters]);
 
   /**
    * BACK LEAVES THE VIEW BEFORE IT LEAVES THE PAGE: the dropdown changes what

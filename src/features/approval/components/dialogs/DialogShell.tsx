@@ -100,7 +100,19 @@ export default function DialogShell({
             showsVerticalScrollIndicator={false}
           >
             <Animated.View style={[styles.card, { transform: [{ scale }] }]}>
-              {children}
+              {/*
+                AND THE CARD ITSELF PUTS THE KEYBOARD AWAY. Tapping the dim
+                area works, but the thing under the reader's thumb is the
+                dialog — the title, the message, the space around the remarks
+                box — and a tap there used to do nothing while the keyboard
+                still covered Approve and Reject.
+
+                A tap that a child handles never reaches here, so the text box
+                still focuses and both buttons still fire on the first tap.
+              */}
+              <Pressable onPress={Keyboard.dismiss} accessible={false}>
+                {children}
+              </Pressable>
             </Animated.View>
           </ScrollView>
         </Animated.View>

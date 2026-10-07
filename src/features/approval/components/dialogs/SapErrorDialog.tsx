@@ -100,7 +100,7 @@ export default function SapErrorDialog({
 
         {!!raw && (
           <View style={styles.rawBox}>
-            <Text style={styles.rawLabel}>SAP's exact response</Text>
+            <Text style={styles.rawLabel}>SAP&apos;s exact response</Text>
             <Text style={styles.rawBody}>{raw}</Text>
           </View>
         )}

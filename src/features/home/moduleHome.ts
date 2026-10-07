@@ -43,7 +43,8 @@ export type ModuleKey =
   | "deposits"
   | "production"
   | "backdate"
-  | "advancePayments";
+  | "advancePayments"
+  | "creditLimit";
 
 /**
  * Deposit screens, which share the `payments/` route prefix.
@@ -99,7 +100,10 @@ export interface ModuleDef {
  * hold it as their main job. Deposits sits below Payments because banking is
  * the step AFTER collecting, and a user who does both records more often than
  * they bank — the same reasoning the bottom tab bar already uses. Production
- * and BackDate are narrow, single-purpose modules and rank last.
+ * and BackDate are narrow, single-purpose modules and rank last. Credit Limit
+ * is the newest and narrowest of all — one decision about one customer — so it
+ * ranks BELOW every module that already owned a home: nobody who holds an
+ * older module should be moved off the page they have been landing on.
  *
  * To re-rank a module, move its entry. To add one, add an entry.
  */
@@ -165,6 +169,20 @@ export const MODULE_PRIORITY: ModuleDef[] = [
       "advance-payments/approval",
     ],
     ownsRoute: (route: string) => route.startsWith("advance-payments/"),
+    homeShowsEntries: true,
+  },
+  {
+    key: "creditLimit",
+    label: "Credit Limit",
+    // NOT the details or progress screens: both open for either side, so
+    // counting them would make the module look held by anybody who can be
+    // sent a link.
+    screens: [
+      "credit-limit/create",
+      "credit-limit/tracking",
+      "credit-limit/approval",
+    ],
+    ownsRoute: (route: string) => route.startsWith("credit-limit/"),
     homeShowsEntries: true,
   },
 ];

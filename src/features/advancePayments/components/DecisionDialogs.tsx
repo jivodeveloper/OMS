@@ -4,6 +4,7 @@ import { StyleSheet, Text, View } from "react-native";
 
 import DialogFooter from "@/src/features/approval/components/dialogs/DialogFooter";
 import DialogHeader from "@/src/features/approval/components/dialogs/DialogHeader";
+import DialogRequiredNote from "@/src/features/approval/components/dialogs/DialogRequiredNote";
 import DialogShell from "@/src/features/approval/components/dialogs/DialogShell";
 import RemarksInput from "@/src/features/approval/components/dialogs/RemarksInput";
 import { COLORS } from "@/src/constants/theme";
@@ -154,12 +155,7 @@ export function DecisionPrompt({
         error={touched && empty}
       />
 
-      {touched && empty ? (
-        <View style={styles.requiredRow}>
-          <Ionicons name="alert-circle" size={14} color={COLORS.error} />
-          <Text style={styles.requiredText}>A remark is required for this.</Text>
-        </View>
-      ) : null}
+      {touched && empty ? <DialogRequiredNote /> : null}
 
       <DialogFooter
         cancelLabel="Cancel"
@@ -256,15 +252,6 @@ export function DecisionDone({
 }
 
 const styles = StyleSheet.create({
-  requiredRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: sp(6),
-    paddingHorizontal: sp(20),
-    marginTop: -sp(4),
-  },
-  requiredText: { fontSize: fs(11), color: COLORS.error, fontWeight: "600" },
-
   infoCard: {
     flexDirection: "row",
     gap: sp(10),

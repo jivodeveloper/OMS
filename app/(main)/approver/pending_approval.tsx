@@ -25,6 +25,7 @@ import { router, useLocalSearchParams, useNavigation } from "expo-router";
 import { api } from "@/src/services/api";
 import { storage } from "@/src/utils/storage";
 import { useAuth } from "@/src/context/AuthContext";
+import RejectDialog from "@/src/features/approval/components/dialogs/RejectDialog";
 import { refreshOrderData } from "@/src/cache";
 import { fs, ms, sp } from "@/src/utils/responsive";
 import {
@@ -894,8 +895,9 @@ export default function PendingApprovalScreen() {
     setRejectModalVisible(true);
   };
 
-  const handleReject = async () => {
-    if (!rejectReason.trim()) {
+  /** The reason comes FROM THE DIALOG — see the note in auditorapproval. */
+  const handleReject = async (reason: string = rejectReason) => {
+    if (!reason.trim()) {
       Alert.alert("Error", "Please enter rejection reason");
       return;
     }
@@ -905,7 +907,7 @@ export default function PendingApprovalScreen() {
       await productService.updatestatus(
         selectedOrderId!,
         OTHER_STATUS_OPTIONS[1].value,
-        rejectReason,
+        reason,
       );
       setRejectModalVisible(false);
       Alert.alert("Success", "Order rejected");
@@ -1198,52 +1200,22 @@ export default function PendingApprovalScreen() {
         />
       )}
 
-      <Modal
+      {/* THE APP'S ONE DECISION DIALOG — see the note in auditorapproval. */}
+      <RejectDialog
         visible={rejectModalVisible}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setRejectModalVisible(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Reject Order</Text>
-            <Text style={styles.modalSubtitle}>
-              Please provide a reason for rejection:
-            </Text>
-
-            <TextInput
-              style={styles.reasonInput}
-              placeholder="Enter reason..."
-              value={rejectReason}
-              onChangeText={setRejectReason}
-              multiline
-              numberOfLines={4}
-              textAlignVertical="top"
-            />
-
-            <View style={styles.modalActions}>
-              <TouchableOpacity
-                style={[styles.modalBtn, styles.cancelBtn]}
-                onPress={() => setRejectModalVisible(false)}
-              >
-                <Text style={styles.cancelBtnText}>Cancel</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.modalBtn, styles.confirmRejectBtn]}
-                onPress={handleReject}
-                disabled={actionLoading !== null}
-              >
-                {actionLoading?.type === "reject" ? (
-                  <ActivityIndicator size="small" color="#fff" />
-                ) : (
-                  <Text style={styles.confirmRejectText}>Reject Order</Text>
-                )}
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
+        loading={actionLoading?.type === "reject"}
+        title="Reject Order"
+        subtitle="This order will be sent back. Please state why it is being rejected."
+        confirmLabel="Reject Order"
+        onClose={() => {
+          if (actionLoading !== null) return;
+          setRejectModalVisible(false);
+        }}
+        onConfirm={(reason) => {
+          setRejectReason(reason);
+          void handleReject(reason);
+        }}
+      />
 
       <Modal
         visible={isFilterModalVisible}

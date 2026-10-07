@@ -8,20 +8,12 @@ import {
   ActivityIndicator,
   Alert,
   Modal,
-  Pressable,
-  KeyboardAvoidingView,
   TextInput,
   RefreshControl,
   Platform,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
-import Animated, {
-  useAnimatedStyle,
-  useSharedValue,
-  withSpring,
-  withTiming,
-} from "react-native-reanimated";
 import {
   OrderItemList,
   orderService,
@@ -34,6 +26,8 @@ import { api } from "@/src/services/api";
 import { storage } from "@/src/utils/storage";
 import StateWrapper from "@/src/components/common/StateWrapper";
 import { useAuth } from "@/src/context/AuthContext";
+import ApproveDialog from "@/src/features/approval/components/dialogs/ApproveDialog";
+import RejectDialog from "@/src/features/approval/components/dialogs/RejectDialog";
 import Dropdown from "@/src/components/common/DropdownProps";
 import { refreshOrderData } from "@/src/cache";
 import { fs, ms, sp } from "@/src/utils/responsive";
@@ -155,106 +149,15 @@ const getBillingApprovalSuccessCopy = (status?: string | null, message?: string 
   };
 };
 
-type ActionDialogProps = {
-  visible: boolean;
-  type: "approve" | "reject";
-  remark: string;
-  onChangeRemark: (value: string) => void;
-  loading: boolean;
-  onCancel: () => void;
-  onConfirm: () => void;
-};
-
-const ActionDialog = ({
-  visible,
-  type,
-  remark,
-  onChangeRemark,
-  loading,
-  onCancel,
-  onConfirm,
-}: ActionDialogProps) => {
-  const progress = useSharedValue(0);
-  const isApprove = type === "approve";
-  const accent = isApprove ? COLORS.success : COLORS.error;
-
-  useEffect(() => {
-    if (visible) {
-      progress.value = withSpring(1, { damping: 15, stiffness: 180, mass: 0.7 });
-    } else {
-      progress.value = withTiming(0, { duration: 140 });
-    }
-  }, [visible, progress]);
-
-  const overlayStyle = useAnimatedStyle(() => ({ opacity: progress.value }));
-  const cardStyle = useAnimatedStyle(() => ({
-    opacity: progress.value,
-    transform: [{ scale: 0.88 + progress.value * 0.12 }, { translateY: (1 - progress.value) * 24 }],
-  }));
-
-  return (
-    <Modal visible={visible} transparent animationType="none" statusBarTranslucent onRequestClose={onCancel}>
-      <Animated.View style={[styles.dialogOverlay, overlayStyle]}>
-        <Pressable style={StyleSheet.absoluteFill} onPress={onCancel} />
-        <KeyboardAvoidingView
-          behavior={Platform.OS === "ios" ? "padding" : undefined}
-          style={styles.dialogKav}
-          pointerEvents="box-none"
-        >
-          <Animated.View style={[styles.dialogCard, cardStyle]}>
-            <View style={[styles.dialogIconWrap, { backgroundColor: isApprove ? "#DCFCE7" : "#FEE2E2" }]}>
-              <Ionicons name={isApprove ? "checkmark-done" : "close"} size={30} color={accent} />
-            </View>
-            <Text style={styles.dialogTitle}>{isApprove ? "Approve Order" : "Reject Order"}</Text>
-            <Text style={styles.dialogMessage}>
-              {isApprove
-                ? "Confirm approval for this order. You can add an optional remark below."
-                : "Please provide a reason for rejecting this order."}
-            </Text>
-
-            <Text style={styles.dialogRemarkLabel}>
-              {isApprove ? "Remarks (optional)" : "Rejection reason"}
-            </Text>
-            <TextInput
-              style={styles.dialogInput}
-              placeholder={isApprove ? "Add a remark..." : "Enter reason..."}
-              placeholderTextColor="#94A3B8"
-              value={remark}
-              onChangeText={onChangeRemark}
-              multiline
-              numberOfLines={3}
-              textAlignVertical="top"
-              editable={!loading}
-            />
-
-            <View style={styles.dialogActions}>
-              <TouchableOpacity
-                style={[styles.dialogBtn, styles.dialogCancelBtn]}
-                onPress={onCancel}
-                disabled={loading}
-                activeOpacity={0.85}
-              >
-                <Text style={styles.dialogCancelText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.dialogBtn, { backgroundColor: accent }]}
-                onPress={onConfirm}
-                disabled={loading}
-                activeOpacity={0.85}
-              >
-                {loading ? (
-                  <ActivityIndicator size="small" color="#fff" />
-                ) : (
-                  <Text style={styles.dialogConfirmText}>{isApprove ? "Approve" : "Reject"}</Text>
-                )}
-              </TouchableOpacity>
-            </View>
-          </Animated.View>
-        </KeyboardAvoidingView>
-      </Animated.View>
-    </Modal>
-  );
-};
+/*
+ * THE LOCAL DECISION DIALOG IS GONE.
+ *
+ * It was a third design for the same act: its own overlay, its own card
+ * animation, its own bare text box with no counter and no required-remark
+ * line. `ApproveDialog` and `RejectDialog` — the dialogs an approver already
+ * knows from an advance payment and a receipt — are used instead, so one
+ * decision looks the same wherever it is taken.
+ */
 
 export default function BillingOrderList() {
   const { tab, statusFilter, year, month, _t } = useLocalSearchParams<{ tab?: string; statusFilter?: string; year?: string; month?: string; _t?: string }>();
@@ -934,15 +837,20 @@ export default function BillingOrderList() {
     setRejectModalVisible(true);
   };
 
-  const handleReject = async () => {
+  /**
+   * The remark comes FROM THE DIALOG, not from state: `ApproveDialog` and
+   * `RejectDialog` hold their own text and hand it over on confirm, so reading
+   * the state here would read whatever was there before this render.
+   */
+  const handleReject = async (reason: string = rejectReason) => {
     if (decisionType === "approve") {
       const order = orders.find((item) => item.id === selectedOrderId);
       if (!order) return;
       setRejectModalVisible(false);
-      handleApprove(order, rejectReason);
+      handleApprove(order, reason);
       return;
     }
-    if (!rejectReason.trim()) {
+    if (!reason.trim()) {
       if (Platform.OS === "web") {
         window.alert("Please enter rejection reason");
       } else {
@@ -953,7 +861,7 @@ export default function BillingOrderList() {
 
     try {
       setActionLoading({ id: selectedOrderId!, type: "reject" });
-      await productService.updatestatus(selectedOrderId!, "8", rejectReason);
+      await productService.updatestatus(selectedOrderId!, "8", reason);
       setRejectModalVisible(false);
       if (Platform.OS === "web") {
         window.alert("Order rejected");
@@ -1262,18 +1170,43 @@ export default function BillingOrderList() {
       />
 
       {/* Approve / Reject Dialog */}
-      <ActionDialog
-        visible={rejectModalVisible}
-        type={decisionType}
-        remark={rejectReason}
-        onChangeRemark={(value) => setRejectReason(value.toUpperCase())}
-        loading={actionLoading?.type === decisionType}
-        onCancel={() => {
-          if (actionLoading !== null) return;
-          setRejectModalVisible(false);
-        }}
-        onConfirm={() => handleReject()}
-      />
+      {/* One sheet for both decisions, as every other module has: the dialog
+          names the act and takes its remark. */}
+      {decisionType === "approve" ? (
+        <ApproveDialog
+          visible={rejectModalVisible}
+          loading={actionLoading?.type === "approve"}
+          title="Approve Order"
+          subtitle="Are you sure you want to approve this order?"
+          onClose={() => {
+            if (actionLoading !== null) return;
+            setRejectModalVisible(false);
+          }}
+          onConfirm={(remarks) => {
+            // UPPERCASE, as this screen has always sent its remarks.
+            const said = remarks.toUpperCase();
+            setRejectReason(said);
+            void handleReject(said);
+          }}
+        />
+      ) : (
+        <RejectDialog
+          visible={rejectModalVisible}
+          loading={actionLoading?.type === "reject"}
+          title="Reject Order"
+          subtitle="This order will be sent back. Please state why it is being rejected."
+          confirmLabel="Reject Order"
+          onClose={() => {
+            if (actionLoading !== null) return;
+            setRejectModalVisible(false);
+          }}
+          onConfirm={(remarks) => {
+            const said = remarks.toUpperCase();
+            setRejectReason(said);
+            void handleReject(said);
+          }}
+        />
+      )}
 
       <Modal
         visible={approvalSuccessModal && !!approvalResult}

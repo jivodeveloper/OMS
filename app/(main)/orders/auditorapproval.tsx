@@ -5,7 +5,6 @@ import {
   FlatList,
   TouchableOpacity,
   StyleSheet,
-  ActivityIndicator,
   Alert,
   Modal,
   TextInput,
@@ -23,6 +22,7 @@ import { api } from "@/src/services/api";
 import StateWrapper from "@/src/components/common/StateWrapper";
 import { storage } from "@/src/utils/storage";
 import { useAuth } from "@/src/context/AuthContext";
+import RejectDialog from "@/src/features/approval/components/dialogs/RejectDialog";
 import { refreshOrderData } from "@/src/cache";
 import { fs, ms, sp } from "@/src/utils/responsive";
 import {
@@ -823,8 +823,14 @@ export default function AuditorApprovalScreen() {
     setRejectModalVisible(true);
   };
 
-  const handleReject = async () => {
-    if (!rejectReason.trim()) {
+  /**
+   * The reason comes FROM THE DIALOG, not from state.
+   *
+   * `RejectDialog` holds its own text and hands it over on confirm, so reading
+   * the state here would read whatever was there before this render.
+   */
+  const handleReject = async (reason: string = rejectReason) => {
+    if (!reason.trim()) {
       if (Platform.OS === "web") {
         window.alert("Please enter rejection reason");
       } else {
@@ -835,7 +841,7 @@ export default function AuditorApprovalScreen() {
 
     try {
       setActionLoading({ id: selectedOrderId!, type: "reject" });
-      await productService.updatestatus(selectedOrderId!, "7", rejectReason);
+      await productService.updatestatus(selectedOrderId!, "7", reason);
       setRejectModalVisible(false);
       if (Platform.OS === "web") {
         window.alert("Order rejected");
@@ -1126,52 +1132,25 @@ export default function AuditorApprovalScreen() {
           }
         />
 
-        <Modal
+        {/* THE APP'S ONE DECISION DIALOG — the same sheet, circled icon,
+            remarks box with its counter and button row an approver sees on an
+            advance payment. This was a plain bottom sheet with a bare text box
+            and no dismissal for the keyboard. */}
+        <RejectDialog
           visible={rejectModalVisible}
-          transparent
-          animationType="slide"
-          onRequestClose={() => setRejectModalVisible(false)}
-        >
-          <View style={styles.modalOverlay}>
-            <View style={styles.modalContent}>
-              <Text style={styles.modalTitle}>Reject Order</Text>
-              <Text style={styles.modalSubtitle}>
-                Please provide a reason for rejection:
-              </Text>
-
-              <TextInput
-                style={styles.reasonInput}
-                placeholder="Enter reason..."
-                value={rejectReason}
-                onChangeText={setRejectReason}
-                multiline
-                numberOfLines={4}
-                textAlignVertical="top"
-              />
-
-              <View style={styles.modalActions}>
-                <TouchableOpacity
-                  style={[styles.modalBtn, styles.cancelBtn]}
-                  onPress={() => setRejectModalVisible(false)}
-                >
-                  <Text style={styles.cancelBtnText}>Cancel</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={[styles.modalBtn, styles.confirmRejectBtn]}
-                  onPress={handleReject}
-                  disabled={actionLoading !== null}
-                >
-                  {actionLoading?.type === "reject" ? (
-                    <ActivityIndicator size="small" color="#fff" />
-                  ) : (
-                    <Text style={styles.confirmRejectText}>Reject Order</Text>
-                  )}
-                </TouchableOpacity>
-              </View>
-            </View>
-          </View>
-        </Modal>
+          loading={actionLoading?.type === "reject"}
+          title="Reject Order"
+          subtitle="This order will be sent back. Please state why it is being rejected."
+          confirmLabel="Reject Order"
+          onClose={() => {
+            if (actionLoading !== null) return;
+            setRejectModalVisible(false);
+          }}
+          onConfirm={(reason) => {
+            setRejectReason(reason);
+            void handleReject(reason);
+          }}
+        />
 
         <Modal
           visible={approvalSuccessModal && !!approvalResult}

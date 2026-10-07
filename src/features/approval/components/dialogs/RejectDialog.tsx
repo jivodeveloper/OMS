@@ -1,23 +1,43 @@
 import React, { useEffect, useState } from "react";
-import { StyleSheet, Text, View } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
+
 import { COLORS } from "@/src/constants/theme";
-import DialogShell from "./DialogShell";
-import DialogHeader from "./DialogHeader";
 import DialogFooter from "./DialogFooter";
+import DialogHeader from "./DialogHeader";
+import DialogRequiredNote from "./DialogRequiredNote";
+import DialogShell from "./DialogShell";
 import RemarksInput from "./RemarksInput";
 
 interface RejectDialogProps {
   visible: boolean;
   onClose: () => void;
   onConfirm: (remarks: string) => void;
+  /** Spins the confirm button while the decision is in flight. */
+  loading?: boolean;
+  /**
+   * Wording only, for a screen whose document is not called a "request" — an
+   * order screen says "Reject Order". NOTHING about the layout changes with
+   * it: this dialog is the one the whole app uses.
+   */
+  title?: string;
+  subtitle?: string;
+  confirmLabel?: string;
 }
 
-/** Reject confirmation — unlike approve, a remark is mandatory here. */
+/**
+ * Reject confirmation — unlike approve, a remark is mandatory here.
+ *
+ * THE ADVANCE PAYMENT DECISION DIALOG, part for part, down to the line that
+ * appears when somebody tries to reject with nothing written: it is the shared
+ * `DialogRequiredNote`, so the two cannot drift again the way they had.
+ */
 export default function RejectDialog({
   visible,
   onClose,
   onConfirm,
+  loading = false,
+  title = "Reject Request",
+  subtitle = "This request will be sent back to the creator. Please state why it is being rejected.",
+  confirmLabel = "Reject",
 }: RejectDialogProps) {
   const [remarks, setRemarks] = useState("");
   const [touched, setTouched] = useState(false);
@@ -45,8 +65,8 @@ export default function RejectDialog({
       <DialogHeader
         icon="alert-circle"
         accent={COLORS.error}
-        title="Reject Request"
-        subtitle="This request will be sent back to the creator. Please state why it is being rejected."
+        title={title}
+        subtitle={subtitle}
         onClose={onClose}
       />
 
@@ -57,41 +77,20 @@ export default function RejectDialog({
           setRemarks(value);
           if (touched) setTouched(false);
         }}
-        placeholder="Enter the reason for rejection"
+        placeholder="Say why — the creator will read this"
         error={touched && isEmpty}
       />
 
-      {touched && isEmpty ? (
-        <View style={styles.errorRow}>
-          <Ionicons name="alert-circle" size={14} color={COLORS.error} />
-          <Text style={styles.errorText}>
-            Remarks are required to reject a request.
-          </Text>
-        </View>
-      ) : null}
+      {touched && isEmpty ? <DialogRequiredNote /> : null}
 
       <DialogFooter
         cancelLabel="Cancel"
         onCancel={onClose}
-        confirmLabel="Reject"
+        confirmLabel={confirmLabel}
         onConfirm={handleConfirm}
         accent={COLORS.error}
+        loading={loading}
       />
     </DialogShell>
   );
 }
-
-const styles = StyleSheet.create({
-  errorRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    marginTop: 8,
-  },
-  errorText: {
-    flex: 1,
-    fontSize: 11,
-    fontWeight: "500",
-    color: COLORS.error,
-  },
-});

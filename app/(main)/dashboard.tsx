@@ -36,6 +36,7 @@ import ModuleHomeScreen from "@/src/features/home/ModuleHomeScreen";
 import {
   advancePaymentHome,
   backdateHome,
+  creditLimitHome,
   productionHome,
 } from "@/src/features/home/moduleConfigs";
 import { homeModuleFor } from "@/src/features/home/moduleHome";
@@ -163,6 +164,10 @@ export default function DashboardScreen() {
       return <ModuleHomeScreen config={backdateHome} />;
     case "advancePayments":
       return <ModuleHomeScreen config={advancePaymentHome} />;
+    // Last in the ranking, so this is the home only of somebody who holds
+    // Credit Limit and nothing older.
+    case "creditLimit":
+      return <ModuleHomeScreen config={creditLimitHome} />;
     // "orders", and the null case — a reports-only or settings-only user who
     // holds no module at all keeps exactly what they saw before.
     default:
