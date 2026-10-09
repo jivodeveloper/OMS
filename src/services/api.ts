@@ -107,6 +107,48 @@ const getTimeoutForEndpoint = (endpoint: string): number => {
   return DEFAULT_REQUEST_TIMEOUT_MS;
 };
 
+/**
+ * WHAT TO QUOTE WHEN THE SERVER WILL NOT SAY WHAT BROKE.
+ *
+ * An unhandled exception comes back as "An unexpected error occurred. The
+ * incident has been logged." and nothing else: the server deliberately keeps
+ * the exception's text out of the response, because it routinely carries a
+ * query, a file path or a row of someone's data.
+ *
+ * So the client cannot show the exception — but it can show what FINDS it.
+ * Every response carries `X-Request-ID`, and every line the server logged for
+ * that request is tagged with it (`core/logging.py`), so the id plus the
+ * endpoint turns "an unexpected error occurred" into one `grep` of the server
+ * log. That is the difference between a dead end and a diagnosis, and it
+ * needs nothing from the server that is not already there.
+ *
+ * ONLY WHERE THERE IS NOTHING ELSE. A refusal (400, 403, 409) says what is
+ * wrong in words a person can act on — "Enter the Payment Date.", "no longer
+ * your stage" — and burying it under plumbing would make every ordinary
+ * dialog worse to read. This is for the server failures that explain nothing:
+ * a 5xx, or a body with no message of its own.
+ */
+function diagnostics(
+  response: Response,
+  method: string | undefined,
+  endpoint: string,
+  data: any,
+): Record<string, string> | undefined {
+  const explained =
+    response.status < 500 &&
+    typeof data?.message === 'string' &&
+    data.message.trim() !== '' &&
+    !/^an unexpected error occurred/i.test(data.message.trim());
+  if (explained) return undefined;
+
+  const found: Record<string, string> = {};
+  const id = response.headers?.get?.('X-Request-ID');
+  if (id && id.trim()) found['request id'] = id.trim();
+  // The endpoint, so the log can be narrowed before the id is even needed.
+  found.endpoint = `${method ?? 'GET'} ${endpoint} -> ${response.status}`;
+  return found;
+}
+
 // Turn a DRF/Django error payload into a readable, human-friendly message.
 // Handles strings, arrays of strings, { detail }, { message }, { errors } and
 // field-keyed dicts like { items: ["...", "..."], qty: ["..."] }.
@@ -206,7 +248,22 @@ const requestWithFallback = async (
           extractErrorMessage(data) ||
           `Request failed (${response.status})`,
         status: response.status,
-        errors: data?.errors,
+        /*
+         * WHAT WENT WRONG, in the server's own words.
+         *
+         * `errors` is where this API puts detail — `{problems: [...]}`, or a
+         * serializer's field map — and a screen's dialog renders every line of
+         * it. An UNHANDLED exception has none of that: `core.exception_handler`
+         * answers 500 with the safe headline plus `request_id`, and, where the
+         * server is configured to say so (`API_ERROR_DETAIL` / `DEBUG`), the
+         * exception itself under `exception`.
+         *
+         * Without this those sit at the top level and no dialog ever shows
+         * them, so a real bug reads as "an unexpected error occurred" and
+         * nothing else. Only ever a FALLBACK: a body that carries `errors`
+         * keeps exactly what it had.
+         */
+        errors: data?.errors ?? diagnostics(response, init.method, endpoint, data),
         data,
       };
     }

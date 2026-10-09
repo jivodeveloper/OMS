@@ -78,6 +78,21 @@ describe("what the dialog says a refusal was", () => {
     assert.equal(shown[12], "…and 18 more.");
   });
 
+  it("says what finds a 500 in the log, since the server will not say what broke", () => {
+    // An unhandled exception comes back as the generic sentence and nothing
+    // else — the server keeps the exception's text out of the response on
+    // purpose. The client adds what LOCATES it: the request id every log line
+    // for that request is tagged with, and the endpoint (see `api.ts`).
+    const err = refusal(500, "An unexpected error occurred. The incident has been logged.", {
+      "request id": "b0ba2758457f4911",
+      endpoint: "POST /advance-payments/requests/81/payout/ -> 500",
+    });
+    assert.deepEqual(failureDetails(err), [
+      "request id: b0ba2758457f4911",
+      "endpoint: POST /advance-payments/requests/81/payout/ -> 500",
+    ]);
+  });
+
   it("has nothing to add when the server sent no detail", () => {
     assert.deepEqual(failureDetails(refusal(500, "Server error.")), []);
     assert.deepEqual(failureDetails(new Error("Offline")), []);

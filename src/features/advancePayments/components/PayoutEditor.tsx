@@ -93,6 +93,15 @@ export interface PayoutStatus {
   saving: boolean;
   /** Nothing left to fix — `validatePayout` is satisfied. */
   ready: boolean;
+  /**
+   * WHAT IS STILL MISSING, and what is wrong with what is there.
+   *
+   * Published so the page can say WHICH field is holding the approval back —
+   * "Beneficiary Name is still needed" rather than "fill in the payment
+   * details", which sends the approver scanning a form they thought was done.
+   */
+  missing: string[];
+  problems: string[];
   /** Edited since the last save: approving now would approve what is on the
    *  server, not what is on screen. */
   dirty: boolean;
@@ -357,9 +366,10 @@ export default function PayoutEditor({
   // `version`, which re-seeds `payout` above.
   const hasSaved = Boolean(initial);
   useEffect(() => {
-    onStatus?.({ save, saving, ready, dirty, saved: hasSaved });
+    onStatus?.({ save, saving, ready, dirty, saved: hasSaved, missing, problems });
     // `save` closes over the draft, so it is new on every keystroke; the page
-    // only ever calls the latest one, which is the point.
+    // only ever calls the latest one, which is the point. `missing` and
+    // `problems` are derived from `payout`, which IS listed.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [saving, ready, dirty, hasSaved, payout]);
 
@@ -847,8 +857,7 @@ function MethodCard({
       />
       {!methodError ? (
         <Text style={styles.note}>
-          UPI below ₹1,00,000 · RTGS above ₹2,00,000 · IMPS below ₹5,00,000 · Cash up to
-          ₹10,000.
+          UPI &lt; ₹1L · RTGS &gt; ₹2L · IMPS &lt; ₹5L · Cash ≤ ₹10,000
         </Text>
       ) : null}
 
@@ -897,6 +906,9 @@ function MethodCard({
               autoCapitalize="characters"
             />
           </Field>
+          {/* WHOSE bank, which is the one thing this field is misread as:
+              the cheque is drawn on OURS, since we are the ones paying. */}
+          <Text style={styles.note}>Our bank, the cheque is drawn on.</Text>
           <Field label="Cheque Date" required>
             <DateField
               value={line.chequeDate}

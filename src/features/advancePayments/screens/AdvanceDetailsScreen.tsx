@@ -50,6 +50,8 @@ import EditChangeRows, {
   ManualAccountFlag,
 } from "../components/EditChangeRows";
 import AttachmentReadingRows from "../components/AttachmentReadingRows";
+import BillBreakdown from "../components/BillBreakdown";
+import { sapDocumentOf } from "../logic/sapMapping";
 import PartnerLedgerCard from "../components/PartnerLedgerCard";
 import ExpenseCard from "../components/ExpenseCard";
 import { monthLabel } from "../components/ExpenseLines";
@@ -439,6 +441,20 @@ export default function AdvanceDetailsScreen() {
        * on top of it would approve whatever the server still held, which is
        * exactly the mistake the old gate existed to prevent.
        */
+      /*
+       * THE SAME RULE AT THE POINT OF ACTING, not only on the button.
+       *
+       * The button is blocked (`payoutBlock`), but a block is a label: this is
+       * the guard. Approving at the Payment stage with the details incomplete
+       * would send up a save the server refuses and then an approval it
+       * refuses too — so it stops here, saying which field, exactly as the
+       * button does.
+       */
+      if (action === "approve" && can.edit_payout && !payoutStatus?.ready) {
+        appAlert("Not yet", payoutBlock ?? "Fill in the payment details above first.");
+        return;
+      }
+
       let version = request.flow?.version;
       if (action === "approve" && payoutStatus) {
         const saved = await payoutStatus.save();
@@ -579,15 +595,28 @@ export default function AdvanceDetailsScreen() {
   /**
    * Why Approve cannot be pressed yet, if it cannot.
    *
-   * ONLY THAT THE DETAILS ARE INCOMPLETE. Saving is no longer something the
-   * approver does separately — Approve does it — so the one thing left to
-   * block on is a payment that is not filled in. `ready` is
-   * `validatePayout`'s own answer, the same one the server checks.
+   * NO PAYMENT DETAILS, NO APPROVAL. At the Payment stage the details ARE what
+   * is being approved — approving without them would pass a request on with
+   * nothing saying where the money goes, and the server would refuse the save
+   * that Approve now does on its way through anyway.
+   *
+   * IT FAILS CLOSED. `payoutStatus` is null until the editor has mounted and
+   * published itself, and treating "I do not know yet" as "fine" is how an
+   * empty payout gets approved in the half-second before the editor reports
+   * — so the absence of an answer blocks, exactly as an incomplete one does.
+   *
+   * The reason NAMES the field, from `validatePayout` — the same check the
+   * server makes — rather than sending the approver to hunt for it.
    */
-  const payoutBlock =
-    can.edit_payout && payoutStatus && !payoutStatus.ready
+  const payoutBlock = !can.edit_payout
+    ? undefined
+    : !payoutStatus
       ? "Fill in the payment details above first."
-      : undefined;
+      : payoutStatus.problems.length
+        ? payoutStatus.problems[0]
+        : payoutStatus.missing.length
+          ? `${payoutStatus.missing[0]} is still needed in the payment details.`
+          : undefined;
 
   const actions: ActionSpec[] = [
     can.reject && {
@@ -1211,6 +1240,26 @@ export default function AdvanceDetailsScreen() {
                       {row.document.reading && showsBalance(entry) ? (
                         <AttachmentReadingRows stored={row.document.reading} />
                       ) : null}
+
+                      {/* THE BILL AS SAP BOOKED IT — taxable, GST, TDS, net
+                          and the G/L behind each line. What a payment against
+                          it is checked against, so it waits for the Payment
+                          stage like the reading above, and it is closed until
+                          tapped: each one is three SAP queries and a request
+                          may pay a dozen bills. POs have no breakdown — a PO
+                          is not booked, its bills are. */}
+                      {(() => {
+                        const sap = showsBalance(entry)
+                          ? sapDocumentOf(row.document, form.company)
+                          : null;
+                        return sap?.kind === "bill" ? (
+                          <BillBreakdown
+                            company={sap.company}
+                            docEntry={sap.docEntry}
+                            label={`${row.document.number}: taxable, GST, TDS and G/L in SAP`}
+                          />
+                        ) : null;
+                      })()}
                       {row.document.note ? (
                         <DetailLine label="Note" value={row.document.note} />
                       ) : null}
@@ -1254,6 +1303,25 @@ export default function AdvanceDetailsScreen() {
                 sub={entry.payout.toIfsc}
               />
             </View>
+
+            {/* SAP'S PAYMENT MODE, which the desk may have chosen by hand.
+                An approver after Payment is checking what will reach SAP, and
+                this is one of the fields SAP insists on (its check 460007) —
+                so when the desk overrode the automatic choice, that is worth
+                seeing. Left out when it is automatic: it is then the methods
+                above, said twice. */}
+            {entry.payout.sapPaymentMode ? (
+              <>
+                <View style={styles.divider} />
+                <Field
+                  icon="swap-horizontal-outline"
+                  label="SAP Payment Mode"
+                  value={entry.payout.sapPaymentMode}
+                  sub="Chosen by the paying desk"
+                  full
+                />
+              </>
+            ) : null}
 
             {/* TDS WITHHELD AT PAYMENT. It is the difference between what the
                 request is for and what the payee actually receives, so it is

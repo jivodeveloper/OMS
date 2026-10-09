@@ -178,6 +178,29 @@ export default function AdvanceEditScreen() {
             </View>
           ) : null}
 
+          {/* WHAT RESUBMITTING WILL DO, said before it is done.
+              A request Payment returned has ALREADY passed every approval
+              stage: resubmitted unchanged in the things those stages approved
+              — the amount, company, budget head, purpose, request type and
+              Department Head — it goes straight back to Payment and their
+              approvals stand. Change one of them and it starts from the first
+              stage again, which is a different wait and worth knowing before
+              the edit rather than after it. */}
+          {resubmit ? (
+            <View style={styles.resubmitNote}>
+              <Ionicons
+                name="information-circle-outline"
+                size={16}
+                color={COLORS.primary}
+              />
+              <Text style={styles.resubmitText}>
+                {request.flow?.returned_after_approval
+                  ? "Its approvals stand: resubmitted, it goes straight back to Payment. Changing the amount, company, department, purpose, type or Department Head sends it through the full approval again."
+                  : "Resubmitting starts the approval again from its first stage."}
+              </Text>
+            </View>
+          ) : null}
+
           <AdvanceRequestForm
             form={form}
             setForm={setForm}
@@ -225,6 +248,26 @@ const styles = StyleSheet.create({
   centre: { flex: 1, alignItems: "center", justifyContent: "center", gap: SPACING.sm, padding: SPACING.lg },
   errorTitle: { fontSize: 15, fontWeight: "700", color: COLORS.text, textAlign: "center" },
   scroll: { padding: SPACING.md, paddingBottom: SPACING.xxl },
+  resubmitNote: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: SPACING.sm,
+    padding: SPACING.md - 4,
+    marginBottom: SPACING.md - 4,
+    borderRadius: RADIUS.md,
+    borderWidth: 1,
+    borderColor: COLORS.borderBlue,
+    backgroundColor: COLORS.primaryLighter,
+  },
+  // `minWidth: 0` so the sentence wraps instead of pushing the icon out.
+  resubmitText: {
+    flex: 1,
+    minWidth: 0,
+    fontSize: 12,
+    color: COLORS.text,
+    lineHeight: 17,
+  },
+
   returned: {
     backgroundColor: COLORS.warningLight,
     borderColor: COLORS.warning,

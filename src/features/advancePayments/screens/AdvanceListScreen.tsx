@@ -149,7 +149,18 @@ export default function AdvanceListScreen({ scope }: { scope?: RequestListScope 
     failed: [string, string][];
   } | null>(null);
 
-  const canBulk = (entry: AdvanceRequestEntry) => Boolean(entry.api.can?.approve);
+  /**
+   * WHAT CAN HONESTLY BE APPROVED FROM A LIST.
+   *
+   * The server's `can.approve`, MINUS anything sitting at the Payment stage
+   * (`can.edit_payout`): approving one of those means filling in where the
+   * money goes, which cannot be done from a list — the server refuses it
+   * ("The payment details are not ready"), so offering the tick would only
+   * promise something that always fails. Those are approved on their own
+   * screen, where the details are.
+   */
+  const canBulk = (entry: AdvanceRequestEntry) =>
+    Boolean(entry.api.can?.approve) && !entry.api.can?.edit_payout;
   const selectable = rows.filter(canBulk);
   const chosen = selectable.filter((entry) => ticked.has(entry.serverId));
 

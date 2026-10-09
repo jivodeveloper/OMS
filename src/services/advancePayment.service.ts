@@ -254,6 +254,63 @@ export interface SapRelatedAttachment {
   note: string;
 }
 
+/** One A/P invoice as SAP booked it (`/bill-breakdown/`). Amounts are strings. */
+export interface SapBillBreakdown {
+  company: AdvancePaymentCompany;
+  header: {
+    doc_entry: number;
+    doc_num: number | null;
+    vendor_ref: string;
+    doc_date: string | null;
+    status: string;
+    card_code: string;
+    card_name: string;
+    /** The vendor's control (payable) account. */
+    payable_account: string;
+    payable_account_name: string;
+    taxable: string;
+    freight: string;
+    discount: string;
+    gst: string;
+    /** What the vendor's invoice shows: taxable + freight + GST. */
+    gross: string;
+    tds: string;
+    rounding: string;
+    /** SAP's DocTotal: payable after TDS. */
+    net: string;
+    paid: string;
+    balance: string;
+  };
+  lines: {
+    line: number;
+    item_code: string;
+    description: string;
+    quantity: string;
+    taxable: string;
+    gst: string;
+    tax_code: string;
+    account: string;
+    account_name: string;
+  }[];
+  gst: {
+    code: string;
+    rate: string;
+    base: string;
+    amount: string;
+    account: string;
+    account_name: string;
+  }[];
+  tds: {
+    code: string;
+    name: string;
+    rate: string;
+    taxable: string;
+    amount: string;
+    account: string;
+    account_name: string;
+  }[];
+}
+
 /** One PO as SAP holds it (`/purchase-order/`). Amounts and quantities are strings. */
 export interface SapPurchaseOrder {
   header: {
@@ -879,6 +936,13 @@ export interface ApiRequest extends ApiRequestFields {
     version: number;
     total_stages: number;
     awaiting_me: boolean;
+    /**
+     * Returned by Payment, every approval stage having passed it: resubmitted
+     * with the same amount, company, budget head, purpose, request type and
+     * Department Head, it goes STRAIGHT BACK TO PAYMENT and those approvals
+     * stand. Changing any of them starts it from the first stage again.
+     */
+    returned_after_approval?: boolean;
   } | null;
   can: RequestAbilities;
   /** The SAP outgoing payment, once Final's approval has posted it. */
@@ -1154,6 +1218,23 @@ export const advancePaymentService = {
   /** The company's cash accounts, from the chart of accounts. */
   cashAccounts: async (company: AdvancePaymentCompany): Promise<SapCashAccount[]> =>
     rows<SapCashAccount>(guard(await api.get(`${BASE}/cash-accounts/${query({ company })}`))),
+
+  /**
+   * ONE A/P INVOICE AS SAP BOOKED IT: taxable, GST, TDS, net, and the G/L
+   * account behind every line.
+   *
+   * What a payment against the bill is actually checked against — three SAP
+   * queries, so it is read only when somebody opens it.
+   */
+  billBreakdown: async (
+    company: AdvancePaymentCompany,
+    docEntry: number,
+  ): Promise<SapBillBreakdown> =>
+    unwrap<SapBillBreakdown>(
+      guard(
+        await api.get(`${BASE}/bill-breakdown/${query({ company, doc_entry: docEntry })}`),
+      ),
+    ),
 
   /** A payee's bank accounts in SAP, the default first. */
   partnerBankAccounts: async (
