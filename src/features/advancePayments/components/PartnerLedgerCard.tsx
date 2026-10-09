@@ -108,6 +108,14 @@ export default function PartnerLedgerCard({ entry }: { entry: AdvanceRequestEntr
             {entry.form.partnerName || cardCode}
           </Text>
         </View>
+        {/* Collapsed, the balance rides in the header: it is the figure an
+            approver actually decides on, so closing the card must not hide it. */}
+        {!open && side ? (
+          <Text style={styles.headBalance} numberOfLines={1}>
+            {formatINR(side.amount)}
+            {side.side ? ` ${side.side}` : ""}
+          </Text>
+        ) : null}
         <Ionicons
           name={open ? "chevron-up" : "chevron-down"}
           size={20}
@@ -115,79 +123,84 @@ export default function PartnerLedgerCard({ entry }: { entry: AdvanceRequestEntr
         />
       </View>
 
-      {/* The balance stays visible whether or not the items are expanded: it is
-          the figure an approver actually decides on. */}
-      {side ? (
-        <View style={styles.balanceRow}>
-          <Text style={styles.balanceLabel}>Current balance</Text>
-          <View style={styles.balanceValueWrap}>
-            <Text style={styles.balanceValue}>
-              {formatINR(side.amount)}
-              {side.side ? ` ${side.side}` : ""}
-            </Text>
-            <Text style={styles.balanceMeaning}>{side.meaning}</Text>
-          </View>
-        </View>
-      ) : null}
-
-      {summary ? (
-        <Text style={styles.summary}>
-          {summary.open_count} open · Dr {formatINR(money(summary.open_debit))} · Cr{" "}
-          {formatINR(money(summary.open_credit))}
-          {summary.overdue_count ? ` · ${summary.overdue_count} overdue` : ""}
-        </Text>
-      ) : null}
-
-      {error ? (
-        <Text style={styles.error}>{error}</Text>
-      ) : loading ? (
-        <Text style={styles.muted}>Reading the ledger from SAP…</Text>
-      ) : rows.length === 0 ? (
-        <Text style={styles.muted}>Nothing open in SAP.</Text>
-      ) : open ? (
-        <View style={styles.rows}>
-          {rows.map((row, index) => {
-            const overdue = (row.days_overdue ?? 0) > 0;
-            return (
-              <View
-                key={`${row.trans_id}-${row.doc_type_code}-${row.doc_num}-${index}`}
-                style={[
-                  styles.row,
-                  index > 0 && styles.rowDivider,
-                  overdue && styles.rowOverdue,
-                ]}
-              >
-                <View style={styles.rowMain}>
-                  <Text style={styles.docName} numberOfLines={1}>
-                    {row.doc_type} {row.doc_num}
-                  </Text>
-                  {row.party_ref ? (
-                    <Text style={styles.docMeta} numberOfLines={1}>
-                      Ref {row.party_ref}
-                    </Text>
-                  ) : null}
-                  <Text style={styles.docMeta} numberOfLines={1}>
-                    {row.posting_date ? formatDate(row.posting_date) : "—"}
-                    {row.due_date ? ` · due ${formatDate(row.due_date)}` : ""}
-                  </Text>
-                  {overdue ? (
-                    <Text style={styles.overdueFlag}>{row.days_overdue} days overdue</Text>
-                  ) : null}
-                </View>
-                <View style={styles.rowAmount}>
-                  <Text style={styles.amount}>{formatINR(money(row.open_amount))}</Text>
-                  {/* Which way the item runs. A bare figure is read backwards
-                      about half the time, and Dr / Cr is the word the ledger
-                      itself uses. */}
-                  <Text style={styles.direction}>
-                    {row.direction === "DEBIT" ? "Dr" : "Cr"}
-                  </Text>
-                </View>
+      {/* COLLAPSED IS THE HEADER ALONE. Hiding only the item rows left the
+          balance, summary and status lines on screen, so with nothing open in
+          SAP the card looked the same either way and the tap did nothing. */}
+      {!open ? null : (
+        <>
+          {side ? (
+            <View style={styles.balanceRow}>
+              <Text style={styles.balanceLabel}>Current balance</Text>
+              <View style={styles.balanceValueWrap}>
+                <Text style={styles.balanceValue}>
+                  {formatINR(side.amount)}
+                  {side.side ? ` ${side.side}` : ""}
+                </Text>
+                <Text style={styles.balanceMeaning}>{side.meaning}</Text>
               </View>
-            );
-          })}
-        </View>
-      ) : null}
+            </View>
+          ) : null}
+
+          {summary ? (
+            <Text style={styles.summary}>
+              {summary.open_count} open · Dr {formatINR(money(summary.open_debit))} · Cr{" "}
+              {formatINR(money(summary.open_credit))}
+              {summary.overdue_count ? ` · ${summary.overdue_count} overdue` : ""}
+            </Text>
+          ) : null}
+
+          {error ? (
+            <Text style={styles.error}>{error}</Text>
+          ) : loading ? (
+            <Text style={styles.muted}>Reading the ledger from SAP…</Text>
+          ) : rows.length === 0 ? (
+            <Text style={styles.muted}>Nothing open in SAP.</Text>
+          ) : (
+            <View style={styles.rows}>
+              {rows.map((row, index) => {
+                const overdue = (row.days_overdue ?? 0) > 0;
+                return (
+                  <View
+                    key={`${row.trans_id}-${row.doc_type_code}-${row.doc_num}-${index}`}
+                    style={[
+                      styles.row,
+                      index > 0 && styles.rowDivider,
+                      overdue && styles.rowOverdue,
+                    ]}
+                  >
+                    <View style={styles.rowMain}>
+                      <Text style={styles.docName} numberOfLines={1}>
+                        {row.doc_type} {row.doc_num}
+                      </Text>
+                      {row.party_ref ? (
+                        <Text style={styles.docMeta} numberOfLines={1}>
+                          Ref {row.party_ref}
+                        </Text>
+                      ) : null}
+                      <Text style={styles.docMeta} numberOfLines={1}>
+                        {row.posting_date ? formatDate(row.posting_date) : "—"}
+                        {row.due_date ? ` · due ${formatDate(row.due_date)}` : ""}
+                      </Text>
+                      {overdue ? (
+                        <Text style={styles.overdueFlag}>{row.days_overdue} days overdue</Text>
+                      ) : null}
+                    </View>
+                    <View style={styles.rowAmount}>
+                      <Text style={styles.amount}>{formatINR(money(row.open_amount))}</Text>
+                      {/* Which way the item runs. A bare figure is read backwards
+                          about half the time, and Dr / Cr is the word the ledger
+                          itself uses. */}
+                      <Text style={styles.direction}>
+                        {row.direction === "DEBIT" ? "Dr" : "Cr"}
+                      </Text>
+                    </View>
+                  </View>
+                );
+              })}
+            </View>
+          )}
+        </>
+      )}
     </TouchableOpacity>
   );
 }
@@ -229,6 +242,13 @@ const styles = StyleSheet.create({
   headText: { flex: 1, minWidth: 0 },
   title: { fontSize: fs(14), fontWeight: "800", color: COLORS.text },
   subtitle: { fontSize: fs(11), color: COLORS.textSecondary, marginTop: 1 },
+  headBalance: {
+    flexShrink: 0,
+    maxWidth: "40%",
+    fontSize: fs(13),
+    fontWeight: "800",
+    color: COLORS.text,
+  },
   balanceRow: {
     flexDirection: "row",
     alignItems: "flex-start",

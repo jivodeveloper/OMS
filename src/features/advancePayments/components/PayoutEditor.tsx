@@ -303,12 +303,20 @@ export default function PayoutEditor({
 
   // The page renders Save and gates Approve on this, so it is published on
   // every change rather than left for the page to work out.
+  //
+  // Keyed on WHETHER a saved copy exists, never on `initial` itself: the page
+  // rebuilds `initial` on every render, and publishing sets the page's state,
+  // so depending on the object re-rendered the page, which made a new
+  // `initial`, which published again -- "Maximum update depth exceeded".
+  // Its CONTENT is already covered by `dirty`, and a server-side change moves
+  // `version`, which re-seeds `payout` above.
+  const hasSaved = Boolean(initial);
   useEffect(() => {
-    onStatus?.({ save, saving, ready, dirty, saved: Boolean(initial) });
+    onStatus?.({ save, saving, ready, dirty, saved: hasSaved });
     // `save` closes over the draft, so it is new on every keystroke; the page
     // only ever calls the latest one, which is the point.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [saving, ready, dirty, initial, payout]);
+  }, [saving, ready, dirty, hasSaved, payout]);
 
   return (
     <>

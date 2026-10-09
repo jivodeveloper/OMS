@@ -926,7 +926,10 @@ function guard(res: any): any {
   );
   error.status = typeof res?.status === "number" ? res.status : undefined;
   error.errors = res?.errors;
-  return Promise.reject(error);
+  // Thrown, not returned as a rejected promise: callers wrap the result in
+  // `rows()` / `unwrap()` without awaiting it, which turned a failure into an
+  // empty list plus an unhandled rejection.
+  throw error;
 }
 
 const unwrap = <T,>(body: any): T =>

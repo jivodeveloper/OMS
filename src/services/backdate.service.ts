@@ -253,7 +253,10 @@ function guard(res: any): any {
   error.errors = res?.errors;
   // The approval endpoint puts the SAP detail here when it returns 502.
   if (res?.errors?.sap) error.sap = res.errors.sap;
-  return Promise.reject(error);
+  // Thrown, not returned as a rejected promise: callers wrap the result in
+  // `rows()` / `unwrap()` without awaiting it, which turned a failure into an
+  // empty list plus an unhandled rejection.
+  throw error;
 }
 
 const unwrap = <T,>(body: any): T =>

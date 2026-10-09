@@ -10,7 +10,6 @@ import {
   paymentAgainstLabel,
   requestAmount,
   typeLabel,
-  vendorRefs,
   type AdvanceRequestEntry,
 } from "../logic/approvalData";
 import { STATUS_LABEL } from "../logic/requestLabels";
@@ -55,7 +54,6 @@ export default function AdvanceRequestCard({
   // for — the same "is this settled?" question the payment card's invoice strip
   // answers. A typed-amount request has nothing to compare, so it shows a total.
   const open = c.reference ? allocationTotals(allocationRows(form)).open : 0;
-  const refs = vendorRefs(form);
   const awaitingMe = entry.api.flow?.awaiting_me ?? false;
 
   return (
@@ -96,27 +94,6 @@ export default function AdvanceRequestCard({
               {form.company}
             </Text>
           </View>
-          {/* WHAT THE MONEY IS FOR, where the priority flag used to be:
-              priority is no longer asked for, and the purpose is the thing a
-              reader of the list is actually scanning for. */}
-          {form.purposeLabel ? (
-            <View style={styles.chip}>
-              <Ionicons name="pricetag-outline" size={13} color={COLORS.primary} />
-              <Text style={styles.chipText} numberOfLines={1}>
-                {form.purposeLabel}
-              </Text>
-            </View>
-          ) : null}
-          {/* THE VENDOR'S OWN NUMBER, which is what they quote when they ring
-              about a payment — OMS's request number means nothing to them. */}
-          {refs.length ? (
-            <View style={styles.chip}>
-              <Ionicons name="pricetags-outline" size={13} color={COLORS.primary} />
-              <Text style={styles.chipText} numberOfLines={1}>
-                {refs.length === 1 ? refs[0] : `${refs[0]} +${refs.length - 1}`}
-              </Text>
-            </View>
-          ) : null}
         </View>
       </View>
 
