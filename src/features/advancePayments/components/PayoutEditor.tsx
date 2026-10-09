@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import AttachmentPicker from "@/app/(main)/payments/_components/AttachmentPicker";
 import type { PickedFile } from "@/app/(main)/payments/_lib/pickAttachment";
@@ -24,6 +24,8 @@ import {
   methodsFor,
   newPayoutLine,
   noteRowsTotal,
+  SAP_PAYMENT_MODES,
+  autoSapPaymentMode,
   netPayable,
   payoutTotal,
   startPayout,
@@ -134,6 +136,16 @@ export default function PayoutEditor({
    * typing for the rest of this visit, exactly as on the web.
    */
   const [manualToken, setManualToken] = useState<string | null>(null);
+  /**
+   * THE TOKEN AS A REF, NOT ONLY AS STATE.
+   *
+   * The password dialog runs its caller the moment it is confirmed — in the
+   * same tick, before React re-renders — so a `save` closure reading the state
+   * would still see the null it was created with and send no token at all.
+   * That is a refusal asking for a password, answered with the password, and
+   * refused again: a loop. The ref is what the save reads.
+   */
+  const manualTokenRef = useRef<string | null>(null);
   const [afterPassword, setAfterPassword] = useState<(() => void) | null>(null);
 
   /**
@@ -224,6 +236,8 @@ export default function PayoutEditor({
    */
   const net = netPayable(payout, amount);
   const balanced = Math.round(allocated * 100) === Math.round(net * 100);
+  /** What SAP would be told if the desk leaves the mode on Automatic. */
+  const autoMode = autoSapPaymentMode(payout.lines);
 
   /**
    * TDS IS FOR A VENDOR'S BILLS. The DocEntries of the bills being paid are
@@ -262,8 +276,23 @@ export default function PayoutEditor({
         request.id,
         payoutToApi(payout),
         request.flow?.version,
-        // Only a typed account needs it; the server refuses one without.
-        payout.toAccountManual ? manualToken : null,
+        /*
+         * ALWAYS THE TOKEN WE HOLD, never a guess about whether it is needed.
+         *
+         * This used to send it only when `toAccountManual` was set, and that
+         * flag is the APP's idea of "typed by hand". The SERVER's is different
+         * and is the one that counts: an account is manual unless it is one of
+         * the PAYEE'S OWN SAP ACCOUNTS (`_from_sap`) — so a payee with no SAP
+         * accounts at all, an employee, or an Expense with no vendor is always
+         * manual, while the flag stayed false. The password was then asked for,
+         * entered, and thrown away here: the save went up without it and came
+         * back 403 "Confirm your password", with no way to get past it.
+         *
+         * The server ignores the token when the account did come from SAP, so
+         * sending it unconditionally is safe — and it is what the web client
+         * does.
+         */
+        manualTokenRef.current,
       );
       // Files go after the lines exist, because a payment proof belongs to one
       // line and the line only has an id once the server has saved it.
@@ -292,6 +321,22 @@ export default function PayoutEditor({
        * after the dialog is dismissed, so the reason is still there while the
        * fields are corrected.
        */
+      /*
+       * A REFUSAL THAT ONLY WANTS THE PASSWORD RE-ASKS FOR IT.
+       *
+       * `problems: ["manual_password"]` is the server saying the typed
+       * account needs confirming — because none was sent, or because the
+       * one sent has aged out (the token lasts 30 minutes, and filling in
+       * a payout can take longer than that). Showing the sentence and
+       * stopping left the user reading "confirm your password" with
+       * nothing to confirm it in. The dialog opens again instead, and the
+       * save runs itself once the password is accepted.
+       */
+      if (failureDetails(err).includes("manual_password")) {
+        setError("");
+        setAfterPassword(() => () => void save());
+        return null;
+      }
       showFailure("Could not save the payment details", err);
       setError([failureMessage(err), ...failureDetails(err)].join("\n"));
       console.warn("[advance-payments] payout save refused", err);
@@ -439,6 +484,26 @@ export default function PayoutEditor({
           />
         ))}
 
+        {/* SAP'S PAYMENT MODE (OVPM.U_Pymnt_Mode), which SAP's check 460007
+            requires on any payment leaving a bank account. Automatic follows
+            the methods — the bank line carrying the most money, NEFT and RTGS
+            as themselves and anything else as FT, which is the server's own
+            rule (`autoSapPaymentMode`) — and the desk may override it. Not
+            shown at all when nothing goes through a bank: cash needs none. */}
+        {autoMode ? (
+          <Select
+            label="SAP Payment Mode"
+            data={[
+              { label: `Automatic (${autoMode})`, value: "" },
+              ...SAP_PAYMENT_MODES.map((mode) => ({ label: mode, value: mode })),
+            ]}
+            value={payout.sapPaymentMode}
+            onChange={(mode) =>
+              patch({ sapPaymentMode: mode as PayoutDetails["sapPaymentMode"] })
+            }
+          />
+        ) : null}
+
         <TouchableOpacity
           style={styles.addLine}
           activeOpacity={0.8}
@@ -476,6 +541,9 @@ export default function PayoutEditor({
         visible={afterPassword !== null}
         onClose={() => setAfterPassword(null)}
         onConfirmed={(token) => {
+          // The ref FIRST: `then()` below runs before this render is replaced,
+          // and the save it triggers reads the ref.
+          manualTokenRef.current = token;
           setManualToken(token);
           const then = afterPassword;
           setAfterPassword(null);
@@ -520,6 +588,22 @@ function PayToAccount({
     ? undefined
     : accounts.find((account) => account.account_number === value.toAccountNumber);
   const typing = value.toAccountManual || accounts.length === 0;
+  /*
+   * WHETHER THE SERVER WILL CALL THIS A TYPED ACCOUNT — `_from_sap`, mirrored.
+   *
+   * Not `toAccountManual`: a payee whose accounts SAP does not hold (an
+   * employee, an Expense with no vendor, a vendor with none on file) is typed
+   * by definition, and the flag never gets set because there was no "Enter
+   * another account…" to choose. Reading the rule the same way the server does
+   * means the password is asked for BEFORE the save rather than after it is
+   * refused.
+   */
+  const fromSap = accounts.some(
+    (account) =>
+      account.account_number === value.toAccountNumber &&
+      (!account.ifsc || account.ifsc.toUpperCase() === value.toIfsc.toUpperCase()),
+  );
+  const needsPassword = Boolean(value.toAccountNumber) && !fromSap;
   const locked = !unlocked;
 
   const pick = (key: string) => {
@@ -586,7 +670,7 @@ function PayToAccount({
             }
             placeholder="Payee's account number"
             keyboardType="numeric"
-            editable={!locked || !lookedUp}
+            editable={!locked}
           />
         </Field>
       )}
@@ -628,7 +712,7 @@ function PayToAccount({
         />
       </Field>
 
-      {typing && locked ? (
+      {(typing || needsPassword) && locked ? (
         <TouchableOpacity
           style={styles.unlockBtn}
           onPress={() => unlock(() => {})}

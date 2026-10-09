@@ -179,24 +179,14 @@ export default function ExpenseLines({
         </Row>
       ) : null}
 
-      {/* ELECTRICITY IS A ROUTE, not a label: the budget head's owner approves
-          it and then the Director. Asked of both readers, because the desk may
-          be the first to know what the payment actually is. */}
-      <View style={styles.switchRow}>
-        <View style={styles.switchText}>
-          <Text style={styles.switchLabel}>Electricity expense</Text>
-          <Text style={styles.switchHint}>
-            Approved by the budget head&apos;s owner, then the Director.
-          </Text>
-        </View>
-        <Switch
-          value={form.isElectricity}
-          onValueChange={(isElectricity) => onChange({ isElectricity })}
-          trackColor={{ true: COLORS.primaryLight, false: COLORS.borderLight }}
-          thumbColor={form.isElectricity ? COLORS.primary : COLORS.surface}
-        />
-      </View>
+      {/* THE ELECTRICITY TOGGLE IS GONE, as it is on the web (2026-10-09).
+          It used to split the Expense workflows — plain and electricity — and
+          it no longer does: the Director approves either way. A flag that
+          changes nothing is a question not worth asking, and one that claimed
+          to change the route was worse than nothing. Older requests keep
+          whatever they were saved with, and the details page still shows it. */}
 
+      <View style={styles.linesWrap}>
       {lines.map((line, index) => {
         const n = index + 1;
         const amountError = plainAmountError(line.amount)
@@ -352,6 +342,8 @@ export default function ExpenseLines({
         );
       })}
 
+      </View>
+
       {!atPayment ? (
         <TouchableOpacity
           style={[styles.addBtn, lines.length >= MAX_EXPENSE_LINES && styles.addBtnOff]}
@@ -406,6 +398,10 @@ export default function ExpenseLines({
 }
 
 const styles = StyleSheet.create({
+  // The run of boxes, held off whatever is above it (the card's own heading,
+  // or the desk's Month and TDS row).
+  linesWrap: { marginTop: sp(14) },
+
   switchRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -417,24 +413,45 @@ const styles = StyleSheet.create({
   switchLabel: { fontSize: fs(13), fontWeight: "700", color: COLORS.text },
   switchHint: { fontSize: fs(11), color: COLORS.textSecondary, marginTop: 2 },
 
+  /*
+   * THE LINE BOXES, AND THE AIR AROUND THEM.
+   *
+   * A box inside a card is two borders deep, so it has to be spaced from its
+   * neighbours by MORE than its own padding, or the whole column reads as one
+   * grey slab. One scale throughout: 14 inside the box, 14 between boxes.
+   *
+   * The top is 12 and the bottom 14 ON PURPOSE, not by accident: every control
+   * carries `marginTop: 16` of its own (`AdvanceUi.Field`), so the first one
+   * already sits well clear of the heading while the last one has nothing
+   * under it. Equal padding both ends is what made the old boxes read
+   * top-light and bottom-heavy.
+   */
   lineBox: {
     borderWidth: 1,
     borderColor: COLORS.borderLight,
-    borderRadius: sp(12),
+    borderRadius: sp(14),
     backgroundColor: COLORS.background,
-    padding: sp(12),
-    marginBottom: sp(10),
+    paddingHorizontal: sp(14),
+    paddingTop: sp(12),
+    // The last control's own 16pt top margin is the gap above; this is the
+    // gap below it, so the box is evenly padded without doubling anything.
+    paddingBottom: sp(14),
+    marginBottom: sp(14),
   },
+  // Flush with the box's top padding: the heading is the only child with no
+  // margin of its own, and the divider under it does the separating.
   lineHead: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginBottom: sp(8),
+    paddingBottom: sp(10),
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.borderLight,
   },
-  lineTitle: { fontSize: fs(12.5), fontWeight: "800", color: COLORS.text },
-  lineNote: { fontSize: fs(11), color: COLORS.textSecondary, marginBottom: sp(8) },
+  lineTitle: { fontSize: fs(12.5), fontWeight: "800", color: COLORS.primary },
+  lineNote: { fontSize: fs(11), color: COLORS.textSecondary, marginTop: sp(6) },
 
-  figureRow: { flexDirection: "row", gap: sp(10), marginBottom: sp(10) },
+  figureRow: { flexDirection: "row", gap: sp(10), marginTop: sp(12) },
   figure: { flex: 1, minWidth: 0 },
   figureLabel: { fontSize: fs(11), color: COLORS.textSecondary },
   figureValue: { fontSize: fs(13), color: COLORS.text, marginTop: 2 },
@@ -445,7 +462,11 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     gap: sp(6),
-    paddingVertical: sp(11),
+    // The last box already ends 14 below its content; this is the gap between
+    // that edge and the button, so adding a line reads as the next step rather
+    // than part of the box above it.
+    marginTop: sp(2),
+    paddingVertical: sp(12),
     borderRadius: sp(12),
     borderWidth: 1,
     borderStyle: "dashed",
@@ -456,7 +477,13 @@ const styles = StyleSheet.create({
   addText: { fontSize: fs(13), fontWeight: "800", color: COLORS.primary },
   addTextOff: { color: COLORS.textMuted },
 
-  totalBox: { marginTop: sp(12), gap: sp(4) },
+  totalBox: {
+    marginTop: sp(16),
+    paddingTop: sp(12),
+    borderTopWidth: 1,
+    borderTopColor: COLORS.borderLight,
+    gap: sp(6),
+  },
   totalRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   totalRowTop: { borderTopWidth: 1, borderTopColor: COLORS.borderLight, paddingTop: sp(6) },
   totalLabel: { fontSize: fs(12.5), color: COLORS.textSecondary },

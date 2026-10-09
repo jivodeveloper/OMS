@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { View } from "react-native";
 
 import AttachmentPicker from "@/app/(main)/payments/_components/AttachmentPicker";
@@ -115,6 +115,27 @@ export default function AdvanceRequestForm({
    * an Employee or Imprest request outside Mart, or a purpose marked
    * `needs_head` — and the HOD picked must have an OMS login to approve with.
    */
+  /**
+   * IS THIS PURPOSE APPROVED "BY DEPARTMENT"? The purpose list says so
+   * (`needs_head`), and `needsDepartmentHead` reads the answer off the form —
+   * so the flag has to be put there when a purpose is chosen, and again when
+   * the list arrives for a request that was SAVED with one: a stored request
+   * records only whether a head was named, not whether its purpose asks for
+   * one. Without this the app never asked for the Department Head and the
+   * server refused the request for the field it had not shown.
+   */
+  const purposeNeedsHead = (code: string) =>
+    Boolean(purposes.purposes.find((purpose) => purpose.code === code)?.needs_head);
+  const listedNeedsHead = purposes.purposes.length ? purposeNeedsHead(form.purpose) : null;
+  useEffect(() => {
+    if (listedNeedsHead !== null && listedNeedsHead !== form.purposeNeedsHead) {
+      setForm(applyChange(form, { purposeNeedsHead: listedNeedsHead }));
+    }
+    // `form` is deliberately not a dependency: this only reconciles the flag
+    // with the list, and re-running it on every keystroke would fight typing.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [listedNeedsHead, form.purposeNeedsHead]);
+
   const askHead = needsDepartmentHead(form);
   const [headSearch, setHeadSearch] = useState("");
   const heads = useDepartmentHeads(headSearch, askHead);
@@ -627,6 +648,7 @@ export default function AdvanceRequestForm({
               purpose: value,
               purposeLabel:
                 purposes.purposes.find((purpose) => purpose.code === value)?.label ?? "",
+              purposeNeedsHead: purposeNeedsHead(value),
             })
           }
           placeholder={

@@ -614,6 +614,9 @@ export function resolveCase(form: RequestForm): ResolvedCase {
 
 /* ── Who approves ────────────────────────────────────────────────────────── */
 
+/** The plant's budget heads (`purposes.FACTORY_BUDGETS` on the server). */
+const FACTORY_BUDGETS: ReadonlyArray<string> = ["Factory", "FACT_COM"];
+
 /** Employee and Imprest requests always go to the requester's Department Head. */
 const HEAD_TYPES: ReadonlyArray<PartnerType> = ["EMPLOYEE_ADVANCE", "EMPLOYEE_IMPREST"];
 
@@ -624,6 +627,9 @@ const HEAD_TYPES: ReadonlyArray<PartnerType> = ["EMPLOYEE_ADVANCE", "EMPLOYEE_IM
  */
 export function needsDepartmentHead(form: RequestForm): boolean {
   if (!form.company || form.company === "MART") return false;
+  // A plant's staff salary advance goes to the plant's fixed approver, by
+  // amount (approval matrix, 2026-10-09) — the server's same rule.
+  if (form.type === "EMPLOYEE_ADVANCE" && FACTORY_BUDGETS.includes(form.budget)) return false;
   return (form.type !== "" && HEAD_TYPES.includes(form.type)) || form.purposeNeedsHead;
 }
 

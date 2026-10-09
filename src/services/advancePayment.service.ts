@@ -651,6 +651,8 @@ export interface ApiPayout {
   to_account_manual: boolean;
   /** Sent as `{code}` (or null for none); read back with what it came to. */
   tds?: ApiPayoutTds | null;
+  /** SAP's Payment Mode (NEFT / RTGS / FT) the desk chose; "" = from the methods. */
+  sap_payment_mode?: string;
   lines: ApiPayoutLine[];
   updated_by?: ApiUser | null;
   updated_on?: string | null;

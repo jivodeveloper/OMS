@@ -183,6 +183,27 @@ export interface PayoutDetails {
    * it is booked under and what it comes to. The methods pay the rest.
    */
   tds: PayoutTds | null;
+  /** SAP's Payment Mode the desk chose; "" = Automatic, from the methods (`autoSapPaymentMode`). */
+  sapPaymentMode: SapPaymentMode | "";
+}
+
+/**
+ * SAP's Payment Mode values (OVPM.U_Pymnt_Mode). SAP's check 460007 refuses a
+ * payment from a bank account without one.
+ */
+export const SAP_PAYMENT_MODES = ["NEFT", "RTGS", "FT"] as const;
+export type SapPaymentMode = (typeof SAP_PAYMENT_MODES)[number];
+
+/**
+ * What OMS sends when the desk leaves it Automatic — the server's same rule:
+ * the bank method carrying the most money; NEFT and RTGS as themselves, any
+ * other (UPI, IMPS, cheque) as FT. Null when nothing goes through a bank.
+ */
+export function autoSapPaymentMode(lines: PayoutLine[]): SapPaymentMode | null {
+  const bank = lines.filter((l) => l.method !== "CASH");
+  if (bank.length === 0) return null;
+  const biggest = bank.reduce((a, b) => ((Number(b.amount) || 0) > (Number(a.amount) || 0) ? b : a));
+  return biggest.method === "NEFT" || biggest.method === "RTGS" ? biggest.method : "FT";
 }
 
 export interface PayoutTds {
@@ -229,6 +250,7 @@ export const EMPTY_PAYOUT: PayoutDetails = {
   lines: [],
   bankAttachments: [],
   tds: null,
+  sapPaymentMode: "",
 };
 
 /**

@@ -370,6 +370,7 @@ export function payoutFromApi(payout: ApiPayout, files: ApiRequestFile[]): Payou
     bankAttachments: files
       .filter((f) => f.purpose === "BANK_PROOF" && f.payout_line_id === null)
       .map(fileFromApi),
+    sapPaymentMode: (payout.sap_payment_mode ?? "") as PayoutDetails["sapPaymentMode"],
     lines: payout.lines.map(
       (line): PayoutLine => ({
         id: `line-${line.id}`,
@@ -401,6 +402,7 @@ export function payoutToApi(payout: PayoutDetails): ApiPayout {
     to_account_manual: payout.toAccountManual,
     // Only the code goes: the server works out the rate, account and amount from SAP.
     tds: payout.tds ? { code: payout.tds.code } : null,
+    sap_payment_mode: payout.sapPaymentMode,
     lines: payout.lines.map((line) => ({
       id: line.serverId,
       method: line.method,

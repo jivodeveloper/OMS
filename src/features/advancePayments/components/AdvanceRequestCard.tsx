@@ -41,10 +41,16 @@ export default function AdvanceRequestCard({
   entry,
   onDetails,
   onProgress,
+  selection,
 }: {
   entry: AdvanceRequestEntry;
   onDetails: () => void;
   onProgress: () => void;
+  /**
+   * The desk picking several to approve at once. Absent everywhere else: a
+   * tick box on a list nobody can act from is a control that does nothing.
+   */
+  selection?: { selected: boolean; onToggle: () => void };
 }) {
   const { form } = entry;
   const tone = STATUS_TONE[entry.status] ?? { bg: "#F3F4F6", fg: "#6B7280" };
@@ -59,6 +65,23 @@ export default function AdvanceRequestCard({
   return (
     <View style={styles.card}>
       <View style={styles.cardHead}>
+        {/* THE WHOLE HEADER IS THE TICK TARGET while choosing, because a 20pt
+            box is not what a thumb aims at. */}
+        {selection ? (
+          <TouchableOpacity
+            onPress={selection.onToggle}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            accessibilityRole="checkbox"
+            accessibilityState={{ checked: selection.selected }}
+            accessibilityLabel={`Select ${entry.requestNo}`}
+          >
+            <Ionicons
+              name={selection.selected ? "checkbox" : "square-outline"}
+              size={20}
+              color={selection.selected ? COLORS.primary : COLORS.textMuted}
+            />
+          </TouchableOpacity>
+        ) : null}
         <Text style={styles.docNo} numberOfLines={1}>
           {entry.requestNo}
         </Text>

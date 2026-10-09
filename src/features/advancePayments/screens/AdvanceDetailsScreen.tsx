@@ -855,7 +855,7 @@ export default function AdvanceDetailsScreen() {
                   <Field
                     icon="flash-outline"
                     label="Electricity"
-                    value="Yes — the Director approves it too"
+                    value="Yes"
                     full
                   />
                 </>

@@ -20,18 +20,21 @@ import { can } from "@/src/constants/permissions";
 import useAndroidBackOverride from "@/src/hooks/useAndroidBackOverride";
 import { useAuth } from "@/src/context/AuthContext";
 import InlineOrderDateFilter from "@/src/components/common/InlineOrderDateFilter";
+import { advancePaymentService } from "@/src/services/advancePayment.service";
 import { COLORS } from "@/src/constants/theme";
 import { fs, ms, sp } from "@/src/utils/responsive";
 
 import { useAssignments } from "../assignments";
 import AdvanceRequestCard from "../components/AdvanceRequestCard";
 import AssignedList from "../components/AssignedList";
+import { BulkApproveDone, BulkApprovePrompt } from "../components/BulkApproveDialogs";
 
 import {
   useAdvanceRequests,
   type RequestListScope,
 } from "../hooks/useAdvanceRequests";
 import type { AdvanceRequestEntry } from "../logic/approvalData";
+import { failureMessage } from "../showError";
 import { COMPANIES } from "../logic/constants";
 import {
   DESK_STATUS_OPTIONS,
@@ -129,6 +132,65 @@ export default function AdvanceListScreen({ scope }: { scope?: RequestListScope 
   } = useAdvanceRequests(listScope);
 
   const [filterOpen, setFilterOpen] = useState(false);
+
+  /* ── Approving several at once ──────────────────────────────────────
+   *
+   * ONLY WHAT IS THIS USER'S TO APPROVE. The server decides per request
+   * (`can.approve`), so the ticks are offered on those rows and no others —
+   * and the chosen set is re-filtered at the moment of approving, because a
+   * filter change or a refresh can take a row off the list after it was
+   * ticked.
+   */
+  const [ticked, setTicked] = useState<ReadonlySet<number>>(new Set());
+  const [asking, setAsking] = useState(false);
+  const [progress, setProgress] = useState("");
+  const [outcome, setOutcome] = useState<{
+    done: string[];
+    failed: [string, string][];
+  } | null>(null);
+
+  const canBulk = (entry: AdvanceRequestEntry) => Boolean(entry.api.can?.approve);
+  const selectable = rows.filter(canBulk);
+  const chosen = selectable.filter((entry) => ticked.has(entry.serverId));
+
+  const toggle = (id: number) =>
+    setTicked((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
+  /**
+   * ONE AT A TIME, each with its own version — exactly as its own screen would
+   * send it. There is no bulk endpoint, and firing them together would lose
+   * which of them the server refused.
+   */
+  const approveChosen = async (remarks: string) => {
+    const done: string[] = [];
+    const failed: [string, string][] = [];
+    for (const [index, entry] of chosen.entries()) {
+      setProgress(`Approving ${index + 1} of ${chosen.length}…`);
+      try {
+        await advancePaymentService.act(
+          entry.serverId,
+          "approve",
+          remarks,
+          entry.api.flow?.version,
+        );
+        done.push(entry.requestNo);
+      } catch (err) {
+        // The server's own words, per request: "no longer your stage", a SAP
+        // refusal at Final, a stale version. A count would name none of them.
+        failed.push([entry.requestNo, failureMessage(err)]);
+      }
+    }
+    setProgress("");
+    setAsking(false);
+    setTicked(new Set());
+    setOutcome({ done, failed });
+    void onRefresh();
+  };
 
   /**
    * Preselect what the home page's card counted.
@@ -334,6 +396,14 @@ export default function AdvanceListScreen({ scope }: { scope?: RequestListScope 
               entry={item}
               onDetails={() => openDetails(item)}
               onProgress={() => openProgress(item)}
+              selection={
+                canBulk(item)
+                  ? {
+                      selected: ticked.has(item.serverId),
+                      onToggle: () => toggle(item.serverId),
+                    }
+                  : undefined
+              }
             />
           )}
           contentContainerStyle={styles.listContent}
@@ -358,6 +428,52 @@ export default function AdvanceListScreen({ scope }: { scope?: RequestListScope 
 
         </>
       )}
+
+      {/* WHAT IS TICKED, AND THE ONE BUTTON FOR IT. Only while something is
+          ticked: a permanent bar would take a row's height from every list for
+          an action most readers never use. */}
+      {chosen.length ? (
+        <View style={styles.bulkBar}>
+          <TouchableOpacity
+            style={styles.bulkClear}
+            onPress={() => setTicked(new Set())}
+            activeOpacity={0.8}
+            accessibilityRole="button"
+          >
+            <Ionicons name="close" size={16} color={COLORS.textSecondary} />
+          </TouchableOpacity>
+          <Text style={styles.bulkCount} numberOfLines={1}>
+            {chosen.length} selected
+          </Text>
+          <TouchableOpacity
+            style={styles.bulkApprove}
+            onPress={() => setAsking(true)}
+            activeOpacity={0.85}
+            accessibilityRole="button"
+          >
+            <Ionicons name="checkmark-done" size={16} color="#fff" />
+            <Text style={styles.bulkApproveText}>Approve {chosen.length}</Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
+
+      {asking ? (
+        <BulkApprovePrompt
+          count={chosen.length}
+          busy={progress !== ""}
+          progress={progress}
+          onClose={() => setAsking(false)}
+          onConfirm={(remarks) => void approveChosen(remarks)}
+        />
+      ) : null}
+
+      {outcome ? (
+        <BulkApproveDone
+          done={outcome.done}
+          failed={outcome.failed}
+          onClose={() => setOutcome(null)}
+        />
+      ) : null}
 
       {/* Filter sheet — company only; status lives in the header dropdown and
           the date on the bar, exactly as on payment tracking. */}
@@ -585,6 +701,38 @@ const styles = StyleSheet.create({
   },
 
   listContent: { padding: sp(16), paddingBottom: sp(40) },
+
+  bulkBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: sp(10),
+    paddingHorizontal: sp(14),
+    paddingVertical: sp(10),
+    borderTopWidth: 1,
+    borderTopColor: COLORS.borderLight,
+    backgroundColor: COLORS.surface,
+  },
+  bulkClear: {
+    width: ms(34),
+    height: ms(34),
+    borderRadius: sp(10),
+    borderWidth: 1,
+    borderColor: COLORS.borderLight,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  // `minWidth: 0` so the count never pushes the button off a narrow screen.
+  bulkCount: { flex: 1, minWidth: 0, fontSize: fs(13), fontWeight: "700", color: COLORS.text },
+  bulkApprove: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: sp(6),
+    paddingHorizontal: sp(16),
+    height: ms(40),
+    borderRadius: sp(12),
+    backgroundColor: COLORS.success,
+  },
+  bulkApproveText: { fontSize: fs(13.5), fontWeight: "800", color: "#fff" },
   loadingWrap: { flex: 1, alignItems: "center", justifyContent: "center" },
   emptyWrap: { alignItems: "center", paddingVertical: sp(60), gap: sp(8) },
   emptyTitle: {
