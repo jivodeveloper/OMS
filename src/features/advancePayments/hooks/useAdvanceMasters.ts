@@ -5,8 +5,11 @@ import {
   advancePaymentError,
   advancePaymentService,
   type AdvancePaymentCompany,
+  type DepartmentHeadChoice,
   type PaymentPurpose,
   type SapBudget,
+  type SapExpenseAccount,
+  type TdsCode,
 } from "@/src/services/advancePayment.service";
 
 import type { OpenDocument, Partner } from "../logic/constants";
@@ -295,4 +298,203 @@ export function useBudgets(company: AdvancePaymentCompany | "") {
   );
 
   return { budgets, optionsFor, loading, error };
+}
+
+/* ------------------------------------------------------------------ *
+ * Expense
+ * ------------------------------------------------------------------ */
+
+/**
+ * The company's expense G/L accounts — what an Expense line is paid to.
+ *
+ * DIRECT AND INDIRECT IN ONE LIST, each saying which it is: one request is one
+ * kind, and the server refuses a request whose lines mix them. Showing only
+ * one kind would hide the account somebody is looking for and give them no
+ * reason why.
+ */
+export function useExpenseAccounts(company: AdvancePaymentCompany | "") {
+  const [accounts, setAccounts] = useState<SapExpenseAccount[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!company) {
+      setAccounts([]);
+      setError("");
+      return;
+    }
+    let alive = true;
+    setLoading(true);
+    setError("");
+    advancePaymentService
+      .expenseAccounts(company)
+      .then((rows) => {
+        if (alive) setAccounts(rows);
+      })
+      .catch((err) => {
+        if (!alive) return;
+        setError(advancePaymentError(err));
+        setAccounts([]);
+      })
+      .finally(() => {
+        if (alive) setLoading(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [company]);
+
+  /**
+   * The picker's options, with a saved account SAP no longer lists kept on the
+   * list by its saved name — otherwise opening an old request would blank a
+   * line's G/L and saving would drop it.
+   */
+  const optionsFor = useCallback(
+    (chosen: string, chosenName: string) => {
+      const options = accounts.map((account) => ({
+        label: `${account.code} · ${account.name}`,
+        value: account.code,
+        hint: `${account.kind === "DIRECT" ? "Direct" : "Indirect"} · ${account.group}`,
+      }));
+      if (chosen && !options.some((option) => option.value === chosen)) {
+        return [{ label: `${chosen} · ${chosenName}`, value: chosen, hint: "" }, ...options];
+      }
+      return options;
+    },
+    [accounts],
+  );
+
+  const nameOf = useCallback(
+    (code: string) => accounts.find((account) => account.code === code)?.name ?? "",
+    [accounts],
+  );
+
+  return { accounts, optionsFor, nameOf, loading, error };
+}
+
+/** SAP's Effective Months (newest first) — which month an Expense line posts to. */
+export function useExpenseMonths(company: AdvancePaymentCompany | "", enabled = true) {
+  const [months, setMonths] = useState<string[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!company || !enabled) {
+      setMonths([]);
+      return;
+    }
+    let alive = true;
+    setLoading(true);
+    setError("");
+    advancePaymentService
+      .expenseMonths(company)
+      .then((found) => {
+        if (alive) setMonths(found.months ?? []);
+      })
+      .catch((err) => {
+        if (!alive) return;
+        setError(advancePaymentError(err));
+        setMonths([]);
+      })
+      .finally(() => {
+        if (alive) setLoading(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [company, enabled]);
+
+  return { months, loading, error };
+}
+
+/** SAP's TDS codes the Payment desk may deduct, the vendor's own first. */
+export function useTdsCodes(company: AdvancePaymentCompany | "", cardCode: string, enabled = true) {
+  const [codes, setCodes] = useState<TdsCode[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!company || !enabled) {
+      setCodes([]);
+      return;
+    }
+    let alive = true;
+    setLoading(true);
+    setError("");
+    advancePaymentService
+      .tdsOptions(company, cardCode, [])
+      .then((found) => {
+        if (alive) setCodes(found.codes ?? []);
+      })
+      .catch((err) => {
+        if (!alive) return;
+        setError(advancePaymentError(err));
+        setCodes([]);
+      })
+      .finally(() => {
+        if (alive) setLoading(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [company, cardCode, enabled]);
+
+  /** A code's rate, for working out a line's TDS before the server answers. */
+  const rateOf = useCallback(
+    (code: string) => {
+      const found = codes.find((row) => row.code === code);
+      return found ? Number(found.rate) : null;
+    },
+    [codes],
+  );
+
+  return { codes, rateOf, loading, error };
+}
+
+/**
+ * The HODs a request may name as its Department Head.
+ *
+ * SEARCHED ON THE SERVER, because the master runs to hundreds; the chosen one
+ * is kept on the list whatever the search says, so a picked head never
+ * disappears while somebody types. An HOD with no OMS login cannot approve,
+ * and `departmentHeadLoginError` says so rather than letting the request be
+ * submitted into a stage nobody holds.
+ */
+export function useDepartmentHeads(search: string, enabled = true) {
+  const [heads, setHeads] = useState<DepartmentHeadChoice[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!enabled) {
+      setHeads([]);
+      return;
+    }
+    let alive = true;
+    setLoading(true);
+    setError("");
+    // Typed searches are debounced by the caller's state; this only guards the
+    // burst while a screen mounts.
+    const timer = setTimeout(() => {
+      advancePaymentService
+        .departmentHeads(search)
+        .then((found) => {
+          if (alive) setHeads(found);
+        })
+        .catch((err) => {
+          if (!alive) return;
+          setError(advancePaymentError(err));
+          setHeads([]);
+        })
+        .finally(() => {
+          if (alive) setLoading(false);
+        });
+    }, search ? 300 : 0);
+    return () => {
+      alive = false;
+      clearTimeout(timer);
+    };
+  }, [search, enabled]);
+
+  return { heads, loading, error };
 }

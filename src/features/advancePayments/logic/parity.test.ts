@@ -17,6 +17,7 @@ import { describe, it } from "node:test";
 import type { OpenDocument } from "./constants.ts";
 import {
   CASE_RULES,
+  NO_TDS,
   PARTNER_CODE_PREFIX,
   allocationRows,
   allocationTotals,
@@ -29,11 +30,19 @@ import {
   dueFirst,
   dueLabel,
   dueState,
+  expenseNet,
+  expenseTds,
+  expenseTotal,
+  lineGst,
+  lineTaxable,
+  newExpenseLine,
   resolveCase,
   validate,
+  validateExpense,
+  type ExpenseLineForm,
   type RequestForm,
 } from "./rules.ts";
-import { requestAmount } from "./approvalData.ts";
+import { paidAmount, payeeOf, requestAmount } from "./approvalData.ts";
 import { toApiRequest } from "./requestApi.ts";
 import { ownerLabel, withCodePrefix } from "./sapMapping.ts";
 
@@ -344,5 +353,140 @@ describe("due documents", () => {
       dueFirst(docs, (d) => d, TODAY).map((d) => d.id),
       ["old", "today", "later", "none"],
     );
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * Expense requests
+ *
+ * The web's own `expense.test.ts` figures, kept here for the same reason as
+ * everything above: an Expense is the only request whose amount the client
+ * works out from its lines, and a copy that rounded the taxable amount a
+ * different way would ask SAP for a different figure than the web would.
+ * ------------------------------------------------------------------ */
+
+const TDS_RATES: Record<string, number> = { "C194-2": 2, "J194-10": 10 };
+const rateOf = (code: string) => TDS_RATES[code] ?? null;
+
+const expenseLine = (patch: Partial<ExpenseLineForm>): ExpenseLineForm => ({
+  ...newExpenseLine(),
+  ...patch,
+});
+
+/** An Expense as the form holds it: two lines, one without a G/L. */
+function expenseForm(patch: Partial<RequestForm> = {}): RequestForm {
+  return [
+    { company: "OIL" as const, type: "EXPENSE" as const },
+    {
+      budget: "Factory",
+      budgetName: "Factory",
+      isElectricity: true,
+      expenseLines: [
+        expenseLine({ amount: "11800", glAccount: "5680011", glName: "ELECTRICITY EXPENSES" }),
+        expenseLine({ amount: "3000.50", glUnknown: true, remarks: "Penalty, G/L to confirm" }),
+      ],
+    },
+    patch,
+  ].reduce<RequestForm>((form, next) => applyChange(form, next), EMPTY_FORM);
+}
+
+describe("an Expense request", () => {
+  it("is not asked Payment Against, and starts with one empty line", () => {
+    const form = applyChange(applyChange(EMPTY_FORM, { company: "OIL" }), { type: "EXPENSE" });
+    // Provisional: the server makes it direct when the G/L accounts are.
+    assert.equal(form.paymentAgainst, "INDIRECT_EXPENSE");
+    assert.equal(form.expenseLines.length, 1);
+    const c = resolveCase(form);
+    assert.equal(c.expense, true);
+    assert.equal(c.plainAmount, false);
+    assert.equal(c.reference, null);
+  });
+
+  it("is complete without a payee, ownership, payment date, sub budget, month or remarks", () => {
+    assert.deepEqual(validate(expenseForm(), "2026-10-08"), { missing: [], problems: [] });
+  });
+
+  it("needs each line's amount, and its G/L — or, not knowing it, what it is for", () => {
+    const { missing, problems } = validate(
+      expenseForm({
+        expenseLines: [
+          expenseLine({ amount: "0", glAccount: "5670001" }),
+          expenseLine({ amount: "" }),
+          expenseLine({ amount: "5", glUnknown: true }),
+        ],
+      }),
+      "2026-10-08",
+    );
+    assert.ok(problems.includes("Line 1: enter an amount above zero."));
+    assert.deepEqual(missing, [
+      "Amount on line 2",
+      "G/L account on line 2",
+      "Remarks on line 3 (what it is for)",
+    ]);
+  });
+
+  it("at Payment needs every line's G/L, a month and a sub budget", () => {
+    assert.deepEqual(validateExpense(expenseForm(), { atPayment: true }).missing, [
+      "Sub Budget",
+      "Month",
+      "G/L account on line 2",
+    ]);
+  });
+
+  it("is worth its lines' amounts; the desk's GST backs the taxable amount out", () => {
+    const form = expenseForm();
+    assert.equal(expenseTotal(form.expenseLines), 14800.5);
+    assert.equal(requestAmount(form), 14800.5);
+    const taxed = expenseLine({ amount: "11800", gstCode: "CGST_SGST_18" });
+    assert.equal(lineTaxable(taxed), 10000);
+    assert.equal(lineGst(taxed), 1800);
+    assert.equal(lineTaxable(expenseLine({ amount: "1049.99", gstCode: "IGST_5" })), 999.99);
+  });
+
+  it("deducts TDS on the taxable amount, to the rupee — the request's code, a line's own, or none", () => {
+    const form = expenseForm({
+      expenseTdsCode: "C194-2",
+      expenseLines: [
+        expenseLine({ amount: "11800", gstCode: "CGST_SGST_18", glAccount: "5680011" }),
+        expenseLine({ amount: "2500", glAccount: "5670001", tdsOverride: "J194-10" }),
+        expenseLine({ amount: "700", glAccount: "5670001", tdsOverride: NO_TDS }),
+      ],
+    });
+    // 200 (2% of the taxable 10,000, not of 11,800) + 250 + 0
+    assert.equal(expenseTds(form, rateOf), 450);
+    assert.equal(expenseNet(form, rateOf), 15000 - 450);
+  });
+
+  it("sends the lines, and no purpose, sub budget or month of its own", () => {
+    const input = toApiRequest(expenseForm({ payee: "Tester" }));
+    assert.equal(input.request_type, "EXPENSE");
+    assert.equal(input.partner_code, "");
+    assert.equal(input.partner_name, "Tester");
+    assert.equal(input.amount, "14800.5");
+    assert.equal(input.budget_code, "Factory");
+    assert.equal(input.purpose_code, "");
+    assert.equal(input.sub_budget_code, "");
+    assert.equal(input.effect_month, "");
+    assert.equal(input.is_electricity, true);
+    assert.deepEqual(
+      (input.expense_lines ?? []).map((line) => [line.amount, line.gl_account, line.remarks]),
+      [
+        ["11800", "5680011", ""],
+        ["3000.50", "", "Penalty, G/L to confirm"],
+      ],
+    );
+  });
+
+  it("pays the invoice values less the TDS the server worked out", () => {
+    // What a read-back request carries: the server's own tds_amount per line.
+    const form = expenseForm();
+    form.expenseLines[0] = { ...form.expenseLines[0], tdsAmount: "236" };
+    form.expenseLines[1] = { ...form.expenseLines[1], tdsAmount: "60" };
+    assert.equal(requestAmount(form), 14800.5);
+    assert.equal(paidAmount(form), 14800.5 - 296);
+  });
+
+  it("names its payee, who is not a SAP partner", () => {
+    assert.equal(payeeOf(expenseForm({ payee: "Tester" })), "Tester");
   });
 });

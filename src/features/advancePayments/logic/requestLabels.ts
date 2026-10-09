@@ -15,6 +15,7 @@ import {
   paymentAgainstLabel,
   requestAmount,
   typeLabel,
+  vendorRefs,
   type AdvanceRequestEntry,
   type ApprovalStatus,
 } from "./approvalData";
@@ -73,12 +74,15 @@ function haystack(entry: AdvanceRequestEntry): string {
     entry.requestedBy,
     form.partnerName,
     form.partner,
+    form.payee,
     typeLabel(form),
     paymentAgainstLabel(form),
     form.ownership,
     form.budgetName,
     form.budget,
     form.purposeLabel,
+    form.subBudgetName,
+    ...vendorRefs(form),
   ]
     .join(" ")
     .toLowerCase();
@@ -204,7 +208,7 @@ const BALANCE_ROLES = new Set(["PAYMENT", "AUDIT", "FINAL"]);
 
 /**
  * Whether the desk shows the payee's SAP balance: at or past Payment (or
- * completed), paid to a business partner (Vendor, Employee Imprest), and to a
+ * completed), paid to a business partner (Vendor, Employee Imprest, Customer), and to a
  * viewer who holds Payment or a later stage (`can.see_account`).
  * Never to the requester while they raise it — and not while the partner has
  * no account in SAP yet (a new imprest holder): there is no ledger to read
@@ -212,9 +216,7 @@ const BALANCE_ROLES = new Set(["PAYMENT", "AUDIT", "FINAL"]);
  */
 export function showsBalance(entry: AdvanceRequestEntry): boolean {
   const partner =
-    entry.form.type === "VENDOR" ||
-    entry.form.type === "EMPLOYEE_IMPREST" ||
-    entry.form.type === "CUSTOMER";
+    entry.form.type === "VENDOR" || entry.form.type === "EMPLOYEE_IMPREST" || entry.form.type === "CUSTOMER";
   return partner && !entry.api.partner_not_in_sap && entry.api.can.see_account && reachedPayment(entry);
 }
 
@@ -226,4 +228,16 @@ export function showsBalance(entry: AdvanceRequestEntry): boolean {
  */
 export function reachedPayment(entry: AdvanceRequestEntry): boolean {
   return BALANCE_ROLES.has(entry.api.flow?.current_role ?? "") || entry.status === "APPROVED";
+}
+
+/** One line on the closed Status card: where it stands. */
+export function statusSummary(entry: AdvanceRequestEntry): string {
+  const stage = entry.api.flow?.current_stage;
+  return entry.status === "PENDING" && stage ? `Waiting at ${stage}` : STATUS_LABEL[entry.status];
+}
+
+/** One line on the closed History card: how much happened. */
+export function historySummary(entry: AdvanceRequestEntry): string {
+  const n = entry.api.logs?.length ?? 0;
+  return n ? `${n} ${n === 1 ? "entry" : "entries"}` : "";
 }

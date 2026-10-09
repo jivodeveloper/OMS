@@ -6,9 +6,11 @@ import { COLORS } from "@/src/constants/theme";
 import { fs, ms, sp } from "@/src/utils/responsive";
 
 import {
+  payeeOf,
   paymentAgainstLabel,
   requestAmount,
   typeLabel,
+  vendorRefs,
   type AdvanceRequestEntry,
 } from "../logic/approvalData";
 import { STATUS_LABEL } from "../logic/requestLabels";
@@ -53,6 +55,7 @@ export default function AdvanceRequestCard({
   // for — the same "is this settled?" question the payment card's invoice strip
   // answers. A typed-amount request has nothing to compare, so it shows a total.
   const open = c.reference ? allocationTotals(allocationRows(form)).open : 0;
+  const refs = vendorRefs(form);
   const awaitingMe = entry.api.flow?.awaiting_me ?? false;
 
   return (
@@ -70,8 +73,11 @@ export default function AdvanceRequestCard({
 
       <View style={styles.partyRow}>
         <View style={styles.partyCol}>
+          {/* WHO IS PAID. An Expense has no SAP partner — its payee is a
+              typed name — so `payeeOf` answers for both rather than leaving
+              an Expense card blank where every other card names someone. */}
           <Text style={styles.party} numberOfLines={2}>
-            {form.partnerName || form.partner || "—"}
+            {payeeOf(form) || "—"}
           </Text>
           <Text style={styles.partyCode}>
             {typeLabel(form)} · {paymentAgainstLabel(form)}
@@ -98,6 +104,16 @@ export default function AdvanceRequestCard({
               <Ionicons name="pricetag-outline" size={13} color={COLORS.primary} />
               <Text style={styles.chipText} numberOfLines={1}>
                 {form.purposeLabel}
+              </Text>
+            </View>
+          ) : null}
+          {/* THE VENDOR'S OWN NUMBER, which is what they quote when they ring
+              about a payment — OMS's request number means nothing to them. */}
+          {refs.length ? (
+            <View style={styles.chip}>
+              <Ionicons name="pricetags-outline" size={13} color={COLORS.primary} />
+              <Text style={styles.chipText} numberOfLines={1}>
+                {refs.length === 1 ? refs[0] : `${refs[0]} +${refs.length - 1}`}
               </Text>
             </View>
           ) : null}

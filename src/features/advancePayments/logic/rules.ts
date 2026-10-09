@@ -48,6 +48,8 @@ import {
   type OpenDocument,
   type Partner,
   type PartnerType,
+  GST_OPTIONS,
+  type GstCode,
   type PaymentAgainst,
   type PaymentMode,
   type ReturnMethod,
@@ -63,6 +65,64 @@ export interface Allocation {
 }
 
 export const EMPTY_ALLOCATION: Allocation = { mode: "FIXED", amount: "", percentage: "" };
+
+/**
+ * One line of an Expense request: an amount (the invoice value) to an
+ * expense G/L account.
+ *
+ * A requester who does not know the G/L ticks so (`glUnknown`) and says in
+ * the remarks what it is for: the Payment desk picks it. The desk also records
+ * the line's GST (the taxable amount is backed out of the amount), sets its
+ * month (blank: the request's) and the TDS, deducted on the taxable amount.
+ */
+export interface ExpenseLineForm {
+  /** The client's own key for the row (the server's id once saved, as text). */
+  id: string;
+  /** The invoice value. Fixed once raised: the Payment desk cannot change it. */
+  amount: string;
+  /** "I don't know the G/L account": remarks instead. */
+  glUnknown: boolean;
+  /** The Payment desk's: how much of the amount is GST. */
+  gstCode: GstCode;
+  glAccount: string;
+  glName: string;
+  effectMonth: string;
+  remarks: string;
+  /** The Payment desk's TDS for this line: "" (the request's), "NONE", or a code. */
+  tdsOverride: string;
+  /** As the server last worked them out (read-only): the TDS code and amount. */
+  tdsCode: string;
+  tdsAmount: string;
+}
+
+let expenseLineSeq = 0;
+
+/** A fresh, empty expense line. */
+export function newExpenseLine(): ExpenseLineForm {
+  expenseLineSeq += 1;
+  return {
+    id: `new-${expenseLineSeq}`,
+    amount: "",
+    glUnknown: false,
+    gstCode: "",
+    glAccount: "",
+    glName: "",
+    effectMonth: "",
+    remarks: "",
+    tdsOverride: "",
+    tdsCode: "",
+    tdsAmount: "",
+  };
+}
+
+/** A line's TDS choice meaning "no TDS on this line", whatever the request's. */
+export const NO_TDS = "NONE";
+
+/** SAP's Effective Month code for a date: "2026-10-07" -> "10-2026". */
+export function monthCodeOf(isoDate: string): string {
+  const [year, month] = isoDate.split("-");
+  return year && month ? `${month}-${year}` : "";
+}
 
 export interface RequestForm {
   company: Company | "";
@@ -136,10 +196,37 @@ export interface RequestForm {
   /** Payment Purpose: what the money is for, a code of the Payment Desk's list. */
   purpose: string;
   purposeLabel: string;
+  /**
+   * The purpose is approved "by department" (its `needs_head`): the request
+   * then names a Department Head. Set with the purpose, from the list.
+   */
+  purposeNeedsHead: boolean;
+  /**
+   * The Department Head: an HOD of the employee master, by employee code,
+   * with their name. Asked only when `needsDepartmentHead`. They approve
+   * through the OMS login the server matched to them (`departmentHeadLogin`,
+   * a username); an HOD with none cannot be submitted.
+   */
+  departmentHead: string;
+  departmentHeadName: string;
+  departmentHeadLogin: string;
   /** Who owns this request: a HOD or Sub-HOD, for information only. */
   ownership: string;
   paymentDate: string;
   remarks: string;
+  /* ── Expense only ── */
+  /** Who is paid: an Expense has no SAP partner, so the name is typed. */
+  payee: string;
+  /** SAP's Sub Budget (dimension 4): every expense line in SAP carries one. */
+  subBudget: string;
+  subBudgetName: string;
+  /** SAP's Effective Month ("10-2026") for every line that does not name its own: the Payment desk's. */
+  effectMonth: string;
+  /** An electricity expense: the head's owner, then the Director. */
+  isElectricity: boolean;
+  /** The Payment desk's TDS code for every line that does not name its own; "" none. */
+  expenseTdsCode: string;
+  expenseLines: ExpenseLineForm[];
 }
 
 export const EMPTY_FORM: RequestForm = {
@@ -164,9 +251,20 @@ export const EMPTY_FORM: RequestForm = {
   budgetName: "",
   purpose: "",
   purposeLabel: "",
+  purposeNeedsHead: false,
+  departmentHead: "",
+  departmentHeadName: "",
+  departmentHeadLogin: "",
   ownership: "",
   paymentDate: "",
   remarks: "",
+  payee: "",
+  subBudget: "",
+  subBudgetName: "",
+  effectMonth: "",
+  isElectricity: false,
+  expenseTdsCode: "",
+  expenseLines: [],
 };
 
 /* ── The documents a payment can be made against ─────────────────────────── */
@@ -291,12 +389,14 @@ export const availableOf = (doc: OpenDocument) => doc.oms?.available ?? doc.open
 interface CaseRule {
   /** Documents must be picked, and the payment is calculated from them. */
   reference?: ReferenceKind;
-  /** Ask when the payment is expected to be adjusted against the documents. */
+  /** Ask when the payment is expected to be adjusted against the documents. Optional. */
   expectedDate?: boolean;
   /** Ask how the money comes back (One Time / EMI / Other), and over what period. */
   repayment?: boolean;
   /** Ask when the bill is expected. */
   expectedBillDate?: boolean;
+  /** An Expense: lines to G/L accounts, a payee, Sub Budget and Month. */
+  expense?: boolean;
 }
 
 /**
@@ -343,6 +443,11 @@ export const CASE_RULES: Record<PartnerType, Partial<Record<PaymentAgainst, Case
   CUSTOMER: {
     AGAINST_LEDGER: { reference: "CUSTOMER_LEDGER" },
     ON_ACCOUNT: {},
+  },
+  // Straight to expense G/L accounts: no partner, no documents — its lines.
+  EXPENSE: {
+    DIRECT_EXPENSE: { expense: true },
+    INDIRECT_EXPENSE: { expense: true },
   },
 };
 
@@ -392,6 +497,8 @@ export function partnerSourceFor(
   if (type === "EMPLOYEE_ADVANCE") return "SAP_EMPLOYEES";
   if (type === "EMPLOYEE_IMPREST") return "SAP_IMPREST";
   if (type === "CUSTOMER") return "SAP_CUSTOMERS";
+  // An Expense may name the SAP vendor it pays (optional).
+  if (type === "EXPENSE") return "SAP_VENDORS";
   return null;
 }
 
@@ -433,6 +540,8 @@ export interface ResolvedCase {
   decided: boolean;
   /** A decided case with no document: the requester types the amount. */
   plainAmount: boolean;
+  /** An Expense: lines, payee, Sub Budget, Month; no partner, no purpose. */
+  expense: boolean;
 }
 
 function samplePartners(source: PartnerSource | null): Partner[] {
@@ -488,7 +597,9 @@ export function resolveCase(form: RequestForm): ResolvedCase {
         ? "Business Partner"
         : form.type === "CUSTOMER"
           ? "Customer"
-          : "Employee",
+          : form.type === "EXPENSE"
+            ? "Vendor"
+            : "Employee",
     partnerSource,
     livePartners,
     liveDocuments,
@@ -496,8 +607,29 @@ export function resolveCase(form: RequestForm): ResolvedCase {
     documents,
     selectedDocuments,
     decided,
-    plainAmount: decided && reference === null,
+    plainAmount: decided && reference === null && !rule?.expense,
+    expense: Boolean(rule?.expense),
   };
+}
+
+/* ── Who approves ────────────────────────────────────────────────────────── */
+
+/** Employee and Imprest requests always go to the requester's Department Head. */
+const HEAD_TYPES: ReadonlyArray<PartnerType> = ["EMPLOYEE_ADVANCE", "EMPLOYEE_IMPREST"];
+
+/**
+ * Whether the request names a Department Head, who approves it: outside Mart,
+ * an Employee or Imprest request, or a purpose approved "by department".
+ * The server applies the same rule (`purposes.needs_department_head`).
+ */
+export function needsDepartmentHead(form: RequestForm): boolean {
+  if (!form.company || form.company === "MART") return false;
+  return (form.type !== "" && HEAD_TYPES.includes(form.type)) || form.purposeNeedsHead;
+}
+
+/** An HOD picked who has no OMS login: they could not approve it. */
+export function departmentHeadLoginError(name: string): string {
+  return `${name || "That Department Head"} has no OMS login to approve with. Choose another, or ask an administrator to create one.`;
 }
 
 /* ── Changing an answer, and what it invalidates ─────────────────────────── */
@@ -505,7 +637,7 @@ export function resolveCase(form: RequestForm): ResolvedCase {
 const CLEARED_DOCUMENTS = { selected: [] as OpenDocument[], allocations: {} } as const;
 const CLEARED_PARTNER = { partner: "", partnerName: "" } as const;
 /** Budget heads are cost centres of ONE company's SAP. The purpose is not. */
-const CLEARED_DEPARTMENT = { budget: "", budgetName: "" } as const;
+const CLEARED_DEPARTMENT = { budget: "", budgetName: "", subBudget: "", subBudgetName: "" } as const;
 const CLEARED_REPAYMENT = {
   returnMethod: "",
   returnMethodOther: "",
@@ -584,9 +716,29 @@ export function sanitize(form: RequestForm): RequestForm {
     next.emiAmount = "";
   }
 
+  // Expense fields live only on an Expense; an Expense names no purpose.
+  if (!c.expense) {
+    next.payee = "";
+    next.subBudget = "";
+    next.subBudgetName = "";
+    next.effectMonth = "";
+    next.isElectricity = false;
+    next.expenseTdsCode = "";
+    next.expenseLines = [];
+  } else {
+    next.purpose = "";
+    next.purposeLabel = "";
+    next.purposeNeedsHead = false;
+  }
+
   // Typed answers live only as long as the "other" choice they describe.
   if (next.paymentAgainst !== "OTHER") next.paymentAgainstOther = "";
   if (next.returnMethod !== "CUSTOM") next.returnMethodOther = "";
+  if (!needsDepartmentHead(next)) {
+    next.departmentHead = "";
+    next.departmentHeadName = "";
+    next.departmentHeadLogin = "";
+  }
 
   return next;
 }
@@ -611,9 +763,18 @@ export function applyChange(form: RequestForm, patch: Partial<RequestForm>): Req
     next = { ...next, ...CLEARED_PARTNER, ...CLEARED_DOCUMENTS, ...CLEARED_DEPARTMENT };
   }
   if (changed("type")) {
+    // A type with ONE answer (Expense: Direct Expense) has it picked for it.
+    const only = next.type ? Object.keys(CASE_RULES[next.type]) : [];
     next = {
       ...next,
-      paymentAgainst: "",
+      // An Expense is not asked it: direct or indirect follows from its G/L
+      // accounts (the server decides; indirect until a direct one is chosen).
+      paymentAgainst:
+        next.type === "EXPENSE"
+          ? "INDIRECT_EXPENSE"
+          : only.length === 1
+            ? (only[0] as PaymentAgainst)
+            : "",
       ...CLEARED_PARTNER,
       ...CLEARED_DOCUMENTS,
       amount: "",
@@ -651,6 +812,14 @@ export function applyChange(form: RequestForm, patch: Partial<RequestForm>): Req
   // has no documents, so the typed amount stands.
   if (changed("partner") && resolveCase(next).reference) {
     next = { ...next, ...CLEARED_DOCUMENTS };
+  }
+  // An Expense's vendor names who is paid, unless something else was typed.
+  if (changed("partner") && resolveCase(next).expense && (!form.payee || form.payee === form.partnerName)) {
+    next = { ...next, payee: next.partnerName };
+  }
+  // Starting an Expense: one line to fill in. (The month is the Payment desk's.)
+  if (resolveCase(next).expense && !resolveCase(form).expense) {
+    next = { ...next, expenseLines: next.expenseLines.length ? next.expenseLines : [newExpenseLine()] };
   }
 
   return sanitize(next);
@@ -796,6 +965,63 @@ export function plainAmountError(amount: string): string | null {
   if (value === null) return null;
   if (Number.isNaN(value) || value <= 0) return "Enter an amount above zero.";
   return null;
+}
+
+/* ── Expense lines ───────────────────────────────────────────────────────── */
+
+/** Most lines one Expense may carry (the server's `MAX_EXPENSE_LINES`). */
+export const MAX_EXPENSE_LINES = 50;
+
+const toPaisa = (value: number) => Math.round(value * 100) / 100;
+
+/** A line's amount (its invoice value), or 0 while it is blank or not a positive number. */
+export function lineInvoice(line: ExpenseLineForm): number {
+  const value = parseNumber(line.amount);
+  return value !== null && !Number.isNaN(value) && value > 0 ? value : 0;
+}
+
+/** A line's taxable amount: its amount less the GST the desk records — as the server works it. */
+export function lineTaxable(line: ExpenseLineForm): number {
+  const rate = GST_OPTIONS.find((o) => o.value === line.gstCode)?.rate ?? 0;
+  return toPaisa((lineInvoice(line) * 100) / (100 + rate));
+}
+
+/** A line's GST: what of its amount is not taxable value. */
+export function lineGst(line: ExpenseLineForm): number {
+  return toPaisa(lineInvoice(line) - lineTaxable(line));
+}
+
+/** What an Expense is worth: the sum of its lines' invoice values. */
+export function expenseTotal(lines: ExpenseLineForm[]): number {
+  return toPaisa(lines.reduce((sum, line) => sum + lineInvoice(line), 0));
+}
+
+/** The TDS code a line deducts: its own, the request's, or none. */
+export function lineTdsCode(line: ExpenseLineForm, form: RequestForm): string {
+  if (line.tdsOverride === NO_TDS) return "";
+  return line.tdsOverride || form.expenseTdsCode;
+}
+
+/**
+ * A line's TDS on its taxable amount, rounded to the rupee (as the Act and
+ * the server round it). `rateOf` the rate of a TDS code; without it, the TDS
+ * the server last worked out.
+ */
+export function lineTds(line: ExpenseLineForm, form: RequestForm, rateOf?: (code: string) => number | null): number {
+  if (!rateOf) return Number(line.tdsAmount) || 0;
+  const code = lineTdsCode(line, form);
+  const rate = code ? rateOf(code) : null;
+  return rate ? Math.round((lineTaxable(line) * rate) / 100) : 0;
+}
+
+/** An Expense's TDS: the sum of its lines'. */
+export function expenseTds(form: RequestForm, rateOf?: (code: string) => number | null): number {
+  return form.expenseLines.reduce((sum, line) => sum + lineTds(line, form, rateOf), 0);
+}
+
+/** What the Expense's payment pays: its invoice values less its TDS. */
+export function expenseNet(form: RequestForm, rateOf?: (code: string) => number | null): number {
+  return toPaisa(expenseTotal(form.expenseLines) - expenseTds(form, rateOf));
 }
 
 /* ── Repayment ───────────────────────────────────────────────────────────── */
@@ -973,6 +1199,40 @@ export interface Validation {
 }
 
 /**
+ * An Expense's own fields: its lines — each an amount, and a G/L or (not
+ * knowing it) remarks saying what it is for. `atPayment`: the Payment desk's
+ * check — every line must then have its G/L and a month, and the request its
+ * Sub Budget.
+ */
+export function validateExpense(form: RequestForm, { atPayment = false } = {}): Validation {
+  const missing: string[] = [];
+  const problems: string[] = [];
+  if (atPayment && !form.subBudget) missing.push("Sub Budget");
+  if (form.expenseLines.length === 0) missing.push("Expense lines");
+  if (form.expenseLines.length > MAX_EXPENSE_LINES) {
+    problems.push(`An Expense may have at most ${MAX_EXPENSE_LINES} lines.`);
+  }
+  if (atPayment && form.expenseLines.some((line) => !(line.effectMonth || form.effectMonth))) {
+    missing.push("Month");
+  }
+  form.expenseLines.forEach((line, index) => {
+    const n = index + 1;
+    const error = plainAmountError(line.amount);
+    if (error) problems.push(`Line ${n}: enter an amount above zero.`);
+    else if (!line.amount) missing.push(`Amount on line ${n}`);
+    if (atPayment) {
+      if (!line.glAccount) missing.push(`G/L account on line ${n}`);
+    } else if (line.glUnknown) {
+      // Not knowing the G/L is allowed (Payment picks it), but then say what it is for.
+      if (!line.remarks.trim()) missing.push(`Remarks on line ${n} (what it is for)`);
+    } else if (!line.glAccount) {
+      missing.push(`G/L account on line ${n}`);
+    }
+  });
+  return { missing, problems };
+}
+
+/**
  * Required means required WHILE VISIBLE. A field the case does not show is
  * never listed as missing — it cannot be filled, and `sanitize` guarantees
  * it is empty anyway.
@@ -988,10 +1248,19 @@ export function validate(form: RequestForm, today: string = todayIso()): Validat
   else if (form.paymentAgainst === "OTHER" && !form.paymentAgainstOther.trim()) {
     missing.push("Payment Against (what it is)");
   }
-  if (c.decided && !form.partner) missing.push(c.partnerLabel);
+  if (c.decided && !c.expense && !form.partner) missing.push(c.partnerLabel);
   if (!form.budget) missing.push("Department");
-  if (!form.purpose) missing.push("Payment Purpose");
-  if (c.expectedDate && !form.expectedDate) missing.push("Expected Bill Date");
+  if (c.expense) {
+    const expense = validateExpense(form);
+    missing.push(...expense.missing);
+    problems.push(...expense.problems);
+  } else if (!form.purpose) missing.push("Payment Purpose");
+  if (needsDepartmentHead(form)) {
+    if (!form.departmentHead) missing.push("Department Head");
+    else if (!form.departmentHeadLogin) problems.push(departmentHeadLoginError(form.departmentHeadName));
+  }
+  // Vendor → Against PO's Expected Bill Date is optional; one that is given
+  // still may not be in the past.
   const poDate = c.expectedDate
     ? pastDateError("Expected Bill Date", form.expectedDate, today)
     : null;
@@ -1052,11 +1321,14 @@ export function validate(form: RequestForm, today: string = todayIso()): Validat
     ? pastDateError("Expected Bill Date", form.expectedBillDate, today)
     : null;
   if (billDate) problems.push(billDate);
-  if (!form.ownership.trim()) missing.push("Ownership");
-  if (!form.paymentDate) missing.push("Payment Date");
-  const payDate = pastDateError("Payment Date", form.paymentDate, today);
-  if (payDate) problems.push(payDate);
-  if (!form.remarks.trim()) missing.push("Remarks");
+  // An Expense is not asked them: dated the day it is raised, remarks optional.
+  if (!c.expense) {
+    if (!form.ownership.trim()) missing.push("Ownership");
+    if (!form.paymentDate) missing.push("Payment Date");
+    const payDate = pastDateError("Payment Date", form.paymentDate, today);
+    if (payDate) problems.push(payDate);
+    if (!form.remarks.trim()) missing.push("Remarks");
+  }
 
   return { missing, problems };
 }

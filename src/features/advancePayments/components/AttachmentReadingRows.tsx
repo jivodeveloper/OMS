@@ -1,18 +1,14 @@
 import { Ionicons } from "@expo/vector-icons";
-import React, { useEffect, useState } from "react";
+import React from "react";
 import { StyleSheet, Text, View } from "react-native";
 
 import { COLORS } from "@/src/constants/theme";
 import { fs, ms, sp } from "@/src/utils/responsive";
 import {
-  advancePaymentError,
-  advancePaymentService,
   type AttachmentCheck,
   type AttachmentReading,
   type ReadField,
 } from "@/src/services/advancePayment.service";
-
-import type { DocumentAttachment } from "../logic/constants";
 
 /**
  * What reading a PO's or bill's SAP attachment found, and how it compares with
@@ -93,41 +89,18 @@ function ReadingFields({ data }: { data: AttachmentReading }) {
 }
 
 export default function AttachmentReadingRows({
-  attachment,
   stored,
 }: {
-  attachment: DocumentAttachment;
+  /**
+   * The reading SAVED WITH THE REQUEST. There is no other kind now: the
+   * automatic OCR of SAP attachments was removed on 2026-10-07, on both
+   * clients, so a request raised since carries none and this shows nothing.
+   * Reading one here would be ~10 s a page for a comparison nobody acted on.
+   */
   stored?: AttachmentCheck | null;
 }) {
-  const [live, setLive] = useState<AttachmentCheck | null>(null);
-  const [loading, setLoading] = useState(false);
+  const reading = stored;
 
-  // Read now ONLY when the request carries no reading of its own.
-  useEffect(() => {
-    if (stored) return;
-    let alive = true;
-    setLoading(true);
-    advancePaymentService
-      .readDocumentAttachment(attachment.company, attachment.kind, attachment.docEntry)
-      .then((reading) => {
-        if (alive) setLive(reading);
-      })
-      .catch((err) => {
-        if (alive) setLive({ error: advancePaymentError(err) });
-      })
-      .finally(() => {
-        if (alive) setLoading(false);
-      });
-    return () => {
-      alive = false;
-    };
-  }, [stored, attachment.company, attachment.kind, attachment.docEntry]);
-
-  const reading = stored ?? live;
-
-  if (loading && !reading) {
-    return <Text style={styles.muted}>Reading the attachment…</Text>;
-  }
   if (!reading) return null;
   if ("error" in reading) {
     return (

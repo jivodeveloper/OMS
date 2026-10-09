@@ -16,7 +16,6 @@ import { useRefreshOnFocus } from "@/src/hooks/useRefreshOnFocus";
 import { COLORS } from "@/src/constants/theme";
 import { fs, ms, sp } from "@/src/utils/responsive";
 import {
-  advancePaymentError,
   advancePaymentService,
   type ApiRequest,
 } from "@/src/services/advancePayment.service";
@@ -25,6 +24,7 @@ import EditChangeRows, {
   ManualAccountFlag,
 } from "../components/EditChangeRows";
 import { formatDateTime } from "../logic/requestLabels";
+import { failureMessage } from "../showError";
 
 /**
  * Where one advance payment request has got to.
@@ -166,7 +166,7 @@ export default function AdvanceProgressScreen() {
       try {
         setRequest(await advancePaymentService.request(requestId));
       } catch (err) {
-        setError(advancePaymentError(err));
+        setError(failureMessage(err));
       } finally {
         setLoading(false);
         setRefreshing(false);

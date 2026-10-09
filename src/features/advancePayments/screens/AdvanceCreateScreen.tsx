@@ -20,10 +20,6 @@ import { advancePaymentService } from "@/src/services/advancePayment.service";
 import AdvanceRequestForm from "../components/AdvanceRequestForm";
 import { takeDraftFor } from "../draftHandover";
 import { showFailure } from "../showError";
-import {
-  useBackgroundReadings,
-  withReadings,
-} from "../hooks/useAttachmentReadings";
 import type { FileAttachment } from "../logic/attachments";
 import { toApiRequest } from "../logic/requestApi";
 import { EMPTY_FORM, validate, type RequestForm } from "../logic/rules";
@@ -62,18 +58,11 @@ export default function AdvanceCreateScreen() {
    */
   const [showErrors, setShowErrors] = useState(false);
 
-  // The chosen documents' SAP attachments are read while the requester keeps
-  // filling the form, so each document is saved with what its attachment says.
-  //
-  // SUBMIT DOES NOT WAIT FOR THEM — and this is where the app parts from the
-  // web, which disables its Submit while any read is in flight. On a phone,
-  // on a phone's network, blocking a finished request behind a ~10 s-a-page
-  // OCR is a requester stuck staring at a dead button. Whatever has arrived by
-  // then is sent; a document still being read is simply saved without its
-  // reading, and the approver's screen reads it live instead — the same
-  // fallback the web already uses for requests raised before readings existed.
-  // Nothing is lost but the head start.
-  const background = useBackgroundReadings(form.selected);
+  // THE AUTOMATIC READING OF SAP ATTACHMENTS IS GONE (2026-10-07), on both
+  // clients. It was OCR on a scan — ~10 s a page, every time a document was
+  // ticked — to prefill a comparison nobody acted on, and on a phone's network
+  // it was the slowest thing the form did. A request raised before then keeps
+  // the reading saved with it, and the details screen still shows that.
 
   const { missing, problems } = validate(form);
   const blocking = problems[0] ?? (missing.length ? `${missing[0]} is still needed.` : "");
@@ -105,9 +94,16 @@ export default function AdvanceCreateScreen() {
       setShowErrors(true);
       appAlert(
         "Check the form",
-        problems.length
-          ? problems.join("\n")
-          : `Still needed:\n• ${missing.join("\n• ")}`,
+        // BOTH, never one or the other: a form can have something WRONG
+        // in it (a date in the past) AND something still EMPTY, and
+        // showing only the first means the requester fixes it, taps
+        // Submit and is stopped again by what was already known.
+        [
+          ...problems,
+          ...(missing.length
+            ? [`Still needed:\n• ${missing.join("\n• ")}`]
+            : []),
+        ].join("\n"),
       );
       return;
     }
@@ -117,7 +113,7 @@ export default function AdvanceCreateScreen() {
         .map((attachment) => attachment.file)
         .filter((file): file is NonNullable<typeof file> => file !== undefined);
       const request = await advancePaymentService.createRequest(
-        toApiRequest(withReadings(form, background.readings)),
+        toApiRequest(form),
         picked,
       );
       appAlert("Request submitted", `${request.request_no} is with its first approver.`, [

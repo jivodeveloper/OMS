@@ -4,10 +4,10 @@ import { StyleSheet, Text, TextInput, View } from "react-native";
 import DialogFooter from "@/src/features/approval/components/dialogs/DialogFooter";
 import DialogHeader from "@/src/features/approval/components/dialogs/DialogHeader";
 import DialogShell from "@/src/features/approval/components/dialogs/DialogShell";
+import { failureDetails, failureMessage } from "../showError";
 import { COLORS } from "@/src/constants/theme";
 import { fs, sp } from "@/src/utils/responsive";
 import {
-  advancePaymentError,
   advancePaymentService,
 } from "@/src/services/advancePayment.service";
 
@@ -57,7 +57,10 @@ export default function ManualAccountPassword({
       setError("");
       onConfirmed(token);
     } catch (err) {
-      setError(advancePaymentError(err));
+      // The server's own words: "Wrong password." is one answer, "Typing an
+      // account by hand needs the Payments Approval permission." is another,
+      // and they call for different things.
+      setError([failureMessage(err), ...failureDetails(err)].join(" "));
     } finally {
       setBusy(false);
     }

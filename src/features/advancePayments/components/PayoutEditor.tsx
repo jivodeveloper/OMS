@@ -34,6 +34,7 @@ import {
   type PayoutMethod,
 } from "../logic/payout";
 import { payoutFileChanges, payoutToApi } from "../logic/requestApi";
+import { failureDetails, failureMessage, showFailure } from "../showError";
 import { formatINR } from "../logic/rules";
 import { DateField, Field, Input, Notice, NoticeText, Section, Select } from "./AdvanceUi";
 import ManualAccountPassword from "./ManualAccountPassword";
@@ -75,10 +76,18 @@ const MANUAL = "__manual__";
  */
 const PAY_TO_FIELDS = new Set(["Beneficiary Name", "To Account Number", "IFSC"]);
 
-/** What the page needs to drive the Save button and gate Approve. */
+/** What the page needs to save these details before it approves. */
 export interface PayoutStatus {
-  /** Save the details. The button lives at the foot of the page, not in here. */
-  save: () => void;
+  /**
+   * Save the details, ANSWERING WITH THE SAVED REQUEST — or null if it was
+   * refused (the reason has already been shown here).
+   *
+   * The request itself, not just "it worked", because SAVING BUMPS THE FLOW'S
+   * VERSION: the page approves straight afterwards, and sending the version it
+   * had before the save is a stale screen as far as the server is concerned —
+   * a 409 on the approval of something that had just saved cleanly.
+   */
+  save: () => Promise<ApiRequest | null>;
   saving: boolean;
   /** Nothing left to fix — `validatePayout` is satisfied. */
   ready: boolean;
@@ -241,7 +250,11 @@ export default function PayoutEditor({
     JSON.stringify(payoutToApi(payout)) !==
     JSON.stringify(initial ? payoutToApi(initial) : null);
 
-  const save = async () => {
+  const save = async (): Promise<ApiRequest | null> => {
+    // NOTHING TO SAVE IS A SUCCESS, and the request is unchanged. The page
+    // calls this before approving, and a request whose details are already on
+    // the server must not be written again just because somebody opened it.
+    if (!dirty && initial) return request;
     setSaving(true);
     setError("");
     try {
@@ -267,8 +280,22 @@ export default function PayoutEditor({
         saved = await advancePaymentService.removeRequestFile(request.id, fileId);
       }
       onSaved(saved);
+      return saved;
     } catch (err) {
-      setError(advancePaymentError(err));
+      /*
+       * BOTH, and deliberately.
+       *
+       * The dialog carries EVERY line the server gave — a payout refusal is
+       * usually field-level ("to_account: This field is required.", "The
+       * payment lines come to 4,000, not 5,000") and the headline alone sends
+       * the desk hunting. The inline line then keeps the headline on the card
+       * after the dialog is dismissed, so the reason is still there while the
+       * fields are corrected.
+       */
+      showFailure("Could not save the payment details", err);
+      setError([failureMessage(err), ...failureDetails(err)].join("\n"));
+      console.warn("[advance-payments] payout save refused", err);
+      return null;
     } finally {
       setSaving(false);
     }

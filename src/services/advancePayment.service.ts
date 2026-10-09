@@ -80,6 +80,33 @@ export interface SapAttachment {
 /** A check on a payment proof: matches, shows something else, or cannot tell. */
 export type ProofCheck = boolean | null;
 
+/** One open line of a vendor's ledger that still debits them: paid, not yet adjusted. */
+export interface VendorOnAccountRow {
+  trans_id: number;
+  line_id: number;
+  doc_type: string;
+  doc_type_code: number | null;
+  doc_num: string;
+  posting_date: string | null;
+  paid: string;
+  open: string;
+  memo: string;
+  reference: string;
+  /** The OMS request that posted it, or null when it was paid outside OMS. */
+  oms_request: string | null;
+}
+
+export interface VendorOnAccount {
+  company: string;
+  card_code: string;
+  total_open: string;
+  outside_oms: string;
+  /** False when every PO asked about was created in SAP before `track_from`: show nothing. */
+  applies: boolean;
+  track_from: string;
+  results: VendorOnAccountRow[];
+}
+
 /** What `/payment-proof/` found in an uploaded statement or advice. */
 export interface PaymentProofResult {
   /** "advice" (one payment) or "statement" (many). */
@@ -141,6 +168,19 @@ export interface PaymentPurpose {
   code: string;
   label: string;
   group: string;
+  /** Outside Mart, approved by the Department Head the requester picks. */
+  needs_head?: boolean;
+}
+
+/**
+ * Someone who may be picked as a request's Department Head: an HOD of the
+ * employee master, with the OMS login that approves for them (matched on the
+ * server), or null when none matches — then they cannot be submitted.
+ */
+export interface DepartmentHeadChoice {
+  employee_code: string;
+  employee_name: string;
+  user: ApiUser | null;
 }
 
 /** One active employee from the master, as the request form's pickers read it. */
@@ -298,6 +338,8 @@ export interface SapOpenInvoice {
   doc_total: string;
   paid_to_date: string;
   balance_due: string;
+  /** The TDS SAP withheld on the bill (`WTSum`); "0" when none was. */
+  tds?: string;
   attachment: SapAttachment | null;
   /** What OMS already holds against it. */
   oms?: SapOmsUsage;
@@ -327,6 +369,13 @@ export interface SapOpenPurchaseOrder {
   received_amount: string;
   open_amount: string;
   remarks: string;
+  /**
+   * The TDS SAP withheld on the bills raised from this PO (SAP never carries
+   * TDS on a PO itself), and how many such bills there are. Null when SAP
+   * could not be asked.
+   */
+  tds_on_bills?: string | null;
+  billed?: number | null;
   attachment: SapAttachment | null;
   /** What OMS already holds against it. */
   oms?: SapOmsUsage;
@@ -342,6 +391,8 @@ export interface SapOpenPurchaseOrder {
  */
 /** What OMS already holds against a SAP document (amounts as strings). */
 export interface SapOmsUsage {
+  /** False: created in SAP before the cut-off (6 Oct 2026) — `available` is SAP's open amount as it is. */
+  tracked?: boolean;
   reserved: string;
   paid: string;
   /** A PO: how much of `paid` SAP still holds on account (not yet set off against a bill). */
@@ -686,7 +737,7 @@ export interface SapPartnerLedger {
 
 export interface ApiRequestFields {
   company: AdvancePaymentCompany;
-  request_type: "VENDOR" | "EMPLOYEE_ADVANCE" | "EMPLOYEE_IMPREST" | "CUSTOMER";
+  request_type: "VENDOR" | "EMPLOYEE_ADVANCE" | "EMPLOYEE_IMPREST" | "CUSTOMER" | "EXPENSE";
   payment_against: string;
   payment_against_other: string;
   partner_code: string;
@@ -707,11 +758,82 @@ export interface ApiRequestFields {
   budget_code: string;
   /** Payment Purpose: a code of the Payment Desk's list. */
   purpose_code: string;
+  /** Expense only: SAP's Effective Month ("10-2026") of every line not naming its own. */
+  effect_month: string;
+  /** Expense only: an electricity expense (the Director approves it too). */
+  is_electricity: boolean;
+}
+
+/** An expense G/L account an Expense line may pay to. */
+export interface SapExpenseAccount {
+  code: string;
+  name: string;
+  /** The parent account it sits under (its group). */
+  group: string;
+  /** Direct (SAP's 5100000 group) or indirect (5610000-5690000). */
+  kind: "DIRECT" | "INDIRECT";
+}
+
+/** SAP's Effective Months, newest first, and the company's Variety. */
+export interface SapExpenseMonths {
+  company: AdvancePaymentCompany;
+  months: string[];
+  variety: string;
+}
+
+/** One line of an Expense request as the form sends it. */
+export interface ApiExpenseLineInput {
+  /** The invoice value. */
+  amount: string;
+  /** The Payment desk's: "" (no GST), CGST_SGST_5, CGST_SGST_18, IGST_5, IGST_18 — for the record. */
+  gst_code: string;
+  /** Blank: the Payment stage fills it in (then `remarks` says what it is for). */
+  gl_account: string;
+  /** Blank: the request's month. */
+  effect_month: string;
+  remarks: string;
+  /** The Payment desk's TDS for the line: "" (the request's), "NONE", or a code. */
+  tds_override?: string;
+}
+
+/** The Payment desk's correction of an Expense request. */
+export interface ApiExpenseEdit {
+  sub_budget_code: string;
+  effect_month: string;
+  is_electricity: boolean;
+  expense_tds_code: string;
+  expense_lines: ApiExpenseLineInput[];
+}
+
+/** One line of an Expense request as the server holds it. */
+export interface ApiExpenseLine extends ApiExpenseLineInput {
+  id: number;
+  line_no: number;
+  /** The amount less its GST: what TDS is on. */
+  taxable_amount: string;
+  gst_amount: string;
+  gl_name: string;
+  /** The month it posts to: its own, else the request's. */
+  month: string;
+  tds_code: string;
+  tds_label: string;
+  tds_rate: string | null;
+  tds_amount: string;
+  /** What SAP's payment pays to its G/L: the invoice value less TDS. */
+  net: string;
 }
 
 /** What the form sends to raise or edit a request. */
 export interface ApiRequestInput extends ApiRequestFields {
+  /** The Department Head: an HOD's employee code; null where none is asked. */
+  department_head_code: string | null;
   documents: ApiRequestDocument[];
+  /** Expense only: SAP's Sub Budget (dimension 4). */
+  sub_budget_code?: string;
+  /** Expense, the Payment desk only: the TDS code of every line not naming its own. */
+  expense_tds_code?: string;
+  /** Expense only: what it pays. */
+  expense_lines?: ApiExpenseLineInput[];
   /** Raised from a bill / PO sent to the creator: closes that assignment. */
   assignment_id?: number;
 }
@@ -726,10 +848,18 @@ export interface ApiRequest extends ApiRequestFields {
   currency: string;
   owner_employee_id: number | null;
   budget_name: string;
-  /** Sub Budget: only on requests raised before it stopped being asked. */
+  /** Sub Budget: an Expense's, or a request raised before it stopped being asked. */
   sub_budget_code: string;
   sub_budget_name: string;
+  /** Expense only: the lines it pays (empty otherwise). */
+  expense_lines: ApiExpenseLine[];
+  /** Expense only: the Payment desk's TDS code for every line not naming its own. */
+  expense_tds_code: string;
   purpose_label: string;
+  /** The Department Head picked on the request (an HOD), or null where the route has none. */
+  department_head_employee: { employee_code: string; employee_name: string } | null;
+  /** Their OMS login: who approves at the Department Head stage. */
+  department_head: ApiUser | null;
   status: ApiRequestStatus;
   created_by: ApiUser;
   created_on: string;
@@ -954,6 +1084,18 @@ export const advancePaymentService = {
   budgets: async (company: AdvancePaymentCompany): Promise<SapBudget[]> =>
     rows<SapBudget>(guard(await api.get(`${BASE}/budgets/${query({ company })}`))),
 
+  /** The expense G/L accounts an Expense line may pay to. */
+  expenseAccounts: async (company: AdvancePaymentCompany): Promise<SapExpenseAccount[]> =>
+    rows<SapExpenseAccount>(
+      guard(await api.get(`${BASE}/expense-accounts/${query({ company })}`)),
+    ),
+
+  /** SAP's Effective Months (newest first) and the company's Variety. */
+  expenseMonths: async (company: AdvancePaymentCompany): Promise<SapExpenseMonths> =>
+    unwrap<SapExpenseMonths>(
+      guard(await api.get(`${BASE}/expense-months/${query({ company })}`)),
+    ),
+
   /**
    * A partner's whole open ledger (JDT1, as SAP's own ageing reads it),
    * oldest due first, with the totals that say which way the balance runs.
@@ -969,6 +1111,32 @@ export const advancePaymentService = {
             company,
             card_code: cardCode,
             limit: DOCUMENT_LIMIT,
+          })}`,
+        ),
+      ),
+    ),
+
+  /**
+   * The vendor's money paid but NOT YET ADJUSTED against a bill, from their
+   * SAP ledger.
+   *
+   * Shown beside their POs and never deducted from them: SAP does not say
+   * which PO such a payment was for. `po_entries` are the POs in question —
+   * the answer's `applies` is false when every one of them predates the
+   * cut-off OMS tracks from, and the page then shows nothing.
+   */
+  vendorOnAccount: async (
+    company: AdvancePaymentCompany,
+    cardCode: string,
+    poEntries: number[] = [],
+  ): Promise<VendorOnAccount> =>
+    unwrap<VendorOnAccount>(
+      guard(
+        await api.get(
+          `${BASE}/vendor-on-account/${query({
+            company,
+            card_code: cardCode,
+            ...(poEntries.length ? { po_entries: poEntries.join(",") } : {}),
           })}`,
         ),
       ),
@@ -1003,6 +1171,12 @@ export const advancePaymentService = {
    */
   paymentPurposes: async (): Promise<PaymentPurpose[]> =>
     rows<PaymentPurpose>(guard(await api.get(`${BASE}/payment-purposes/`))),
+
+  /** The employee master's HODs, each with their OMS login, for the Department Head picker. */
+  departmentHeads: async (search = ""): Promise<DepartmentHeadChoice[]> =>
+    rows<DepartmentHeadChoice>(
+      guard(await api.get(`${BASE}/department-heads/${query({ search })}`)),
+    ),
 
   /** SAP's customers (OCRD CardType C): who a refund is paid to. */
   customers: async (
@@ -1232,6 +1406,19 @@ export const advancePaymentService = {
           ...(manualToken ? { manual_token: manualToken } : {}),
         }),
       ),
+    ),
+
+  /**
+   * The Payment desk corrects an Expense request: sub budget, month,
+   * electricity, the TDS and the lines. Logged as "Edited at Payment".
+   */
+  editExpense: async (
+    id: number,
+    edit: ApiExpenseEdit,
+    version?: number,
+  ): Promise<ApiRequest> =>
+    unwrap<ApiRequest>(
+      guard(await api.put(`${BASE}/requests/${id}/expense/`, { ...edit, version })),
     ),
 
   /** The Payment user's password, before typing a payee account by hand. Returns the token. */

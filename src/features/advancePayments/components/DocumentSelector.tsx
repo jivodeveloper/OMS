@@ -26,6 +26,7 @@ import {
   type ReferenceKind,
   type RequestForm,
 } from "../logic/rules";
+import { sapTdsLabel } from "../logic/sapMapping";
 import { Card, Notice, NoticeText } from "./AdvanceUi";
 
 /**
@@ -243,7 +244,11 @@ function DocumentRow({
             {document.reference ? ` · ${document.reference}` : ""}
           </Text>
           <Text style={styles.docMeta}>
-            {def.originalLabel} {formatINR(document.original)} · {def.paidLabel}{" "}
+            {def.originalLabel} {formatINR(document.original)} ·{" "}
+            {/* FROM THE CUT-OFF, OMS ALONE TRACKS IT: `paid` is then what OMS
+                itself paid, not SAP's own figure, and saying "Paid" of it
+                would claim more than OMS knows. */}
+            {document.oms?.tracked ? "Paid via OMS" : def.paidLabel}{" "}
             {formatINR(document.paid)}
           </Text>
           <Text style={styles.docOpen}>
@@ -258,6 +263,14 @@ function DocumentRow({
               {formatINR(available)} available · {formatINR(document.open - available)} held by
               other requests
             </Text>
+          ) : null}
+          {/* WHETHER SAP ALREADY WITHHELD TDS, said BEFORE the document is
+              ticked: a requester asking for the full amount of a bill SAP has
+              already deducted TDS on is asking for more than is owed. A PO
+              carries no TDS in SAP, so it speaks for the bills raised from
+              it. */}
+          {sapTdsLabel(document) ? (
+            <Text style={styles.docTds}>{sapTdsLabel(document)}</Text>
           ) : null}
           {document.note ? <Text style={styles.docNote}>{document.note}</Text> : null}
         </View>
@@ -450,6 +463,8 @@ const styles = StyleSheet.create({
   },
   sideTagText: { fontSize: 10, fontWeight: "900" },
   docNote: { fontSize: 11, color: COLORS.warning, fontWeight: "700", marginTop: 2 },
+  // SAP's own deduction: a fact about the document, not a warning about it.
+  docTds: { fontSize: 11, color: COLORS.textSecondary, marginTop: 2 },
 
   line: {
     marginTop: SPACING.sm,

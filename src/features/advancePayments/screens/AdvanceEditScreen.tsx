@@ -21,10 +21,6 @@ import {
 } from "@/src/services/advancePayment.service";
 
 import AdvanceRequestForm from "../components/AdvanceRequestForm";
-import {
-  useBackgroundReadings,
-  withReadings,
-} from "../hooks/useAttachmentReadings";
 import type { FileAttachment } from "../logic/attachments";
 import { failureMessage, showFailure } from "../showError";
 import { fromApiRequest, toApiRequest } from "../logic/requestApi";
@@ -83,9 +79,9 @@ export default function AdvanceEditScreen() {
     };
   }, [requestId]);
 
-  // Reads the SAP attachment of any document ADDED by this edit; one already
-  // carrying a reading is left as it was read when the request was raised.
-  const background = useBackgroundReadings(form.selected);
+  // The automatic reading of SAP attachments is gone (2026-10-07) — see the
+  // note in `AdvanceCreateScreen`. A document keeps whatever reading it was
+  // saved with; nothing new is read.
 
   const { missing, problems } = validate(form);
   const blocking = problems[0] ?? (missing.length ? `${missing[0]} is still needed.` : "");
@@ -98,9 +94,16 @@ export default function AdvanceEditScreen() {
       setShowErrors(true);
       appAlert(
         "Check the form",
-        problems.length
-          ? problems.join("\n")
-          : `Still needed:\n• ${missing.join("\n• ")}`,
+        // BOTH, never one or the other: a form can have something WRONG
+        // in it (a date in the past) AND something still EMPTY, and
+        // showing only the first means the requester fixes it, taps
+        // Submit and is stopped again by what was already known.
+        [
+          ...problems,
+          ...(missing.length
+            ? [`Still needed:\n• ${missing.join("\n• ")}`]
+            : []),
+        ].join("\n"),
       );
       return;
     }
@@ -110,11 +113,9 @@ export default function AdvanceEditScreen() {
       const picked = files
         .map((attachment) => attachment.file)
         .filter((file): file is NonNullable<typeof file> => file !== undefined);
-      // A document already carrying a reading is left alone; only one newly
-      // added to the request is read. See `useBackgroundReadings`.
       const saved = await advancePaymentService.editRequest(
         request.id,
-        toApiRequest(withReadings(form, background.readings)),
+        toApiRequest(form),
         {
           files: picked,
           removeFileIds,

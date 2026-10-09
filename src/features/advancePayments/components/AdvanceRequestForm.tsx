@@ -6,6 +6,7 @@ import type { PickedFile as PaymentsPickedFile } from "@/app/(main)/payments/_li
 
 import {
   useBudgets,
+  useDepartmentHeads,
   useOpenDocuments,
   useOwners,
   usePurposes,
@@ -23,8 +24,10 @@ import {
   applyChange,
   calculateEmi,
   changeAllocation,
+  departmentHeadLoginError,
   emiEndDate,
   installmentsFromEmi,
+  needsDepartmentHead,
   plainAmountError,
   resolveCase,
   todayIso,
@@ -42,6 +45,8 @@ import {
   Select,
 } from "./AdvanceUi";
 import DocumentSelector from "./DocumentSelector";
+import ExpenseLines from "./ExpenseLines";
+import VendorOnAccountCard from "./VendorOnAccountCard";
 import PickedFileViewer from "./PickedFileViewer";
 import PartnerPicker from "./PartnerPicker";
 
@@ -105,6 +110,33 @@ export default function AdvanceRequestForm({
   const [viewing, setViewing] = useState<FileAttachment | null>(null);
   const owners = useOwners();
   const documents = useOpenDocuments(form.company, c.reference, form.partner);
+  /**
+   * WHO APPROVES "BY DEPARTMENT". Asked only where the route has the stage —
+   * an Employee or Imprest request outside Mart, or a purpose marked
+   * `needs_head` — and the HOD picked must have an OMS login to approve with.
+   */
+  const askHead = needsDepartmentHead(form);
+  const [headSearch, setHeadSearch] = useState("");
+  const heads = useDepartmentHeads(headSearch, askHead);
+  const headOptions = [
+    ...heads.heads.map((head) => ({
+      label: head.employee_name || head.employee_code,
+      value: head.employee_code,
+      hint: head.user?.username
+        ? `${head.employee_code} · ${head.user.username}`
+        : `${head.employee_code} · no OMS login`,
+    })),
+    ...(form.departmentHead &&
+    !heads.heads.some((head) => head.employee_code === form.departmentHead)
+      ? [
+          {
+            label: form.departmentHeadName || form.departmentHead,
+            value: form.departmentHead,
+            hint: form.departmentHead,
+          },
+        ]
+      : []),
+  ];
 
   const change = (patch: Partial<RequestForm>) => setForm(applyChange(form, patch));
 
@@ -225,6 +257,9 @@ export default function AdvanceRequestForm({
             disabled={!step.company}
             error={errorFor("Type")}
           />
+          {/* AN EXPENSE IS NOT ASKED IT: direct or indirect follows from the
+              G/L accounts its lines name, and the server decides. */}
+          {c.expense ? null : (
           <Select
             label="Payment Against"
             required
@@ -239,9 +274,47 @@ export default function AdvanceRequestForm({
             disabled={!step.type}
             error={errorFor("Payment Against")}
           />
+          )}
         </Row>
 
-        {c.decided ? (
+        {c.expense ? (
+          <>
+            {/* AN EXPENSE HAS NO SAP PARTNER, AND NEITHER OF THESE IS
+                REQUIRED. The money goes to G/L accounts: a vendor is named
+                only so the Payment desk is offered their bank accounts, and
+                Pay To left blank means the person raising it — which is what
+                the server fills in (`_clean_expense`), so asking for it with
+                an asterisk would be the form inventing a rule. */}
+            <PartnerPicker
+              label={c.partnerLabel}
+              company={form.company}
+              source={c.partnerSource}
+              value={form.partner}
+              valueName={form.partnerName}
+              onPick={(partner) => change({ partner: partner.value, partnerName: partner.label })}
+              disabled={!step.type}
+              required={false}
+            />
+            {/* PAY TO IS WHAT THE SERVER IS SENT as `partner_name`, so it
+                must say what will actually happen: with a vendor picked, the
+                VENDOR is paid and this follows their name (read-only, because
+                typing another one here would be ignored); with no vendor, a
+                typed name, and blank means whoever raises it. */}
+            <Field label="Pay To">
+              <Input
+                value={form.partner ? form.partnerName : form.payee}
+                onChangeText={(payee) => change({ payee })}
+                placeholder={
+                  !step.type
+                    ? "Pick a type first"
+                    : "Leave blank to pay whoever raises it"
+                }
+                editable={step.type && !form.partner}
+                maxLength={200}
+              />
+            </Field>
+          </>
+        ) : c.decided ? (
           <PartnerPicker
             label={c.partnerLabel}
             company={form.company}
@@ -265,6 +338,26 @@ export default function AdvanceRequestForm({
           error={documents.error}
           onPick={pickDocuments}
           onAllocationChange={(id, patch) => setForm(changeAllocation(form, id, patch))}
+        />
+      ) : null}
+
+      {c.expense ? (
+        <ExpenseLines
+          company={form.company}
+          form={form}
+          onChange={change}
+          showErrors={showErrors}
+        />
+      ) : null}
+
+      {/* Against PO: what the vendor's ledger says we have already paid on
+          account, which no PO's open amount reflects. Shown, never deducted —
+          SAP does not say which PO such a payment was for. */}
+      {c.reference === "VENDOR_PO" && form.partner ? (
+        <VendorOnAccountCard
+          company={form.company}
+          cardCode={form.partner}
+          poEntries={form.selected}
         />
       ) : null}
 
@@ -308,12 +401,13 @@ export default function AdvanceRequestForm({
       {/* ── When, and how it comes back ────────────────────────────── */}
       {c.expectedDate || (c.expectedBillDate && !pairAmountWithBillDate) || c.repayment ? (
         <Card title="Dates">
+          {/* VENDOR -> AGAINST PO: OPTIONAL (since 2026-10-07, on both
+              clients and in the server's own `CASES`). It is when the payment
+              is expected to be adjusted against the PO, which the requester
+              often cannot know; one that IS given still may not be in the
+              past, and `validate` says so. */}
           {c.expectedDate ? (
-            <Field
-              label="Expected Bill Date"
-              required
-              error={errorFor("Expected Bill Date")}
-            >
+            <Field label="Expected Bill Date" error={errorFor("Expected Bill Date")}>
               <DateField
                 value={form.expectedDate}
                 onChange={(expectedDate) => change({ expectedDate })}
@@ -513,6 +607,10 @@ export default function AdvanceRequestForm({
           error={errorFor("Department") ?? budgets.error ?? undefined}
         />
 
+        {/* AN EXPENSE NAMES NO PURPOSE: its budget head routes it, and the
+            Payment desk sets its Sub Budget. */}
+        {c.expense ? null : (
+        <>
         {/* WHAT THE MONEY IS FOR: the Payment Desk's own list, the same for
             every company, which is why it does not clear with one. */}
         <Select
@@ -541,7 +639,43 @@ export default function AdvanceRequestForm({
           disabled={!departmentDone}
           error={errorFor("Payment Purpose") ?? purposes.error ?? undefined}
         />
+        </>
+        )}
 
+        {/* APPROVED "BY DEPARTMENT": the requester names the HOD whose stage
+            it goes to. An HOD with no OMS login cannot approve, so that is
+            said here rather than at submission. */}
+        {askHead ? (
+          <Select
+            label="Department Head"
+            required
+            searchable
+            searchPlaceholder="Search HOD name or code"
+            data={headOptions}
+            value={form.departmentHead}
+            onChange={(value) => {
+              const chosen = heads.heads.find((head) => head.employee_code === value);
+              change({
+                departmentHead: value,
+                departmentHeadName: chosen?.employee_name ?? "",
+                departmentHeadLogin: chosen?.user?.username ?? "",
+              });
+            }}
+            onSearchTextChange={setHeadSearch}
+            placeholder={heads.loading ? "Loading HODs…" : "Select department head"}
+            error={
+              heads.error ||
+              (form.departmentHead && !form.departmentHeadLogin
+                ? departmentHeadLoginError(form.departmentHeadName)
+                : errorFor("Department Head"))
+            }
+          />
+        ) : null}
+
+        {/* NOT ASKED ON AN EXPENSE: dated the day it is raised, and its
+            lines say what it is for. */}
+        {c.expense ? null : (
+        <>
         <Select
           label="Ownership"
           required
@@ -573,17 +707,31 @@ export default function AdvanceRequestForm({
           />
         </Field>
 
-        <Field label="Remarks" required error={errorFor("Remarks")}>
+        </>
+        )}
+
+        {/* REMARKS ARE ASKED OF AN EXPENSE TOO, just not required of it — the
+            same rule the web and `validate` follow. An Expense explains itself
+            through its lines, but the one sentence saying why it is being paid
+            at all still belongs somewhere, and hiding the field left an
+            Expense requester with nowhere to put it. */}
+        <Field
+          label="Remarks"
+          required={!c.expense}
+          error={errorFor("Remarks")}
+        >
           <Input
             value={form.remarks}
             onChangeText={(remarks) => change({ remarks })}
             placeholder={
-              form.paymentDate
-                ? "Why this payment is needed, and anything the approver should know"
-                : "Fill in the fields above first"
+              c.expense
+                ? "Anything the approver should know (optional)"
+                : form.paymentDate
+                  ? "Why this payment is needed, and anything the approver should know"
+                  : "Fill in the fields above first"
             }
             multiline
-            editable={form.paymentDate !== ""}
+            editable={c.expense || form.paymentDate !== ""}
             invalid={Boolean(errorFor("Remarks"))}
           />
         </Field>

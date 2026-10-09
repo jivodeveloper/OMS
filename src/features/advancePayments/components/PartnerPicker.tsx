@@ -32,6 +32,7 @@ export default function PartnerPicker({
   onPick,
   disabled,
   error,
+  required = true,
 }: {
   label: string;
   company: AdvancePaymentCompany | "";
@@ -41,6 +42,13 @@ export default function PartnerPicker({
   onPick: (partner: Partner) => void;
   disabled?: boolean;
   error?: string | null;
+  /**
+   * False where the partner is genuinely optional — an EXPENSE names a SAP
+   * vendor only so the Payment desk is offered their bank accounts; the money
+   * goes to G/L accounts either way. Every other case needs one, so this is
+   * required until a caller says otherwise.
+   */
+  required?: boolean;
 }) {
   const { partners, error: searchError, search } = usePartnerSearch(company, source);
   const [term, setTerm] = useState("");
@@ -67,6 +75,10 @@ export default function PartnerPicker({
    * requester searched for something else.
    */
   const data = [
+    // AN OPTIONAL PARTNER MUST BE REMOVABLE. Without this row a requester who
+    // picks a vendor on an Expense by mistake cannot un-pick one — and a
+    // field that cannot be emptied is not optional, whatever the label says.
+    ...(required ? [] : [{ label: `No ${label.toLowerCase()}`, value: "", code: "" }]),
     ...partners.map((partner) => ({
       label: partner.label,
       value: partner.value,
@@ -81,7 +93,7 @@ export default function PartnerPicker({
     <View style={styles.field}>
       <Dropdown
         label={label}
-        required
+        required={required}
         data={data}
         value={value}
         onChange={(picked: string) => {

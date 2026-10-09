@@ -6,7 +6,7 @@ import { TextInput } from "react-native-paper";
 
 import Dropdown from "@/src/components/common/DropdownProps";
 import { COLORS, RADIUS, SPACING } from "@/src/constants/theme";
-import { sp } from "@/src/utils/responsive";
+import { fs, sp } from "@/src/utils/responsive";
 import { toYMD } from "@/src/utils/datetime";
 
 import { formatDate } from "../logic/rules";
@@ -197,6 +197,7 @@ export function Input({
   invalid,
   prefix,
   code,
+  maxLength,
 }: {
   value: string;
   onChangeText: (value: string) => void;
@@ -215,6 +216,8 @@ export function Input({
    * character at a time, and a code set in body text invites a misread.
    */
   code?: boolean;
+  /** The server's own cap on the field, so it refuses nothing the form allowed. */
+  maxLength?: number;
 }) {
   return (
     <TextInput
@@ -230,6 +233,7 @@ export function Input({
       keyboardType={keyboardType ?? "default"}
       editable={editable}
       autoCapitalize={autoCapitalize}
+      maxLength={maxLength}
       error={invalid}
       textColor={editable ? COLORS.black : COLORS.textSecondary}
       style={[styles.input, multiline && styles.inputMultiline, code && styles.inputCode]}
@@ -257,18 +261,34 @@ export function Select({
   onChange,
   placeholder,
   searchable = false,
+  searchPlaceholder,
+  onSearchTextChange,
   disabled,
 }: {
   label: string;
   required?: boolean;
   error?: string | null;
-  data: { label: string; value: string }[];
+  /** `hint` is the second line of an option — a code, a group, a kind. */
+  data: { label: string; value: string; hint?: string }[];
   value: string;
   onChange: (value: string) => void;
   placeholder?: string;
   searchable?: boolean;
+  searchPlaceholder?: string;
+  /**
+   * The list is searched ON THE SERVER: what is typed goes back to the caller
+   * rather than only filtering what has already arrived, so a master of
+   * hundreds is not silently cut off at whatever the first page held.
+   */
+  onSearchTextChange?: (text: string) => void;
   disabled?: boolean;
 }) {
+  /**
+   * A LIST WITH HINTS DRAWS ITS OWN ROWS, because the dropdown's default row
+   * is one line: an expense G/L is a code, a name, a kind and a group, and
+   * folding those into one label makes every option ellipsise to the code.
+   */
+  const hinted = data.some((option) => option.hint);
   return (
     <View style={styles.field}>
       <Dropdown
@@ -279,6 +299,20 @@ export function Select({
         onChange={onChange}
         placeholder={placeholder ?? `Select ${label}`}
         searchable={searchable}
+        searchPlaceholder={searchPlaceholder}
+        onSearchTextChange={onSearchTextChange}
+        renderItem={
+          hinted
+            ? (item: { label: string; hint?: string }) => (
+                <View style={styles.optionRow}>
+                  <Text style={styles.optionLabel} numberOfLines={2}>
+                    {item.label}
+                  </Text>
+                  {item.hint ? <Text style={styles.optionHint}>{item.hint}</Text> : null}
+                </View>
+              )
+            : undefined
+        }
         disabled={disabled}
         // The dropdown draws its own red outline and message from this, so the
         // error is NOT repeated underneath.
@@ -379,6 +413,10 @@ export function NoticeText({ tone, text }: { tone: Tone; text: string }) {
 }
 
 const styles = StyleSheet.create({
+  // A hinted option: what it is, then what tells it apart.
+  optionRow: { paddingHorizontal: sp(16), paddingVertical: sp(10) },
+  optionLabel: { fontSize: fs(14), fontWeight: "700", color: COLORS.text },
+  optionHint: { fontSize: fs(11), color: COLORS.textSecondary, marginTop: 2 },
 
   card: {
     backgroundColor: COLORS.surface,

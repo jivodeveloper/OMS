@@ -54,6 +54,9 @@ export const PARTNER_TYPES = [
   { value: "EMPLOYEE_IMPREST", label: "Employee Imprest" },
   // A REFUND: what a customer is owed back. Paid to the customer (rCustomer).
   { value: "CUSTOMER", label: "Customer" },
+  // Paid straight to expense G/L accounts (rent, utilities, bank charges…):
+  // no vendor, no bill. Routed by the budget head's owner; Audit posts it.
+  { value: "EXPENSE", label: "Expense" },
 ] as const;
 export type PartnerType = (typeof PARTNER_TYPES)[number]["value"];
 
@@ -74,6 +77,10 @@ export const PAYMENT_AGAINST_OPTIONS = [
   { value: "AGAINST_LEDGER", label: "Against Ledger" },
   { value: "ON_ACCOUNT", label: "On Account" },
   { value: "OTHER", label: "Other" },
+  // An Expense request: its lines are what it pays. One kind per request,
+  // each with its own G/L accounts (SAP's 5100000 group / 5610000-5690000).
+  { value: "DIRECT_EXPENSE", label: "Direct Expense" },
+  { value: "INDIRECT_EXPENSE", label: "Indirect Expense" },
 ] as const;
 export type PaymentAgainst = (typeof PAYMENT_AGAINST_OPTIONS)[number]["value"];
 
@@ -185,6 +192,11 @@ export interface OpenDocument {
    * may not take more than `available`.
    */
   oms?: OmsUsage;
+  /**
+   * The TDS SAP withheld: on a bill itself, or (`bills` set) on the bills
+   * raised from a PO. Absent where SAP was not asked or could not say.
+   */
+  sapTds?: { amount: number; bills?: number };
 }
 
 export interface LedgerKey {
@@ -197,6 +209,12 @@ export interface LedgerKey {
 }
 
 export interface OmsUsage {
+  /**
+   * True: created in SAP since the cut-off (8 Oct 2026), so OMS alone tracks
+   * it — `open` is its total less what OMS paid, and `paid` is OMS's payments.
+   * False: older — SAP's own open amount, less what OMS holds.
+   */
+  tracked: boolean;
   reserved: number;
   paid: number;
   /** A PO: the part of `paid` SAP still holds on account — what still counts against it. */
@@ -273,3 +291,17 @@ export const QUICK_PERCENTAGES = [10, 25, 50, 75, 100] as const;
 /** What the attachment strip says it takes. Enforced in the browser only. */
 export const ACCEPTED_FILE_TYPES = ".pdf,.jpg,.jpeg,.png,.doc,.docx";
 export const MAX_FILE_SIZE_MB = 10;
+
+/**
+ * An Expense line's GST — for the record only: SAP is not told it. The
+ * invoice value is the taxable amount plus this.
+ */
+export const GST_OPTIONS = [
+  { value: "", label: "No GST", rate: 0 },
+  { value: "CGST_SGST_5", label: "CGST + SGST 5%", rate: 5 },
+  { value: "CGST_SGST_18", label: "CGST + SGST 18%", rate: 18 },
+  { value: "IGST_5", label: "IGST 5%", rate: 5 },
+  { value: "IGST_18", label: "IGST 18%", rate: 18 },
+] as const;
+
+export type GstCode = (typeof GST_OPTIONS)[number]["value"];

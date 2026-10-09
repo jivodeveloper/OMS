@@ -18,7 +18,7 @@ import type { ApiRequest } from "../../../services/advancePayment.service";
 import type { FileAttachment } from "./attachments";
 import { PARTNER_TYPES, PAYMENT_AGAINST_OPTIONS, RETURN_METHODS } from "./constants";
 import type { PayoutDetails } from "./payout";
-import { allocationRows, allocationTotals, resolveCase, type RequestForm } from "./rules";
+import { allocationRows, allocationTotals, expenseNet, expenseTotal, resolveCase, type RequestForm } from "./rules";
 
 /**
  * Where a request stands, in the pages' words. PENDING is the server's
@@ -58,9 +58,27 @@ export interface AdvanceRequestEntry {
 
 /** What the request asks to pay: the lines' total, or the typed amount. */
 export function requestAmount(form: RequestForm): number {
-  if (resolveCase(form).reference) return allocationTotals(allocationRows(form)).payment;
+  const c = resolveCase(form);
+  if (c.reference) return allocationTotals(allocationRows(form)).payment;
+  // An Expense: its invoice values (what it pays is that less its TDS: `expenseNet`).
+  if (c.expense) return expenseTotal(form.expenseLines);
   const n = Number(form.amount);
   return Number.isFinite(n) ? n : 0;
+}
+
+/** What the payment methods pay: an Expense's invoice values less its TDS, else the request's amount. */
+export function paidAmount(form: RequestForm): number {
+  return resolveCase(form).expense ? expenseNet(form) : requestAmount(form);
+}
+
+/** The vendor's own numbers (SAP `NumAtCard`) of the bills / POs a request pays, each once. */
+export function vendorRefs(form: RequestForm): string[] {
+  return [...new Set(form.selected.flatMap((doc) => (doc.reference ? [doc.reference] : [])))];
+}
+
+/** Who is paid: the SAP partner's name, or an Expense's typed payee. */
+export function payeeOf(form: RequestForm): string {
+  return form.type === "EXPENSE" ? form.payee : form.partnerName || form.partner;
 }
 
 export const typeLabel = (form: RequestForm) =>

@@ -51,8 +51,11 @@ import EditChangeRows, {
 } from "../components/EditChangeRows";
 import AttachmentReadingRows from "../components/AttachmentReadingRows";
 import PartnerLedgerCard from "../components/PartnerLedgerCard";
+import ExpenseCard from "../components/ExpenseCard";
+import { monthLabel } from "../components/ExpenseLines";
 import PayoutEditor, { type PayoutStatus } from "../components/PayoutEditor";
 import {
+  paidAmount,
   paymentAgainstLabel,
   requestAmount,
   returnMethodLabel,
@@ -423,14 +426,49 @@ export default function AdvanceDetailsScreen() {
     setAsking(null);
     setActing(action);
     try {
-      const next = await advancePaymentService.act(
-        request.id,
-        action,
-        remarks,
-        request.flow?.version,
-      );
+      /*
+       * AT THE PAYMENT STAGE, APPROVING IS SAVING AND THEN APPROVING.
+       *
+       * The desk used to be given two buttons — Save Payment Details, then
+       * Approve — and the second was dead until the first had been pressed.
+       * That is one act in a person's head and it should be one button: the
+       * details ARE what is being approved, so they go up first and the
+       * approval follows them.
+       *
+       * A REFUSED SAVE STOPS HERE. The editor has already said why; approving
+       * on top of it would approve whatever the server still held, which is
+       * exactly the mistake the old gate existed to prevent.
+       */
+      let version = request.flow?.version;
+      if (action === "approve" && payoutStatus) {
+        const saved = await payoutStatus.save();
+        if (!saved) return;
+        // SAVING BUMPED THE VERSION, so the approval must carry the new one —
+        // the old one is a stale screen to the server, and it would refuse an
+        // approval of details it had just accepted.
+        version = saved.flow?.version ?? version;
+      }
+      const next = await advancePaymentService.act(request.id, action, remarks, version);
       setRequest(next);
       const now = fromApiRequest(next).status;
+
+      /*
+       * RETURNING NEEDS NO "DONE".
+       *
+       * The other decisions end the approver's business with the request and
+       * the sheet tells them where it now stands. A return does not: the
+       * approver has just written the reason it is going back, which IS the
+       * message, and a sheet repeating it is one more tap between them and the
+       * next request. So the return lands straight back on the list.
+       *
+       * The reason itself is still asked for — the server refuses a return
+       * without one (`_remarks_required`) — so the prompt before it stays.
+       */
+      if (action === "return") {
+        router.replace("/(main)/advance-payments/tracking" as never);
+        return;
+      }
+
       setDone({
         action,
         requestNo: next.request_no,
@@ -473,7 +511,15 @@ export default function AdvanceDetailsScreen() {
   const entry = fromApiRequest(request);
   const { form } = entry;
   const c = resolveCase(form);
+  /**
+   * WHAT THE REQUEST IS WORTH, and what the payment actually pays.
+   *
+   * They differ on an Expense: the request is its invoice values, the payment
+   * is those less the TDS the desk deducts. Seeding the payout with the gross
+   * would ask the bank for money the TDS journal keeps back.
+   */
   const amount = requestAmount(form);
+  const toPay = paidAmount(form);
   // Due documents first, the longest overdue at the top: what is due is what
   // the payment is most likely for, and what an approver should meet first.
   const rows = c.reference ? dueFirst(allocationRows(form), (row) => row.document) : [];
@@ -530,14 +576,18 @@ export default function AdvanceDetailsScreen() {
    * genuinely available: an approver sees a decision, a creator sees Cancel,
    * and somebody with nothing to do sees no box at all.
    */
-  /** Why Approve cannot be pressed yet, if it cannot. */
-  const payoutBlock = !can.edit_payout
-    ? undefined
-    : !payoutStatus?.saved && !payoutStatus?.dirty
-      ? "Fill in the payment details and save them first."
-      : payoutStatus?.dirty
-        ? "Save the payment details first — the approval takes what is saved, not what is on screen."
-        : undefined;
+  /**
+   * Why Approve cannot be pressed yet, if it cannot.
+   *
+   * ONLY THAT THE DETAILS ARE INCOMPLETE. Saving is no longer something the
+   * approver does separately — Approve does it — so the one thing left to
+   * block on is a payment that is not filled in. `ready` is
+   * `validatePayout`'s own answer, the same one the server checks.
+   */
+  const payoutBlock =
+    can.edit_payout && payoutStatus && !payoutStatus.ready
+      ? "Fill in the payment details above first."
+      : undefined;
 
   const actions: ActionSpec[] = [
     can.reject && {
@@ -770,15 +820,56 @@ export default function AdvanceDetailsScreen() {
               truncated payee is the one field nobody may guess at. */}
           <Field
             icon="person-circle-outline"
-            label={c.partnerLabel}
-            value={form.partnerName || form.partner}
-            sub={form.partner}
+            label={c.expense ? "Pay To" : c.partnerLabel}
+            value={c.expense ? form.payee || form.partnerName : form.partnerName || form.partner}
+            sub={form.partner || undefined}
             full
           />
 
-          <View style={styles.divider} />
+          {/* AN EXPENSE'S OWN FACTS: the month it posts to, the sub budget
+              every SAP expense line carries, and whether it is electricity —
+              which is a ROUTE, not a label: the Director approves it too. */}
+          {c.expense ? (
+            <>
+              <View style={styles.divider} />
+              <View style={styles.grid}>
+                <Field
+                  icon="calendar-number-outline"
+                  label="Month"
+                  value={form.effectMonth ? monthLabel(form.effectMonth) : "Payment desk to set"}
+                />
+                <Field
+                  icon="git-branch-outline"
+                  label="Sub Budget"
+                  value={form.subBudgetName || form.subBudget || "Payment desk to set"}
+                  sub={
+                    form.subBudgetName && form.subBudget !== form.subBudgetName
+                      ? form.subBudget
+                      : undefined
+                  }
+                />
+              </View>
+              {form.isElectricity ? (
+                <>
+                  <View style={styles.divider} />
+                  <Field
+                    icon="flash-outline"
+                    label="Electricity"
+                    value="Yes — the Director approves it too"
+                    full
+                  />
+                </>
+              ) : null}
+            </>
+          ) : null}
 
-          <Field icon="ribbon-outline" label="Ownership" value={form.ownership} full />
+          {/* Not asked of an Expense: it is dated the day it is raised. */}
+          {c.expense ? null : (
+            <>
+              <View style={styles.divider} />
+              <Field icon="ribbon-outline" label="Ownership" value={form.ownership} full />
+            </>
+          )}
 
           {/* What the money is for, in SAP's own terms. Shown by NAME with the
               code beneath: an approver reads "Back Office", and the code is
@@ -796,14 +887,36 @@ export default function AdvanceDetailsScreen() {
             </>
           ) : null}
 
+          {/* WHO APPROVES IT BY DEPARTMENT, named on the request itself: the
+              route's Department Head stage goes to this HOD's OMS login. */}
+          {form.departmentHeadName || form.departmentHead ? (
+            <>
+              <View style={styles.divider} />
+              <Field
+                icon="people-outline"
+                label="Department Head"
+                value={form.departmentHeadName || form.departmentHead}
+                sub={form.departmentHeadLogin || form.departmentHead || undefined}
+                full
+              />
+            </>
+          ) : null}
+
           {c.expectedDate || c.expectedBillDate ? (
             <>
               <View style={styles.divider} />
               <View style={styles.grid}>
+                {/* NOT ALWAYS GIVEN: a PO's expected bill date is optional,
+                    and `formatDate("")` hands back the empty string — which
+                    would read as a blank field rather than an unanswered one. */}
                 <Field
                   icon="document-outline"
                   label="Expected Bill Date"
-                  value={formatDate(form.expectedDate || form.expectedBillDate)}
+                  value={
+                    form.expectedDate || form.expectedBillDate
+                      ? formatDate(form.expectedDate || form.expectedBillDate)
+                      : "Not given"
+                  }
                 />
               </View>
             </>
@@ -1095,11 +1208,8 @@ export default function AdvanceDetailsScreen() {
                           stage — `showsBalance` is the same gate the payee's
                           balance uses, and it asks the server rather than
                           guessing. Never shown to the requester. */}
-                      {row.document.attachment && showsBalance(entry) ? (
-                        <AttachmentReadingRows
-                          attachment={row.document.attachment}
-                          stored={row.document.reading}
-                        />
+                      {row.document.reading && showsBalance(entry) ? (
+                        <AttachmentReadingRows stored={row.document.reading} />
                       ) : null}
                       {row.document.note ? (
                         <DetailLine label="Note" value={row.document.note} />
@@ -1325,11 +1435,23 @@ export default function AdvanceDetailsScreen() {
           </View>
         ) : null}
 
+        {/* AN EXPENSE'S LINES ARE THE REQUEST: there is no bill and no PO, so
+            an approver who cannot see them is approving a bare figure. At the
+            Payment stage the same card corrects them. */}
+        {c.expense ? (
+          <ExpenseCard
+            request={request}
+            form={form}
+            canEdit={Boolean(can.edit_payout)}
+            onSaved={setRequest}
+          />
+        ) : null}
+
         {/* The Payment stage's own editor — outgoing bank and payment details. */}
         {can.edit_payout ? (
           <PayoutEditor
             request={request}
-            amount={amount}
+            amount={toPay}
             initial={entry.payout}
             onStatus={setPayoutStatus}
             onSaved={(saved) => {
@@ -1348,14 +1470,18 @@ export default function AdvanceDetailsScreen() {
           column of five buttons that pushes the request itself off screen —
           and the decision stays reachable without scrolling back down to it.
           EDIT is not here at all: it is the pencil in the header. */}
-      {actions.length || (can.edit_payout && payoutStatus) ? (
+      {/* SAVE IS NOT A BUTTON ANY MORE — Approve saves on its way through.
+          The exception is a desk that may edit the payment but not approve it:
+          they would otherwise have no way to save at all, so for them, and
+          only them, the Save button is still there. */}
+      {actions.length || (can.edit_payout && payoutStatus && !can.approve) ? (
         <ActionBox
           actions={actions}
           acting={acting}
           save={
-            can.edit_payout && payoutStatus
+            can.edit_payout && payoutStatus && !can.approve
               ? {
-                  run: payoutStatus.save,
+                  run: () => void payoutStatus.save(),
                   busy: payoutStatus.saving,
                   ready: payoutStatus.ready,
                   dirty: payoutStatus.dirty || !payoutStatus.saved,
