@@ -310,15 +310,26 @@ export default function ExpenseCard({
 export { fromApiRequest };
 
 const styles = StyleSheet.create({
+  /**
+   * THE DETAIL PAGE'S CARD, to the pixel (`AdvanceDetailsScreen.styles.card`).
+   * Without the side margin it ran edge to edge while Payment Summary above it
+   * sat inside a 14pt gutter, and read as a different kind of box.
+   */
   card: {
     backgroundColor: COLORS.surface,
     borderRadius: sp(16),
+    padding: sp(16),
+    marginHorizontal: sp(14),
+    marginBottom: sp(14),
     borderWidth: 1,
     borderColor: COLORS.borderLight,
-    padding: sp(14),
-    marginBottom: sp(12),
+    shadowColor: COLORS.shadowColor,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    elevation: 2,
   },
-  cardHeader: { flexDirection: "row", alignItems: "center", gap: sp(8), marginBottom: sp(10) },
+  cardHeader: { flexDirection: "row", alignItems: "center", gap: sp(8), marginBottom: sp(14) },
   headerIcon: {
     width: ms(28),
     height: ms(28),
@@ -328,7 +339,7 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.primaryLighter,
   },
   // `minWidth: 0` so the Correct button keeps its place beside a long title.
-  cardTitle: { flex: 1, minWidth: 0, fontSize: fs(14), fontWeight: "800", color: COLORS.text },
+  cardTitle: { flex: 1, minWidth: 0, fontSize: fs(15), fontWeight: "700", color: COLORS.text },
   editBtn: {
     flexDirection: "row",
     alignItems: "center",
