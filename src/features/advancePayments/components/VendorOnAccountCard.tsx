@@ -118,7 +118,9 @@ export default function VendorOnAccountCard({
   return (
     <Card
       title="Already paid, not yet adjusted"
-      subtitle="From the vendor's SAP ledger. Not deducted from any PO — SAP does not say which PO it was for."
+      // Shortened with the web (2026-10-10): the old three sentences said the
+      // same thing three ways. The point is the figure and one instruction.
+      subtitle="On the vendor's ledger, not yet adjusted against a bill. Check it is not an advance for this PO."
     >
       <View style={styles.totalRow}>
         <View style={styles.totalCell}>

@@ -26,6 +26,7 @@ import {
   noteRowsTotal,
   SAP_PAYMENT_MODES,
   autoSapPaymentMode,
+  ifscProblem,
   isBankAccountNumber,
   netPayable,
   payoutTotal,
@@ -640,16 +641,20 @@ function PayToAccount({
   };
 
   /*
-   * SAP'S OWN RECORD CAN HOLD SOMETHING THAT IS NOT AN ACCOUNT NUMBER — a
-   * short code, a name, a note somebody typed into the field. Picking it
-   * looked fine and the save was then refused, which blames the person who
-   * picked rather than the master data. Said here, where it is chosen.
+   * SAP'S OWN RECORD CAN HOLD SOMETHING THAT IS NOT THE USUAL ACCOUNT NUMBER
+   * — a bank's special account ("DIL957"), a short code. It is NOT an error:
+   * an account picked from the payee's SAP master is trusted as Finance set
+   * it up, and the server accepts any 3-34 letters and digits for one
+   * (`SAP_ACCOUNT`); only a HAND-TYPED number must be 9 to 18 digits.
+   *
+   * So this is a caution to check before paying, not an instruction to go and
+   * "correct" data the server is perfectly happy with.
    */
   const badSapNumber =
     !typing && chosen ? !isBankAccountNumber(chosen.account_number) : false;
 
   const note = badSapNumber
-    ? `SAP's account number for this payee, "${chosen?.account_number}", is not a bank account number (9 to 18 digits). Correct it in SAP's Business Partner master, or type the right one by hand.`
+    ? `SAP holds "${chosen?.account_number}" for this payee — not the usual 9 to 18 digits. Check it with the vendor before paying.`
     : !lookedUp
     ? "Employee accounts are not held in SAP. Type the payee's details."
     : loading
@@ -719,7 +724,9 @@ function PayToAccount({
         required
         error={
           chosen && !chosen.ifsc_valid
-            ? "SAP's IFSC for this account does not look valid."
+            ? `SAP's IFSC: ${
+                ifscProblem(chosen.ifsc) ?? "does not look valid."
+              } Correct it in SAP's Business Partner master, or type the right one by hand.`
             : undefined
         }
       >

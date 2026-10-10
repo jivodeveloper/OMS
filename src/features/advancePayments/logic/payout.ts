@@ -325,9 +325,30 @@ export function payoutTotal(payout: PayoutDetails): number {
 /* ── Validation ──────────────────────────────────────────────────────────── */
 
 const IFSC = /^[A-Z]{4}0[A-Z0-9]{6}$/;
+
+/**
+ * Why `value` is not an IFSC, in words, with the likely fix when SAP's record
+ * has the bank code one letter long ("ICICI0004020" for ICIC0004020).
+ * Null when it is a valid IFSC.
+ */
+export function ifscProblem(value: string): string | null {
+  const v = value.trim().toUpperCase();
+  if (IFSC.test(v)) return null;
+  const rule = "an IFSC is 11 characters: a 4-letter bank code, 0, then a 6-character branch code";
+  const fixed = v.length === 12 && /^[A-Z]{5}0/.test(v) ? v.slice(0, 4) + v.slice(5) : "";
+  const likely = fixed && IFSC.test(fixed) ? ` Probably ${fixed}.` : "";
+  return `"${v}" is not a valid IFSC (${v.length} characters; ${rule}).${likely}`;
+}
 const ACCOUNT = /^\d{9,18}$/;
 
-/** Whether `value` can be a bank account number: 9 to 18 digits. */
+/**
+ * An account picked from the payee's SAP master: trusted as Finance set it up,
+ * so any 3-34 letters and digits — a bank's special account ("DIL957") too.
+ * Typed by hand, it must still be 9-18 digits.
+ */
+const SAP_ACCOUNT = /^[A-Za-z0-9]{3,34}$/;
+
+/** Whether `value` is the usual bank account number: 9 to 18 digits. */
 export const isBankAccountNumber = (value: string) => ACCOUNT.test(value.trim());
 
 export interface PayoutValidation {
@@ -353,8 +374,10 @@ export function validatePayout(payout: PayoutDetails, requestAmount: number): Pa
   const needsAccount = payout.lines.some((line) => line.method !== "CASH");
   if (needsAccount) {
     if (!payout.toAccountNumber.trim()) missing.push("To Account Number");
-    else if (!ACCOUNT.test(payout.toAccountNumber.trim())) {
+    else if (payout.toAccountManual && !ACCOUNT.test(payout.toAccountNumber.trim())) {
       problems.push("To Account Number must be 9 to 18 digits.");
+    } else if (!payout.toAccountManual && !SAP_ACCOUNT.test(payout.toAccountNumber.trim())) {
+      problems.push("To Account Number must be the payee's SAP account: 3 to 34 letters and digits.");
     }
     if (!payout.toIfsc.trim()) missing.push("IFSC");
     else if (!IFSC.test(payout.toIfsc.trim().toUpperCase())) {
