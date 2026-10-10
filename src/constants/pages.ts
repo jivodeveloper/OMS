@@ -161,6 +161,24 @@ export const ASSIGNABLE_PAGES: AppPage[] = [
     ],
   },
   {
+    /*
+     * FOLLOW EVERY REQUEST, ACT ON NONE — a supervisor of the desks.
+     *
+     * It opens the same list and details screens the other two do, and the
+     * "All requests" view within them. It confers NOTHING else: editing is
+     * the creator's and deciding the current stage user's, and the server
+     * enforces both whatever this grant says
+     * (`advance_payment/permissions.py`: `VIEW_ALL_KEY`).
+     */
+    key: "Advance_Payment_View_All",
+    label: "Advance Payment — view all requests (read only)",
+    screens: [
+      "advance-payments/tracking",
+      "advance-payments/details",
+      "advance-payments/tracking-progress",
+    ],
+  },
+  {
     // Send Bills & POs — hand SAP's open documents to whoever raises the
     // payment request from them. A separate job from raising or approving one,
     // and the backend issues the key separately

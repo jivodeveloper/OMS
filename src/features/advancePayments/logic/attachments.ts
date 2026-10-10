@@ -29,6 +29,10 @@ export interface FileAttachment {
   size: number;
   /** Chosen in this browser, to be uploaded on save. */
   file?: PickedFile;
+  /** Where it stands on its way to SAP; absent until the server has tried. */
+  sap?: "IN_SAP" | "ON_SHARE" | "NOT_SHARED";
+  /** Why it is not on the SAP share. */
+  sapError?: string;
   /** Held by the server: `advance_payment_request_file.id`. */
   serverId?: number;
 }

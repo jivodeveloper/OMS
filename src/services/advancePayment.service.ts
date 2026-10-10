@@ -389,7 +389,10 @@ export interface SapOpenInvoice {
   card_name: string;
   /** The vendor's own invoice number (`NumAtCard`). */
   party_ref: string;
+  /** SAP's posting date. */
   doc_date: string;
+  /** The date on the bill (SAP's Document Date): the vendor's invoice date. */
+  document_date?: string | null;
   due_date: string;
   currency: string;
   doc_total: string;
@@ -418,7 +421,10 @@ export interface SapOpenPurchaseOrder {
   card_name: string;
   /** The vendor's own reference for the order (`NumAtCard`). */
   vendor_ref: string;
+  /** SAP's posting date. */
   doc_date: string;
+  /** The date on the order (SAP's Document Date). */
+  document_date?: string | null;
   due_date: string;
   currency: string;
   doc_total: string;
@@ -674,6 +680,12 @@ export interface ApiRequestFile {
   payout_line_id: number | null;
   uploaded_by: ApiUser | null;
   uploaded_on: string | null;
+  /** On the company's SAP attachments share (the file upload service). */
+  on_sap_share?: boolean;
+  /** Why it is not on the share, when putting it there failed. */
+  share_error?: string;
+  /** Attached to the request's SAP outgoing payment. */
+  in_sap?: boolean;
 }
 
 export interface ApiPayoutLine {
@@ -726,6 +738,9 @@ export interface ApiVoucher {
   posted_on: string | null;
   cancelled_by: ApiUser | null;
   cancelled_on: string | null;
+  /** The request's files as a SAP attachment on this payment, or why they are not. */
+  attachment_entry?: number | null;
+  attachment_error?: string;
 }
 
 export interface ApiRequestLog {
@@ -772,6 +787,8 @@ export interface RequestAbilities {
    * balance and ledger — is sent to Payment and later stages only.
    */
   see_account: boolean;
+  /** After posting: attach to the SAP payment the files SAP does not have yet. */
+  attach_to_sap?: boolean;
 }
 
 /** A cost centre of SAP's Budget (dimension 3, the form's Department) or Sub Budget (4). */
@@ -947,8 +964,29 @@ export interface ApiRequest extends ApiRequestFields {
   can: RequestAbilities;
   /** The SAP outgoing payment, once Final's approval has posted it. */
   voucher: ApiVoucher | null;
+  /**
+   * REFUSED BY SAP AND NOT POSTED SINCE — the server's own reading of the
+   * attempts, rather than each client working it out of `vouchers`.
+   *
+   * Stays until the posting stage clears the cause and posts again. Null when
+   * a payment is live, so a request that failed and then went through does
+   * not keep showing the failure.
+   */
+  sap_failure?: { error: string; at: string | null; attempts: number } | null;
   /** The latest return, send-back or rejection: what someone must act on. */
   last_decision: ApiRequestLog | null;
+  /**
+   * THE ALL-REQUESTS LIST ONLY (`scope=all`), so a supervisor can see at a
+   * glance who has touched a request and when it last moved.
+   */
+  approvers?: { username: string; name: string }[];
+  last_activity?: {
+    action: string;
+    label: string;
+    by: string;
+    stage: string;
+    on: string;
+  } | null;
   /**
    * The viewer's OWN latest approve / reject / return / send-back on it, or
    * null. What the desk files a request under — never another approver's.
@@ -960,7 +998,15 @@ export interface ApiRequest extends ApiRequestFields {
   stages?: ApiStage[];
 }
 
-export type RequestScope = "mine" | "desk";
+/**
+ * Whose requests a list reads.
+ *
+ * `all` is every request in the company, READ ONLY — a supervisor following
+ * the desks (`Advance_Payment_View_All`). It confers no action: editing is
+ * still the creator's and deciding still the current stage user's, and the
+ * server enforces both whatever this says.
+ */
+export type RequestScope = "mine" | "desk" | "all";
 export type StageAction = "approve" | "reject" | "return" | "send-back" | "cancel" | "resubmit";
 
 
@@ -1419,11 +1465,18 @@ export const advancePaymentService = {
 
   /* --- Payment requests --------------------------------------------- */
 
-  /** Your own requests (`mine`), or the approval desk's (`desk`), newest first. */
+  /** Your own (`mine`), the approval desk's (`desk`) or every one (`all`), newest first. */
   requests: async (scope: RequestScope): Promise<ApiRequest[]> =>
     rows<ApiRequest>(
       guard(await api.get(`${BASE}/requests/${query({ scope })}`, undefined, FRESH)),
     ),
+
+  /**
+   * Attach to the posted SAP payment the request's files SAP does not have:
+   * all of them when posting could not attach them, or those added since.
+   */
+  attachToSap: async (id: number): Promise<ApiRequest> =>
+    unwrap<ApiRequest>(guard(await api.post(`${BASE}/requests/${id}/sap-attachments/`, {}))),
 
   /** One request, with its history and its route. */
   request: async (id: number): Promise<ApiRequest> =>

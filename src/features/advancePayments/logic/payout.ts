@@ -327,6 +327,9 @@ export function payoutTotal(payout: PayoutDetails): number {
 const IFSC = /^[A-Z]{4}0[A-Z0-9]{6}$/;
 const ACCOUNT = /^\d{9,18}$/;
 
+/** Whether `value` can be a bank account number: 9 to 18 digits. */
+export const isBankAccountNumber = (value: string) => ACCOUNT.test(value.trim());
+
 export interface PayoutValidation {
   missing: string[];
   problems: string[];

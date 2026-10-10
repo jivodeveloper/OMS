@@ -129,6 +129,7 @@ export default function AdvanceListScreen({ scope }: { scope?: RequestListScope 
     canApprove,
     holdsMine,
     holdsDesk,
+    holdsAll,
   } = useAdvanceRequests(listScope);
 
   const [filterOpen, setFilterOpen] = useState(false);
@@ -237,6 +238,10 @@ export default function AdvanceListScreen({ scope }: { scope?: RequestListScope 
   const viewOptions = [
     ...(holdsDesk ? [{ label: VIEW_LABEL.desk, value: "desk" as ListView }] : []),
     ...(holdsMine ? [{ label: VIEW_LABEL.mine, value: "mine" as ListView }] : []),
+    // EVERY REQUEST, READ ONLY — a supervisor following the desks. Last in
+    // the list because it is the widest and the least often wanted: somebody
+    // who holds it still comes here mostly for their own work.
+    ...(holdsAll ? [{ label: VIEW_LABEL.all, value: "all" as ListView }] : []),
     {
       label: assigned.rows.length
         ? `${VIEW_LABEL.assigned} (${assigned.rows.length})`
@@ -560,6 +565,7 @@ export type ListView = RequestListScope | "assigned";
 const VIEW_LABEL: Record<ListView, string> = {
   desk: "To Approve",
   mine: "My Requests",
+  all: "All Requests",
   assigned: "Assigned to me",
 };
 

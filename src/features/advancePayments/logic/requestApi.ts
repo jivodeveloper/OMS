@@ -331,6 +331,8 @@ const fileFromApi = (file: ApiRequestFile): FileAttachment => ({
   name: file.name,
   size: file.size,
   serverId: file.id,
+  sap: file.in_sap ? "IN_SAP" : file.on_sap_share ? "ON_SHARE" : file.share_error ? "NOT_SHARED" : undefined,
+  sapError: file.share_error || undefined,
 });
 
 export function fromApiRequest(api: ApiRequest): AdvanceRequestEntry {

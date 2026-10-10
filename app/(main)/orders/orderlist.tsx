@@ -27,6 +27,7 @@ import { storage } from "@/src/utils/storage";
 import StateWrapper from "@/src/components/common/StateWrapper";
 import { useAuth } from "@/src/context/AuthContext";
 import ApproveDialog from "@/src/features/approval/components/dialogs/ApproveDialog";
+import { orderProblem } from "@/src/services/orderFailure";
 import RejectDialog from "@/src/features/approval/components/dialogs/RejectDialog";
 import Dropdown from "@/src/components/common/DropdownProps";
 import { refreshOrderData } from "@/src/cache";
@@ -801,6 +802,12 @@ export default function BillingOrderList() {
           "10",
           remarks.trim() || "Accepted by billing",
         );
+        const refused = orderProblem(response, "Failed to approve order");
+        if (refused) {
+          if (Platform.OS === "web") window.alert(refused);
+          else Alert.alert("Could not approve", refused);
+          return;
+        }
         const copy = getBillingApprovalSuccessCopy(response?.status, response?.message);
         setApprovalResult({
           ...copy,
@@ -861,7 +868,13 @@ export default function BillingOrderList() {
 
     try {
       setActionLoading({ id: selectedOrderId!, type: "reject" });
-      await productService.updatestatus(selectedOrderId!, "8", reason);
+      const answer = await productService.updatestatus(selectedOrderId!, "8", reason);
+      const refused = orderProblem(answer, "Failed to reject order");
+      if (refused) {
+        if (Platform.OS === "web") window.alert(refused);
+        else Alert.alert("Could not reject", refused);
+        return;
+      }
       setRejectModalVisible(false);
       if (Platform.OS === "web") {
         window.alert("Order rejected");

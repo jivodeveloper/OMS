@@ -23,6 +23,7 @@ import StateWrapper from "@/src/components/common/StateWrapper";
 import { storage } from "@/src/utils/storage";
 import { useAuth } from "@/src/context/AuthContext";
 import RejectDialog from "@/src/features/approval/components/dialogs/RejectDialog";
+import { orderProblem } from "@/src/services/orderFailure";
 import { refreshOrderData } from "@/src/cache";
 import { fs, ms, sp } from "@/src/utils/responsive";
 import {
@@ -841,7 +842,17 @@ export default function AuditorApprovalScreen() {
 
     try {
       setActionLoading({ id: selectedOrderId!, type: "reject" });
-      await productService.updatestatus(selectedOrderId!, "7", reason);
+      // THE CLIENT RESOLVES A REFUSAL rather than throwing it, so the answer
+      // has to be read: without this a 409 ("Order already rejected") fell
+      // through to the success path and the screen announced a rejection
+      // that never happened. See `services/orderFailure.ts`.
+      const answer = await productService.updatestatus(selectedOrderId!, "7", reason);
+      const refused = orderProblem(answer, "Failed to reject order");
+      if (refused) {
+        if (Platform.OS === "web") window.alert(refused);
+        else Alert.alert("Could not reject", refused);
+        return;
+      }
       setRejectModalVisible(false);
       if (Platform.OS === "web") {
         window.alert("Order rejected");

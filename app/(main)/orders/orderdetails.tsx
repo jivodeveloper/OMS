@@ -21,6 +21,7 @@ import StateWrapper from "@/src/components/common/StateWrapper";
 import { orderService, productService } from "@/src/services/order.service";
 import { useAuth, useUILabels } from "@/src/context/AuthContext";
 import ApproveDialog from "@/src/features/approval/components/dialogs/ApproveDialog";
+import { orderProblem } from "@/src/services/orderFailure";
 import RejectDialog from "@/src/features/approval/components/dialogs/RejectDialog";
 import useAndroidBackOverride from "@/src/hooks/useAndroidBackOverride";
 import { refreshOrderData } from "@/src/cache";
@@ -712,7 +713,14 @@ export default function OrderDetailsScreen() {
     try {
       setActionLoading({ type: "reject" });
       const rejectStatus = userRole === "billing" ? "8" : "7";
-      await productService.updatestatus(parsedOrderId, rejectStatus, reason);
+      // The client RESOLVES a refusal; read it, or a 409 is announced as a
+      // rejection that never happened (`services/orderFailure.ts`).
+      const answer = await productService.updatestatus(parsedOrderId, rejectStatus, reason);
+      const refused = orderProblem(answer, "Failed to reject order");
+      if (refused) {
+        appAlert("Could not reject", refused);
+        return;
+      }
       setRejectModalVisible(false);
       setRejectReason("");
       showSuccessAndOpenPending("Order rejected");

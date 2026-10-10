@@ -26,6 +26,7 @@ import { api } from "@/src/services/api";
 import { storage } from "@/src/utils/storage";
 import { useAuth } from "@/src/context/AuthContext";
 import RejectDialog from "@/src/features/approval/components/dialogs/RejectDialog";
+import { orderProblem } from "@/src/services/orderFailure";
 import { refreshOrderData } from "@/src/cache";
 import { fs, ms, sp } from "@/src/utils/responsive";
 import {
@@ -872,6 +873,11 @@ export default function PendingApprovalScreen() {
           OTHER_STATUS_OPTIONS[0].value,
           "Approved",
         );
+        const refused = orderProblem(response, "Failed to approve order");
+        if (refused) {
+          Alert.alert("Could not approve", refused);
+          return;
+        }
         setApprovalResult({
           message: response?.message || "Order approved successfully",
           orderNumber,
@@ -904,11 +910,19 @@ export default function PendingApprovalScreen() {
 
     try {
       setActionLoading({ id: selectedOrderId!, type: "reject" });
-      await productService.updatestatus(
+      // The client RESOLVES a refusal, so the answer is read rather than
+      // waited on: a 409 used to reach the success path and the screen
+      // announced a rejection the server had refused.
+      const answer = await productService.updatestatus(
         selectedOrderId!,
         OTHER_STATUS_OPTIONS[1].value,
         reason,
       );
+      const refused = orderProblem(answer, "Failed to reject order");
+      if (refused) {
+        Alert.alert("Could not reject", refused);
+        return;
+      }
       setRejectModalVisible(false);
       Alert.alert("Success", "Order rejected");
       loadOrders();

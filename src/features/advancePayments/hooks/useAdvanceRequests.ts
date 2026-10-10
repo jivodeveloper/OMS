@@ -69,7 +69,15 @@ const raisedOn = (entry: AdvanceRequestEntry): string => {
 };
 
 /** Which side of the module a list is showing. */
-export type RequestListScope = "mine" | "desk";
+/**
+ * Which side a list is showing.
+ *
+ * `all` is every request in the company, READ ONLY, for a supervisor of the
+ * desks (`Advance_Payment_View_All`). It is a scope of its own rather than a
+ * filter on the other two because the server answers it from a different
+ * query — and because a reader of it may act on none of what it shows.
+ */
+export type RequestListScope = "mine" | "desk" | "all";
 
 /**
  * Every Advance Payment request this user is entitled to see.
@@ -103,6 +111,7 @@ export function useAdvanceRequests(want?: RequestListScope) {
   const { user } = useAuth();
   const holdsMine = can(user, "Advance_Payment");
   const holdsDesk = can(user, "Advance_Payment_Approval");
+  const holdsAll = can(user, "Advance_Payment_View_All");
   const canRaise = holdsMine && want !== "desk";
   const canApprove = holdsDesk && want !== "mine";
 
@@ -145,6 +154,18 @@ export function useAdvanceRequests(want?: RequestListScope) {
         // Only what this user may read, and only the side this page is for —
         // except when that leaves nothing, in which case the other side is
         // what they came to see.
+        // EVERY REQUEST IS ONE READ, not a merge: the server answers `all`
+        // from its own query, and asking for the other two beside it would
+        // only re-fetch rows it already returned.
+        if (want === "all") {
+          const every = await advancePaymentService.requests("all");
+          if (run !== runId.current) return;
+          setEntries(
+            every.map(fromApiRequest).sort((a, b) => b.serverId - a.serverId),
+          );
+          return;
+        }
+
         const readMine = want === "desk" ? false : holdsMine;
         const readDesk = want === "mine" ? !holdsMine && holdsDesk : holdsDesk;
         const [mine, desk] = await Promise.all([
@@ -257,9 +278,10 @@ export function useAdvanceRequests(want?: RequestListScope) {
     reload: () => load(),
     canRaise,
     canApprove,
-    /** The KEYS, whatever this page is scoped to — the switch needs both. */
+    /** The KEYS, whatever this page is scoped to — the switch needs them. */
     holdsMine,
     holdsDesk,
+    holdsAll,
   };
 }
 

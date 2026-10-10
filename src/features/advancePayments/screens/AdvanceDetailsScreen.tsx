@@ -1030,7 +1030,7 @@ export default function AdvanceDetailsScreen() {
         </View>
 
         {/* ── SAP Information ──────────────────────────────────────────── */}
-        <SapCard request={request} />
+        <SapCard request={request} onAttached={setRequest} />
 
         {/* ── Remarks & Updates ───────────────────────────────────────
             WHAT WAS SAID, and what has been CHANGED, in one box: both answer
@@ -1673,7 +1673,15 @@ function Field({
  * request still in approval would imply something is in flight when nothing has
  * been sent.
  */
-function SapCard({ request }: { request: ApiRequest }) {
+function SapCard({
+  request,
+  onAttached,
+}: {
+  request: ApiRequest;
+  /** The request as the server answered the attach with. */
+  onAttached: (next: ApiRequest) => void;
+}) {
+  const [attaching, setAttaching] = useState(false);
   /**
    * The POSTED payment if SAP took one; otherwise the LAST ATTEMPT.
    *
@@ -1714,6 +1722,17 @@ function SapCard({ request }: { request: ApiRequest }) {
   if (voucher.posted_on) {
     rows.push({ label: "Posted At", value: formatDateTime(voucher.posted_on) });
   }
+
+  // How many of the request's files SAP does not hold, and what to say about it.
+  const files = request.files ?? [];
+  const filesMissing = files.filter((file) => !file.in_sap).length;
+  const sapFilesLine = voucher.attachment_entry
+    ? `Attached (SAP attachment ${voucher.attachment_entry})${
+        filesMissing ? ` · ${filesMissing} not yet` : ""
+      }`
+    : files.length
+      ? voucher.attachment_error || "Not attached"
+      : "No files";
   if (voucher.posted_by?.name) {
     rows.push({ label: "Posted By", value: voucher.posted_by.name });
   }
@@ -1750,6 +1769,49 @@ function SapCard({ request }: { request: ApiRequest }) {
         <View style={[styles.sapResponse, { backgroundColor: palette.bg }]}>
           <Text style={styles.sapResponseLabel}>SAP Response</Text>
           <Text style={styles.sapResponseText}>{voucher.error}</Text>
+        </View>
+      ) : null}
+
+      {/* THE REQUEST'S FILES ON THE SAP PAYMENT.
+          Posting attaches them, but it can fail on its own — the share may be
+          unreachable, or a proof may have been added after the payment was
+          posted. So the state is stated, and whoever records the payment can
+          send what SAP lacks without re-posting anything. */}
+      {posted ? (
+        <View style={styles.sapRow}>
+          <Text style={styles.sapLabel}>Files in SAP</Text>
+          <View style={styles.sapFiles}>
+            <Text style={styles.sapValue} numberOfLines={3}>
+              {sapFilesLine}
+            </Text>
+            {request.can?.attach_to_sap && filesMissing ? (
+              <TouchableOpacity
+                style={[styles.sapAttachBtn, attaching && styles.sapAttachOff]}
+                onPress={async () => {
+                  setAttaching(true);
+                  try {
+                    onAttached(await advancePaymentService.attachToSap(request.id));
+                  } catch (err) {
+                    showFailure("Could not attach the files", err);
+                  } finally {
+                    setAttaching(false);
+                  }
+                }}
+                disabled={attaching}
+                activeOpacity={0.85}
+                accessibilityRole="button"
+              >
+                {attaching ? (
+                  <ActivityIndicator size="small" color={COLORS.primary} />
+                ) : (
+                  <Ionicons name="cloud-upload-outline" size={ms(14)} color={COLORS.primary} />
+                )}
+                <Text style={styles.sapAttachText}>
+                  {attaching ? "Attaching…" : "Attach to SAP"}
+                </Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
         </View>
       ) : null}
 
@@ -1957,6 +2019,30 @@ function AttachmentRow({
         <Text style={styles.attachMeta}>
           {pdf ? "PDF" : "IMAGE"} · {formatSize(file.size)}
         </Text>
+        {/* WHERE THIS FILE HAS GOT TO ON ITS WAY INTO SAP. A payment posted
+            with its evidence missing is the thing an auditor asks about
+            later, and until now the app said nothing either way. Absent
+            until the server has tried, so an ordinary request shows no
+            badge at all. */}
+        {file.sap ? (
+          <Text
+            style={[
+              styles.attachSap,
+              file.sap === "IN_SAP"
+                ? styles.attachSapOk
+                : file.sap === "NOT_SHARED"
+                  ? styles.attachSapBad
+                  : null,
+            ]}
+            numberOfLines={2}
+          >
+            {file.sap === "IN_SAP"
+              ? "In SAP"
+              : file.sap === "ON_SHARE"
+                ? "On SAP share"
+                : `Not on SAP share${file.sapError ? ` — ${file.sapError}` : ""}`}
+          </Text>
+        ) : null}
       </View>
 
       <View style={styles.attachActions}>
@@ -2841,6 +2927,29 @@ const styles = StyleSheet.create({
   attachName: { fontSize: fs(13), fontWeight: "600", color: COLORS.text },
   attachMeta: { fontSize: fs(11), color: COLORS.textMuted, marginTop: 2 },
   attachActions: { flexDirection: "row", gap: sp(6), flexShrink: 0 },
+  // The request's files against the SAP payment: the line, and the button
+  // that sends what SAP lacks.
+  sapFiles: { flex: 1, minWidth: 0, alignItems: "flex-end", gap: sp(6) },
+  sapAttachBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: sp(6),
+    paddingHorizontal: sp(10),
+    paddingVertical: sp(6),
+    borderRadius: 999,
+    backgroundColor: COLORS.primaryLighter,
+    borderWidth: 1,
+    borderColor: COLORS.borderBlue,
+  },
+  sapAttachOff: { opacity: 0.6 },
+  sapAttachText: { fontSize: fs(11.5), fontWeight: "800", color: COLORS.primary },
+
+  // Where a file stands on its way into SAP — a fact, so it is quiet unless
+  // it is a problem.
+  attachSap: { fontSize: fs(10.5), fontWeight: "700", color: COLORS.textSecondary, marginTop: 2 },
+  attachSapOk: { color: COLORS.success },
+  attachSapBad: { color: COLORS.error },
+
   attachBtn: {
     width: ms(34),
     height: ms(34),

@@ -26,6 +26,7 @@ import {
   noteRowsTotal,
   SAP_PAYMENT_MODES,
   autoSapPaymentMode,
+  isBankAccountNumber,
   netPayable,
   payoutTotal,
   startPayout,
@@ -638,7 +639,18 @@ function PayToAccount({
     });
   };
 
-  const note = !lookedUp
+  /*
+   * SAP'S OWN RECORD CAN HOLD SOMETHING THAT IS NOT AN ACCOUNT NUMBER — a
+   * short code, a name, a note somebody typed into the field. Picking it
+   * looked fine and the save was then refused, which blames the person who
+   * picked rather than the master data. Said here, where it is chosen.
+   */
+  const badSapNumber =
+    !typing && chosen ? !isBankAccountNumber(chosen.account_number) : false;
+
+  const note = badSapNumber
+    ? `SAP's account number for this payee, "${chosen?.account_number}", is not a bank account number (9 to 18 digits). Correct it in SAP's Business Partner master, or type the right one by hand.`
+    : !lookedUp
     ? "Employee accounts are not held in SAP. Type the payee's details."
     : loading
       ? "Reading the payee's accounts from SAP…"

@@ -317,7 +317,7 @@ export const REFERENCE_KINDS: Record<ReferenceKind, ReferenceKindDef> = {
     pluralLabel: "Bills",
     placeholder: "Select Bills",
     numberLabel: "Bill Number",
-    dateLabel: "Bill Date",
+    dateLabel: "Document Date",
     originalLabel: "Original Amount",
     paidLabel: "Paid Amount",
     modes: ["FIXED"],
@@ -331,7 +331,7 @@ export const REFERENCE_KINDS: Record<ReferenceKind, ReferenceKindDef> = {
     pluralLabel: "Purchase Orders",
     placeholder: "Select Open POs",
     numberLabel: "PO Number",
-    dateLabel: "PO Date",
+    dateLabel: "Document Date",
     originalLabel: "PO Amount",
     // What SAP's PaidToDate means on a PO: goods already received. Not
     // advances — SAP holds none against POs — so it is named for what it is.

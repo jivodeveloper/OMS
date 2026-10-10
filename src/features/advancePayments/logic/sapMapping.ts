@@ -117,7 +117,8 @@ export function invoiceToDocument(
   return {
     id: `PCH-${invoice.doc_entry}`,
     number: invoice.doc_num != null ? String(invoice.doc_num) : String(invoice.doc_entry),
-    date: invoice.doc_date,
+    // The date ON the bill (Document Date); the posting date where SAP sends none.
+    date: invoice.document_date || invoice.doc_date,
     partner: invoice.card_code,
     original: sapAmount(invoice.doc_total),
     paid: sapAmount(invoice.paid_to_date),
@@ -146,7 +147,7 @@ export function purchaseOrderToDocument(
   return {
     id: `POR-${po.doc_entry}`,
     number: po.doc_num != null ? String(po.doc_num) : String(po.doc_entry),
-    date: po.doc_date,
+    date: po.document_date || po.doc_date,
     partner: po.card_code,
     original: sapAmount(po.doc_total),
     paid: sapAmount(po.received_amount),

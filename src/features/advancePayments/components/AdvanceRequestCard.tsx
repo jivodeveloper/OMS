@@ -204,6 +204,38 @@ export default function AdvanceRequestCard({
         </View>
       ) : null}
 
+      {/* SAP REFUSED THE PAYMENT AND IT HAS NOT BEEN POSTED SINCE.
+          The server states this on every request now, so the list can say it:
+          a refused posting is the one thing on a desk that needs chasing, and
+          until now it was visible only by opening the request. */}
+      {entry.api.sap_failure ? (
+        <View style={styles.sapFailed}>
+          <Ionicons name="alert-circle" size={ms(13)} color={COLORS.error} />
+          <Text style={styles.sapFailedText} numberOfLines={2}>
+            SAP refused the payment
+            {entry.api.sap_failure.attempts > 1
+              ? ` (${entry.api.sap_failure.attempts} attempts)`
+              : ""}
+            {entry.api.sap_failure.error ? ` — ${entry.api.sap_failure.error}` : ""}
+          </Text>
+        </View>
+      ) : null}
+
+      {/* WHEN IT LAST MOVED, and who moved it. Sent only on the all-requests
+          list, which is where the question is asked: a supervisor scanning
+          every open request is looking for the one that has not moved, and
+          "waiting at Audit" alone does not say for how long. */}
+      {!awaitingMe && entry.api.last_activity ? (
+        <View style={styles.awaiting}>
+          <Ionicons name="time-outline" size={ms(13)} color={COLORS.textSecondary} />
+          <Text style={styles.lastActivityText} numberOfLines={1}>
+            {entry.api.last_activity.label}
+            {entry.api.last_activity.by ? ` by ${entry.api.last_activity.by}` : ""} ·{" "}
+            {formatDate(entry.api.last_activity.on.slice(0, 10))}
+          </Text>
+        </View>
+      ) : null}
+
       <View style={styles.divider} />
 
       {/* The same pair as Payment Tracking: green Progress, blue Details.
@@ -355,6 +387,28 @@ const styles = StyleSheet.create({
     borderRadius: sp(8),
     paddingHorizontal: sp(10),
     paddingVertical: sp(7),
+  },
+  // A refused posting: the same strip, in the colour that says act on it.
+  sapFailed: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: sp(6),
+    marginTop: sp(8),
+    paddingHorizontal: sp(10),
+    paddingVertical: sp(6),
+    borderRadius: sp(10),
+    backgroundColor: COLORS.errorLight,
+  },
+  sapFailedText: { flex: 1, minWidth: 0, fontSize: fs(11.5), fontWeight: "700", color: COLORS.error },
+
+  // The same strip as "awaiting", in the quieter colour: it is a fact about
+  // the request, not a call on the reader.
+  lastActivityText: {
+    flex: 1,
+    minWidth: 0,
+    fontSize: fs(11.5),
+    fontWeight: "600",
+    color: COLORS.textSecondary,
   },
   awaitingText: { fontSize: fs(11), fontWeight: "800", color: COLORS.primary },
   actionRow: { flexDirection: "row", gap: sp(10), marginTop: sp(14) },
