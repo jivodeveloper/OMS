@@ -47,6 +47,7 @@ import ApprovalSuccessDialog from "../components/dialogs/ApprovalSuccessDialog";
 import SapErrorDialog from "../components/dialogs/SapErrorDialog";
 import { useApprovalDetails } from "../hooks/useApprovalDetails";
 import type { ApprovalAttachment } from "../types";
+import useBackToOrigin from "@/src/hooks/useBackToOrigin";
 
 // Android needs this opt-in for LayoutAnimation to run at all.
 if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -54,6 +55,14 @@ if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental
 }
 
 export default function ApprovalDetailsScreen() {
+  // BACK LEAVES THIS SCREEN THE WAY THE HEADER ARROW DOES.
+  // Every page under `(main)` is a DRAWER screen, so pushing between
+  // them builds no stack and the drawer falls back to its initial
+  // route — which is why Back from here landed on the dashboard
+  // instead of the list it was opened from. The fallback is only for
+  // a screen opened cold, by a deep link or a notification.
+  useBackToOrigin("/(main)/payments/payment-tracking");
+
   // `documentId` is the PaymentReceipt id — the payload this screen renders.
   // `id` is the approval request id, kept for callers that still send it.
   const params = useLocalSearchParams<{

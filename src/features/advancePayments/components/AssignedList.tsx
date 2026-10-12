@@ -20,6 +20,7 @@ import Dropdown from "@/src/components/common/DropdownProps";
 import InlineOrderDateFilter, {
   type DateFilterValue,
 } from "@/src/components/common/InlineOrderDateFilter";
+import { useOriginName } from "@/src/hooks/useBackToOrigin";
 import { COLORS } from "@/src/constants/theme";
 import { fs, ms, sp } from "@/src/utils/responsive";
 import {
@@ -84,6 +85,15 @@ export default function AssignedList({
   const [refreshing, setRefreshing] = useState(false);
 
   /**
+   * The page the create form comes back to.
+   *
+   * This list is rendered inside the module's list screen, so the route it
+   * reads is Tracking or Approval — whichever the user is actually on. See
+   * `useOriginName`.
+   */
+  const origin = useOriginName();
+
+  /**
    * THE SENT TAB'S FILTERS, with one difference that matters.
    *
    * Status is not a question here: everything on this list is waiting on this
@@ -140,7 +150,7 @@ export default function AssignedList({
       draftForAssignment(assignment.id, await formFromAssignment(assignment));
       router.push({
         pathname: "/(main)/advance-payments/create",
-        params: { assignment: String(assignment.id) },
+        params: { assignment: String(assignment.id), from: origin },
       } as never);
     } catch (err) {
       // `formFromAssignment` throws a SENTENCE for the SAP cases (paid,

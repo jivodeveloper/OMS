@@ -160,7 +160,7 @@ export const MODULE_PRIORITY: ModuleDef[] = [
   },
   {
     key: "advancePayments",
-    label: "Advance Payments",
+    label: "Payments",
     // NOT the details or edit screens: both open for either side, so counting
     // them would make the module look held by anybody who can be sent a link.
     screens: [

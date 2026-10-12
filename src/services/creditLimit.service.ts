@@ -1,5 +1,11 @@
 import { API_BASE_URL, api } from "./api";
 import { storage } from "../utils/storage";
+// STATIC, NOT `await import(...)`. A dynamic import makes Metro split the
+// module into an async chunk, and asking for that chunk at runtime failed
+// with `Requiring unknown module "2595"` from expo-file-system/legacy. Both
+// of these are already in every bundle, so there is nothing to defer.
+import * as FileSystem from "expo-file-system/legacy";
+import { Platform } from "react-native";
 
 /**
  * Credit Limit — ask for a customer's SAP credit limit to be changed.
@@ -465,8 +471,6 @@ async function fetchDataUri(url: string): Promise<string> {
  * in the app that receives it.
  */
 async function download(url: string, name: string): Promise<string> {
-  const FileSystem = await import("expo-file-system/legacy");
-  const { Platform } = await import("react-native");
   const token = await storage.getAccessToken();
 
   const dir = FileSystem.documentDirectory || FileSystem.cacheDirectory;

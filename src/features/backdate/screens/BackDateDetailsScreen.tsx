@@ -37,6 +37,7 @@ import {
   type ApprovalDecision,
   type BackDateStatus,
 } from "../types";
+import useBackToOrigin from "@/src/hooks/useBackToOrigin";
 
 type Stage = "none" | "approve" | "reject" | "loading" | "done";
 
@@ -73,6 +74,14 @@ const SAP_FAIL = { bg: "#FEF2F2", fg: "#B91C1C", icon: "alert-circle" as const }
  * and `can_edit`.
  */
 export default function BackDateDetailsScreen() {
+  // BACK LEAVES THIS SCREEN THE WAY THE HEADER ARROW DOES.
+  // Every page under `(main)` is a DRAWER screen, so pushing between
+  // them builds no stack and the drawer falls back to its initial
+  // route — which is why Back from here landed on the dashboard
+  // instead of the list it was opened from. The fallback is only for
+  // a screen opened cold, by a deep link or a notification.
+  useBackToOrigin("/(main)/backdate/tracking");
+
   const params = useLocalSearchParams<{
     id?: string;
     actionable?: string;

@@ -109,7 +109,9 @@ export default function AdvanceRequestForm({
   /** The attachment being looked at, if any — see `PickedFileViewer`. */
   const [viewing, setViewing] = useState<FileAttachment | null>(null);
   const owners = useOwners();
-  const documents = useOpenDocuments(form.company, c.reference, form.partner);
+  /** What the document picker's SAP search box holds, when it is shown. */
+  const [docSearch, setDocSearch] = useState("");
+  const documents = useOpenDocuments(form.company, c.reference, form.partner, docSearch);
   /**
    * WHO APPROVES "BY DEPARTMENT". Asked only where the route has the stage —
    * an Employee or Imprest request outside Mart, or a purpose marked
@@ -359,6 +361,8 @@ export default function AdvanceRequestForm({
           error={documents.error}
           onPick={pickDocuments}
           onAllocationChange={(id, patch) => setForm(changeAllocation(form, id, patch))}
+          search={docSearch}
+          onSearch={documents.searchable ? setDocSearch : undefined}
         />
       ) : null}
 

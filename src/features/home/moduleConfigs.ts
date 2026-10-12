@@ -175,7 +175,7 @@ export const backdateHome: ModuleHomeConfig = {
 export const advancePaymentHome: ModuleHomeConfig = {
   heroCount: "Total Requests",
   totalLabel: "Total Requests",
-  recentTitle: "Recent Advance Payments",
+  recentTitle: "Recent Payment Requests",
   empty: "No recent requests",
   trackingRoute: "/(main)/advance-payments/tracking",
   // This list filters on the status itself, so the bucket is sent as it is.

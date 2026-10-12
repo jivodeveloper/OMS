@@ -8,11 +8,19 @@ import {
   advancePaymentError,
   advancePaymentService,
   type AdvancePaymentCompany,
+  type SapPartnerCompanyBalance,
   type SapPartnerLedger,
 } from "@/src/services/advancePayment.service";
 
 import type { AdvanceRequestEntry } from "../logic/approvalData";
 import { balanceSide, formatDate, formatINR } from "../logic/rules";
+
+/** The group's companies as a person names them, not as SAP codes them. */
+const COMPANY_LABEL: Record<string, string> = {
+  OIL: "Oil",
+  BEVERAGES: "Beverages",
+  MART: "Mart",
+};
 
 /**
  * The payee's balance and open ledger in SAP — what a payment is weighed
@@ -45,6 +53,18 @@ export default function PartnerLedgerCard({ entry }: { entry: AdvanceRequestEntr
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [open, setOpen] = useState(false);
+  /**
+   * THE SAME BUSINESS IN THE GROUP'S OTHER COMPANIES.
+   *
+   * A vendor paid from Oil often has a balance in Beverages too, and an
+   * approver weighing a payment wants to see both. Only where the server says
+   * it IS the same business — it matches on PAN, else on name, because a card
+   * code can belong to someone else entirely in another company.
+   *
+   * Never fatal: a failure leaves the other companies unsaid rather than
+   * taking the ledger down with it.
+   */
+  const [others, setOthers] = useState<SapPartnerCompanyBalance[]>([]);
 
   useEffect(() => {
     if (!company || !cardCode) return;
@@ -72,6 +92,15 @@ export default function PartnerLedgerCard({ entry }: { entry: AdvanceRequestEntr
       })
       .finally(() => {
         if (alive) setLoading(false);
+      });
+
+    advancePaymentService
+      .partnerBalances(company, cardCode)
+      .then((rows) => {
+        if (alive) setOthers(rows.filter((row) => row.company !== company));
+      })
+      .catch(() => {
+        if (alive) setOthers([]);
       });
 
     return () => {
@@ -140,6 +169,34 @@ export default function PartnerLedgerCard({ entry }: { entry: AdvanceRequestEntr
               </View>
             </View>
           ) : null}
+
+          {/* Beside the balance here, the same partner's balance elsewhere in
+              the group — the question an approver asks next. */}
+          {others.map((row) => {
+            const theirs = row.balance === null ? null : balanceSide(row.balance, who);
+            return (
+              <View key={row.company} style={styles.balanceRow}>
+                <Text style={styles.balanceLabel}>Balance in {COMPANY_LABEL[row.company]}</Text>
+                <View style={styles.balanceValueWrap}>
+                  <Text style={styles.balanceValue}>
+                    {row.error || !theirs
+                      ? "Could not read SAP"
+                      : `${formatINR(theirs.amount)}${theirs.side ? ` ${theirs.side}` : ""}`}
+                  </Text>
+                  {/* HOW IT WAS MATCHED, because "same code" is not the same
+                      as "same business": by PAN is certain, by name is a
+                      judgement the reader should be able to weigh. */}
+                  <Text style={styles.balanceMeaning}>
+                    {row.matched_by === "PAN"
+                      ? `Same PAN · ${row.card_code}`
+                      : row.matched_by === "name"
+                        ? `Matched by name · ${row.card_code}`
+                        : row.card_code}
+                  </Text>
+                </View>
+              </View>
+            );
+          })}
 
           {summary ? (
             <Text style={styles.summary}>

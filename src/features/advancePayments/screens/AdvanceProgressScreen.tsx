@@ -383,7 +383,7 @@ export default function AdvanceProgressScreen() {
             <Ionicons name="wallet-outline" size={ms(20)} color={INFO_BLUE} />
           </View>
           <View style={styles.summaryMain}>
-            <Text style={styles.summaryLabel}>Advance Payment</Text>
+            <Text style={styles.summaryLabel}>Payment Request</Text>
             <Text style={styles.summaryOrderNo} numberOfLines={1} adjustsFontSizeToFit>
               {request.request_no}
             </Text>

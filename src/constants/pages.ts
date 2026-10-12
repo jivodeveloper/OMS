@@ -108,7 +108,7 @@ export const ASSIGNABLE_PAGES: AppPage[] = [
     // screens a card leads to: granting the form alone would leave the
     // requester unable to see what became of what they raised.
     key: "Advance_Payment",
-    label: "Advance Payment Request",
+    label: "New Payment Request",
     screens: [
       "advance-payments/create",
       "advance-payments/tracking",
@@ -122,7 +122,7 @@ export const ASSIGNABLE_PAGES: AppPage[] = [
     // the server also requires the holder to be that stage's effective user,
     // so this grant shows the desk and nothing more.
     key: "Advance_Payment_Approval",
-    label: "Advance Payment Approval",
+    label: "Payment Approvals",
     screens: [
       "advance-payments/approval",
       "advance-payments/tracking",
@@ -171,7 +171,7 @@ export const ASSIGNABLE_PAGES: AppPage[] = [
      * (`advance_payment/permissions.py`: `VIEW_ALL_KEY`).
      */
     key: "Advance_Payment_View_All",
-    label: "Advance Payment — view all requests (read only)",
+    label: "Payments — view all requests (read only)",
     screens: [
       "advance-payments/tracking",
       "advance-payments/details",
@@ -185,7 +185,7 @@ export const ASSIGNABLE_PAGES: AppPage[] = [
     // (`advance_payment/permissions.py`: `DISPATCH_KEY`), so neither of the
     // other two implies it.
     key: "Advance_Payment_Dispatch",
-    label: "Advance Payment Dispatch",
+    label: "Payment Dispatch",
     screens: ["advance-payments/dispatch", "advance-payments/dispatch-review"],
   },
   {
@@ -614,7 +614,7 @@ const CREATE_TARGETS: CreateTarget[] = [
   },
   {
     key: "advancePayment",
-    label: "Advance Payment",
+    label: "Payment Request",
     description: "Ask to pay a vendor or an employee ahead of the bill",
     icon: "wallet-outline",
     screen: "advance-payments/create",
@@ -784,7 +784,7 @@ export const resolveWorkQueueRoute = (
     {
       screen: "advance-payments/tracking",
       route: "/(main)/advance-payments/tracking",
-      label: "Advances",
+      label: "Payouts",
       // The SAME icon the sidebar gives the list.
       icon: "card-outline",
     },

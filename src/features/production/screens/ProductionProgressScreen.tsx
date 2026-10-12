@@ -20,6 +20,7 @@ import { formatInstant } from "@/src/utils/datetime";
 import { fs, ms, sp } from "@/src/utils/responsive";
 import { messageFrom } from "../hooks/useProductionTracking";
 import { buildRail } from "../types";
+import useBackToOrigin from "@/src/hooks/useBackToOrigin";
 
 /**
  * How far one production order has got.
@@ -116,6 +117,14 @@ interface Step {
 }
 
 export default function ProductionProgressScreen() {
+  // BACK LEAVES THIS SCREEN THE WAY THE HEADER ARROW DOES.
+  // Every page under `(main)` is a DRAWER screen, so pushing between
+  // them builds no stack and the drawer falls back to its initial
+  // route — which is why Back from here landed on the dashboard
+  // instead of the list it was opened from. The fallback is only for
+  // a screen opened cold, by a deep link or a notification.
+  useBackToOrigin("/(main)/production/tracking");
+
   const params = useLocalSearchParams<{ id?: string }>();
   const id = Number(params.id);
 

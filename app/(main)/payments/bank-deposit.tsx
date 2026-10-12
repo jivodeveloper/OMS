@@ -1,3 +1,45 @@
+/**
+ * BANK DEPOSIT - hand approved receipts over to a bank.
+ *
+ * WHAT THE SCREEN IS FOR. Receipts recorded on the Receive Payment screen are
+ * money somebody is still carrying. This screen is the moment it stops being
+ * carried: an employee picks the receipts they are banking, says which bank
+ * account and on what date, attaches the slip the cashier gave them, and the
+ * deposit goes for approval and then to SAP.
+ *
+ * THE PICKER IS THE SCREEN. Everything above it is four fields; the work is
+ * choosing the right rows out of what may be a long list, which is why there
+ * is a search, a party filter and a date range over it, and why each row shows
+ * the cheque number and bank - the employee is holding the physical cheque
+ * while they tick it, and that is what lets them confirm they have the right
+ * one in their hand.
+ *
+ * THE DEPOSIT TYPE FILTERS THE LIST, not just labels it. Cash and cheques go
+ * to the bank as separate deposits, so choosing one hides the rows of the
+ * other and drops any already-ticked row that no longer belongs
+ * (`selectionAfterTypeChange`). The server re-derives the type from the
+ * selection and ignores what is sent, because the free choice was routinely
+ * wrong.
+ *
+ * THE AMOUNT IS AUTO-FILLED BUT NOT LOCKED. It mirrors the selection until the
+ * user types their own figure, after which it is left alone (`depositTouched`)
+ * - a depositor sometimes banks less than they collected. When they do, the
+ * shortfall has to be explained before the form will submit, because an
+ * unexplained gap between collected and banked is the thing this record exists
+ * to make visible.
+ *
+ * SAVING IS THREE ROUND TRIPS - create, upload each attachment, then submit -
+ * so the progress dialog names the step it is on (`stage`, `uploadAt`). One
+ * undifferentiated spinner over three calls reads as a hang on a slow link.
+ *
+ * ONE SCREEN, TWO JOBS, the same split the payment form makes: with a
+ * `depositId` it loads and PATCHes, without one it creates. On an edit the
+ * picker opens COLLAPSED, and the fetch asks for this deposit's own receipts
+ * as well - they are banked here, so the plain "not yet deposited" list leaves
+ * them out and the selection would vanish.
+ *
+ * NOTHING HERE IS A SECURITY BOUNDARY. The server checks all of it again.
+ */
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   KeyboardAvoidingView,
@@ -105,6 +147,9 @@ function BankDepositScreen() {
    */
   const [canResubmit, setCanResubmit] = useState(false);
 
+  // -- The deposit itself: the fields above the picker ------------------
+  // Company first, because the depositor list, the bank account list and the
+  // receipts on offer are all scoped to it.
   const [company, setCompany] = useState<string | null>(null);
   // Today, not a baked-in date — a hardcoded one silently backdates every
   // deposit made after it.
@@ -117,6 +162,10 @@ function BankDepositScreen() {
   const [depositType, setDepositType] = useState<string | null>(null);
   const [remarks, setRemarks] = useState("");
 
+  // -- The picker's own controls ----------------------------------------
+  // None of these reach the server: the receipts are fetched once per company
+  // and narrowed here, so changing a filter costs nothing and never loses a
+  // tick that is still valid under it.
   const [listExpanded, setListExpanded] = useState(true);
   const [search, setSearch] = useState("");
   // Empty = no date filter applied; set by the picker below.
@@ -259,6 +308,12 @@ function BankDepositScreen() {
     ];
   }, [payments]);
 
+  /**
+   * The 220ms ease used for every show/hide on this page.
+   *
+   * Called BEFORE the state change: LayoutAnimation animates the next layout
+   * pass, so a call afterwards animates nothing.
+   */
   const animate = useCallback(() => {
     LayoutAnimation.configureNext(
       LayoutAnimation.create(
@@ -440,6 +495,10 @@ function BankDepositScreen() {
   const reasonRequired = isShort && collectedAmount > 0;
   const reasonMissing = reasonRequired && shortfallReason.trim().length === 0;
 
+  // Tick or untick one receipt. The ids are kept as STRINGS because that is
+  // what the row components and the edit prefill both deal in; comparing them
+  // to the numeric `payment.id` anywhere else is how a selection goes quietly
+  // empty.
   const togglePayment = (id: string) => {
     setSelectedIds((prev) => {
       const next = prev.includes(id)
@@ -557,6 +616,15 @@ function BankDepositScreen() {
     setReceiptsRefreshKey((n) => n + 1);
   }, []);
 
+  /**
+   * Create, upload, submit - in that order, and each one can fail on its own.
+   *
+   * The deposit is created FIRST because the attachments need its id to hang
+   * off; a failure after that leaves a saved deposit with fewer files rather
+   * than nothing at all, which is why the dialog names the step it reached.
+   * `submitBlocked` has already refused everything the form can catch, so what
+   * is left to go wrong here belongs to the server.
+   */
   const handleSubmit = async () => {
     if (submitBlocked) return;
     setStage("saving");

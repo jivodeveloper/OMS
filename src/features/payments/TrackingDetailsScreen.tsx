@@ -21,6 +21,7 @@ import paymentsService, {
 } from "@/src/services/payments.service";
 import ReceiptViewerModal from "./components/ReceiptViewerModal";
 import type { TrackingKind } from "./PaymentTrackingScreen";
+import useBackToOrigin from "@/src/hooks/useBackToOrigin";
 
 /**
  * Read-only detail for a payment receipt or a bank deposit.
@@ -93,6 +94,14 @@ function InfoRow({ label, value }: { label: string; value: string }) {
 }
 
 export default function TrackingDetailsScreen() {
+  // BACK LEAVES THIS SCREEN THE WAY THE HEADER ARROW DOES.
+  // Every page under `(main)` is a DRAWER screen, so pushing between
+  // them builds no stack and the drawer falls back to its initial
+  // route — which is why Back from here landed on the dashboard
+  // instead of the list it was opened from. The fallback is only for
+  // a screen opened cold, by a deep link or a notification.
+  useBackToOrigin("/(main)/payments/payment-tracking");
+
   const params = useLocalSearchParams<{ id?: string; kind?: string }>();
   const id = Number(params.id);
   const kind = (params.kind as TrackingKind) || "PAYMENT";

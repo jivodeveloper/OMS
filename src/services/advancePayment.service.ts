@@ -21,6 +21,12 @@
  */
 import { API_BASE_URL, api } from "./api";
 import { storage } from "../utils/storage";
+// STATIC, NOT `await import(...)`. A dynamic import makes Metro split the
+// module into an async chunk, and asking for that chunk at runtime failed
+// with `Requiring unknown module "2595"` from expo-file-system/legacy. Both
+// of these are already in every bundle, so there is nothing to defer.
+import * as FileSystem from "expo-file-system/legacy";
+import { Platform } from "react-native";
 
 import type { PickedFile } from "../features/advancePayments/logic/attachments";
 
@@ -30,7 +36,15 @@ const BASE = "/advance-payments";
 const PICKER_LIMIT = 100;
 /** The server's own cap — for a caller that filters what comes back. */
 export const SAP_MAX_ROWS = 500;
-const DOCUMENT_LIMIT = 500;
+/**
+ * How many of a partner's open documents one read brings back.
+ *
+ * EXPORTED because a list that comes back FULL is a list that may be cut
+ * short: a vendor with more open bills than this (Reliance Retail, Jivo
+ * Wellness) has older ones that no amount of scrolling reaches, and the
+ * picker then has to ask SAP by name or number instead.
+ */
+export const DOCUMENT_LIMIT = 500;
 
 /** Anything that reads request state is `no-store`: a stale list shows a
  *  decision the user has already made. */
@@ -252,6 +266,22 @@ export interface SapRelatedAttachment {
   file_name: string;
   date: string | null;
   note: string;
+}
+
+/**
+ * The same business partner's balance in another of the group's companies.
+ *
+ * ONLY WHERE IT IS THE SAME BUSINESS: a card code can belong to someone else
+ * entirely in another company, so the server matches on PAN, else on name, and
+ * says which by `matched_by` (`sap_relations.partner_balances`).
+ */
+export interface SapPartnerCompanyBalance {
+  company: AdvancePaymentCompany;
+  card_code: string;
+  card_name: string;
+  balance: string | null;
+  matched_by: "self" | "PAN" | "name" | "";
+  error?: string;
 }
 
 /** One A/P invoice as SAP booked it (`/bill-breakdown/`). Amounts are strings. */
@@ -1134,6 +1164,8 @@ export const advancePaymentService = {
   openVendorInvoices: async (
     company: AdvancePaymentCompany,
     cardCode: string,
+    /** Narrows IN SAP, for a vendor with more open bills than one page holds. */
+    search = "",
   ): Promise<SapOpenInvoice[]> =>
     rows<SapOpenInvoice>(
       guard(
@@ -1143,6 +1175,7 @@ export const advancePaymentService = {
             party_type: "vendor",
             card_code: cardCode,
             limit: DOCUMENT_LIMIT,
+            ...(search ? { search } : {}),
           })}`,
         ),
       ),
@@ -1155,6 +1188,8 @@ export const advancePaymentService = {
   openVendorPurchaseOrders: async (
     company: AdvancePaymentCompany,
     cardCode: string,
+    /** Narrows IN SAP, for a vendor with more open POs than one page holds. */
+    search = "",
   ): Promise<SapOpenPurchaseOrder[]> =>
     rows<SapOpenPurchaseOrder>(
       guard(
@@ -1163,6 +1198,7 @@ export const advancePaymentService = {
             company,
             card_code: cardCode,
             limit: DOCUMENT_LIMIT,
+            ...(search ? { search } : {}),
           })}`,
         ),
       ),
@@ -1279,6 +1315,17 @@ export const advancePaymentService = {
     unwrap<SapBillBreakdown>(
       guard(
         await api.get(`${BASE}/bill-breakdown/${query({ company, doc_entry: docEntry })}`),
+      ),
+    ),
+
+  /** The payee's balance in the group's other companies, where it is the same business. */
+  partnerBalances: async (
+    company: AdvancePaymentCompany,
+    cardCode: string,
+  ): Promise<SapPartnerCompanyBalance[]> =>
+    rows<SapPartnerCompanyBalance>(
+      guard(
+        await api.get(`${BASE}/partner-balances/${query({ company, card_code: cardCode })}`),
       ),
     ),
 
@@ -1655,29 +1702,47 @@ export const advancePaymentService = {
       ),
     ),
 
-  /** A PO's or bill's latest SAP attachment as a data URI. */
+  /**
+   * ONE of a document's SAP attachments, as a data URI.
+   *
+   * `line` names WHICH — as `documentAttachments` lists it. Without one the
+   * server answers the LATEST, which is right for the single link on a
+   * picker row and wrong for a list: every row would open the same file.
+   */
   documentAttachmentImage: async (
     company: AdvancePaymentCompany,
-    kind: SapAttachmentKind,
+    kind: SapAttachmentSource,
     docEntry: number,
+    line?: number,
   ): Promise<string> =>
     fetchDataUri(
-      `${API_BASE_URL}${BASE}/document-attachment/${query({ company, kind, doc_entry: docEntry })}`,
+      `${API_BASE_URL}${BASE}/document-attachment/${query({
+        company,
+        kind,
+        doc_entry: docEntry,
+        ...(line === undefined ? {} : { line }),
+      })}`,
     ),
 
   /** One of a request's files, saved locally; returns the URI to open it with. */
   saveRequestFile: async (id: number, fileId: number, name: string): Promise<string> =>
     download(`${API_BASE_URL}${BASE}/requests/${id}/files/${fileId}/`, name),
 
-  /** A PO's or bill's SAP attachment, saved locally. */
+  /** The same file, saved locally; `line` names which, as above. */
   saveDocumentAttachment: async (
     company: AdvancePaymentCompany,
-    kind: SapAttachmentKind,
+    kind: SapAttachmentSource,
     docEntry: number,
     name: string,
+    line?: number,
   ): Promise<string> =>
     download(
-      `${API_BASE_URL}${BASE}/document-attachment/${query({ company, kind, doc_entry: docEntry })}`,
+      `${API_BASE_URL}${BASE}/document-attachment/${query({
+        company,
+        kind,
+        doc_entry: docEntry,
+        ...(line === undefined ? {} : { line }),
+      })}`,
       name,
     ),
 };
@@ -1719,8 +1784,6 @@ async function fetchDataUri(url: string): Promise<string> {
  * the app that receives it.
  */
 async function download(url: string, name: string): Promise<string> {
-  const FileSystem = await import("expo-file-system/legacy");
-  const { Platform } = await import("react-native");
   const token = await storage.getAccessToken();
 
   const dir = FileSystem.documentDirectory || FileSystem.cacheDirectory;

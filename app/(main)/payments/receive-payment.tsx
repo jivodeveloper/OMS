@@ -1,3 +1,43 @@
+/**
+ * RECEIVE PAYMENT - record money taken in from a customer.
+ *
+ * WHAT THE SCREEN IS FOR. Somebody has collected cash or a cheque and it has
+ * to be written down before it reaches a bank: which company it belongs to,
+ * who handed it over, what it pays off, and how it was paid. What this screen
+ * produces is a RECEIPT, which then goes through approval and on to SAP; the
+ * banking of it is a separate step on the Bank Deposit screen.
+ *
+ * THE CASCADE, and why the order of the fields is not cosmetic. Each choice
+ * narrows the next: a company owns its parties, a party owns its open
+ * invoices, a company owns its cash and bank accounts. So changing a field
+ * CLEARS everything downstream of it (see `handleCompanyChange` and
+ * `handlePartyChange`) - leaving the old selection would submit an invoice
+ * that belongs to a party nobody has chosen.
+ *
+ * ADVANCE IS THE EXCEPTION. An advance is money taken with no invoice behind
+ * it, so ticking it widens the party list to every party (not only those with
+ * something open) and drops the invoice out of the form entirely. SAP wants a
+ * branch for one, which is why the branch picker appears with the tick and
+ * not before it.
+ *
+ * THE METHOD CARD is where the actual money is described - cash with its
+ * denominations, or a cheque with its number, bank and date. A receipt carries
+ * exactly ONE method now; the accordion and the `methods` array are what is
+ * left of the multi-method form, kept because the payload shape is the
+ * server's and a single entry is a one-item list.
+ *
+ * CASH MUST ADD UP. When denominations are entered they are checked against
+ * the amount typed (`_lib/validation`), and while they disagree the accordion
+ * is PINNED to the offending card - opening another one would scroll the
+ * mistake out of sight before anybody fixed it.
+ *
+ * ONE SCREEN, TWO JOBS. With a `receiptId` it loads that receipt and PATCHes;
+ * without one it creates. That is deliberate: two screens would drift, and the
+ * edit form is the one an approver uses to correct a receipt SAP refused.
+ *
+ * NOTHING HERE IS A SECURITY BOUNDARY. The route guard and `permissions` only
+ * decide what is shown; the server checks every one of these rules again.
+ */
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -74,6 +114,13 @@ const emptyForm = (): ReceivePaymentForm => ({
   methods: [createMethod()],
 });
 
+/**
+ * One blank method row.
+ *
+ * The id is counter-plus-timestamp rather than an index: rows are keyed by it
+ * and the accordion remembers which one is open by it, so an id that shifted
+ * when a row was replaced would reopen the wrong card.
+ */
 const createMethod = (): PaymentMethodEntry => {
   methodCounter += 1;
   return {
@@ -340,6 +387,12 @@ function ReceivePaymentScreen() {
     ...collectors.options,
   ];
 
+  /**
+   * The 220ms ease used for every show/hide on this page.
+   *
+   * Called BEFORE the state change, which is how LayoutAnimation works - it
+   * animates the next layout pass, so a call afterwards animates nothing.
+   */
   const animate = useCallback(() => {
     LayoutAnimation.configureNext(
       LayoutAnimation.create(
@@ -356,6 +409,9 @@ function ReceivePaymentScreen() {
   const isPartySource = form.receivedFrom === PARTY_SOURCE;
   const invoiceOptions = invoices.options;
 
+  // Who handed the money over. It does NOT clear the party: both answers are
+  // about the same party, so switching between "they paid it" and "someone
+  // collected it for them" must not throw away the party already chosen.
   const handleReceivedFromChange = (value: string) => {
     animate();
     setForm((prev) => ({ ...prev, receivedFrom: value }));
@@ -621,12 +677,16 @@ function ReceivePaymentScreen() {
     }
   };
 
+  // Opening a card closes the one that was open. Refused outright while a
+  // cash breakdown disagrees with its amount - see `blockingEntry`.
   const toggleMethod = (id: string) => {
     if (blockingEntry) return;
     animate();
     setExpandedId((prev) => (prev === id ? null : id));
   };
 
+  // A patch rather than a whole row: the method card edits one field at a
+  // time, and replacing the entry would drop whatever it had not sent back.
   const updateMethod = (id: string, patch: Partial<PaymentMethodEntry>) => {
     setForm((prev) => ({
       ...prev,

@@ -24,7 +24,7 @@ import type { AttachmentStub } from "@/app/(main)/payments/_lib/types";
 import { appAlert } from "@/src/components/common/AppDialog";
 import { useAuth } from "@/src/context/AuthContext";
 import { COLORS } from "@/src/constants/theme";
-import useBackToOrigin from "@/src/hooks/useBackToOrigin";
+import useBackToOrigin, { useOriginName } from "@/src/hooks/useBackToOrigin";
 import { useRefreshOnFocus } from "@/src/hooks/useRefreshOnFocus";
 import { setHeaderEditHandler } from "@/src/utils/headerEdit";
 import { fs, ms, sp } from "@/src/utils/responsive";
@@ -51,6 +51,7 @@ import EditChangeRows, {
 } from "../components/EditChangeRows";
 import AttachmentReadingRows from "../components/AttachmentReadingRows";
 import BillBreakdown from "../components/BillBreakdown";
+import SapAttachmentList from "../components/SapAttachmentList";
 import { sapDocumentOf } from "../logic/sapMapping";
 import PartnerLedgerCard from "../components/PartnerLedgerCard";
 import ExpenseCard from "../components/ExpenseCard";
@@ -150,6 +151,9 @@ export default function AdvanceDetailsScreen() {
   // Back goes where this page was opened from - the list, or the details
   // page behind a progress page - never to the dashboard. See the hook.
   useBackToOrigin("/(main)/advance-payments/tracking");
+
+  /** What the edit form comes back to: this page, not the drawer's guess. */
+  const origin = useOriginName();
 
   // Only for the name a recorded UTR is stamped with — who read the proof.
   const { user } = useAuth();
@@ -397,9 +401,9 @@ export default function AdvanceDetailsScreen() {
     if (!request) return;
     router.push({
       pathname: "/(main)/advance-payments/edit-request",
-      params: { id: String(request.id) },
+      params: { id: String(request.id), from: origin },
     } as never);
-  }, [request]);
+  }, [request, origin]);
 
   const isFocused = useIsFocused();
   const canEditRef = useRef(false);
@@ -1196,42 +1200,30 @@ export default function AdvanceDetailsScreen() {
                         }
                       />
                       <DetailLine label="This Payment" value={money(row.calc.payment ?? 0)} />
-                      {row.document.attachment ? (
-                        <TouchableOpacity
-                          style={styles.detailLine}
-                          activeOpacity={0.7}
-                          onPress={() => {
-                            const found = row.document.attachment!;
-                            setViewing({
-                              name: found.fileName,
-                              load: () =>
-                                advancePaymentService.documentAttachmentImage(
-                                  found.company,
-                                  found.kind,
-                                  found.docEntry,
-                                ),
-                              save: () =>
-                                advancePaymentService.saveDocumentAttachment(
-                                  found.company,
-                                  found.kind,
-                                  found.docEntry,
-                                  found.fileName,
-                                ),
-                            });
-                          }}
-                          accessibilityRole="button"
-                          accessibilityLabel={`Open ${row.document.attachment.fileName}`}
-                        >
-                          <Text style={styles.detailLineLabel}>SAP Attachment</Text>
-                          <Text style={styles.detailLineLink} numberOfLines={2}>
-                            {row.document.attachment.fileName}
-                            {row.document.attachment.count > 1
-                              ? ` (${row.document.attachment.count})`
-                              : ""}
-                          </Text>
-                          <Ionicons name="open-outline" size={ms(13)} color={COLORS.primary} />
-                        </TouchableOpacity>
-                      ) : null}
+                      {/* EVERY SAP ATTACHMENT, NOT JUST THE LATEST ONE.
+                          A bill's evidence is rarely on the bill alone — the
+                          scan is on it, the weighbridge slip on its GRPO, the
+                          quotation on the PO behind it. This used to show the
+                          single file the picker row carries, with a count in
+                          brackets and no way to reach the others; and because
+                          it asked for no line, the one it opened was whatever
+                          SAP called latest. The list names each file, says
+                          which document it sits on, and opens exactly it. */}
+                      {(() => {
+                        const sap = sapDocumentOf(row.document, form.company);
+                        if (!sap || (sap.kind !== "bill" && sap.kind !== "po")) return null;
+                        return (
+                          <View style={styles.sapAttachBlock}>
+                            <Text style={styles.detailLineLabel}>SAP Attachments</Text>
+                            <SapAttachmentList
+                              company={sap.company}
+                              kind={sap.kind}
+                              docEntry={sap.docEntry}
+                              onOpen={setViewing}
+                            />
+                          </View>
+                        );
+                      })()}
                       {/* WHAT THE SCAN ACTUALLY SAYS, against what SAP holds.
                           An approver's check, so it waits for the Payment
                           stage — `showsBalance` is the same gate the payee's
@@ -2927,6 +2919,10 @@ const styles = StyleSheet.create({
   attachName: { fontSize: fs(13), fontWeight: "600", color: COLORS.text },
   attachMeta: { fontSize: fs(11), color: COLORS.textMuted, marginTop: 2 },
   attachActions: { flexDirection: "row", gap: sp(6), flexShrink: 0 },
+  // The SAP attachment list under a document row: its own label, then the
+  // grouped files, indented with the rest of the row's detail.
+  sapAttachBlock: { paddingVertical: sp(6) },
+
   // The request's files against the SAP payment: the line, and the button
   // that sends what SAP lacks.
   sapFiles: { flex: 1, minWidth: 0, alignItems: "flex-end", gap: sp(6) },

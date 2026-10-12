@@ -22,6 +22,7 @@ import BackDateRequestForm, {
 } from "../components/BackDateRequestForm";
 import BackDateSuccessDialog from "../components/BackDateSuccessDialog";
 import { messageFrom } from "../hooks/useBackDateMasters";
+import useBackToOrigin from "@/src/hooks/useBackToOrigin";
 
 /**
  * Raise a request for temporary back-posting rights in SAP.
@@ -30,6 +31,14 @@ import { messageFrom } from "../hooks/useBackDateMasters";
  * sticky submit bar. The form body itself is shared with the edit screen.
  */
 export default function BackDateCreateScreen() {
+  // BACK LEAVES THIS SCREEN THE WAY THE HEADER ARROW DOES.
+  // Every page under `(main)` is a DRAWER screen, so pushing between
+  // them builds no stack and the drawer falls back to its initial
+  // route — which is why Back from here landed on the dashboard
+  // instead of the list it was opened from. The fallback is only for
+  // a screen opened cold, by a deep link or a notification.
+  useBackToOrigin("/(main)/backdate/tracking");
+
   const [form, setForm] = useState<BackDateFormState>(emptyForm());
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");

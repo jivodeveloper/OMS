@@ -20,7 +20,7 @@ import InlineOrderDateFilter, {
   type DateFilterValue,
 } from "@/src/components/common/InlineOrderDateFilter";
 import { COLORS } from "@/src/constants/theme";
-import useBackToOrigin from "@/src/hooks/useBackToOrigin";
+import useBackToOrigin, { useOriginName } from "@/src/hooks/useBackToOrigin";
 import { useRefreshOnFocus } from "@/src/hooks/useRefreshOnFocus";
 import { fs, ms, sp } from "@/src/utils/responsive";
 import {
@@ -108,6 +108,9 @@ export default function AdvanceDispatchScreen() {
   // The dashboard, not the request list: this page's own key does not admit
   // anyone to the lists, so a dispatch-only user would be refused there.
   useBackToOrigin("/(main)/dashboard");
+
+  /** Where the two pages pushed from here send Back. */
+  const origin = useOriginName();
 
   const [tab, setTab] = useState<Tab>("send");
   /**
@@ -764,7 +767,7 @@ export default function AdvanceDispatchScreen() {
                           if (!row.request) return;
                           router.push({
                             pathname: "/(main)/advance-payments/details",
-                            params: { id: String(row.request.id) },
+                            params: { id: String(row.request.id), from: origin },
                           } as never);
                         }}
                         disabled={!row.request}
@@ -936,7 +939,10 @@ export default function AdvanceDispatchScreen() {
               // Both are answered: nothing can be ticked before they are.
               if (!company || !kind) return;
               holdSelection({ company, kind, rows: chosen });
-              router.push("/(main)/advance-payments/dispatch-review" as never);
+              router.push({
+                pathname: "/(main)/advance-payments/dispatch-review",
+                params: { from: origin },
+              } as never);
             }}
             activeOpacity={0.85}
             accessibilityRole="button"

@@ -18,6 +18,7 @@ import {
 import Dropdown from "@/src/components/common/DropdownProps";
 import { can } from "@/src/constants/permissions";
 import useAndroidBackOverride from "@/src/hooks/useAndroidBackOverride";
+import { useOriginName } from "@/src/hooks/useBackToOrigin";
 import { useAuth } from "@/src/context/AuthContext";
 import InlineOrderDateFilter from "@/src/components/common/InlineOrderDateFilter";
 import { advancePaymentService } from "@/src/services/advancePayment.service";
@@ -27,7 +28,11 @@ import { fs, ms, sp } from "@/src/utils/responsive";
 import { useAssignments } from "../assignments";
 import AdvanceRequestCard from "../components/AdvanceRequestCard";
 import AssignedList from "../components/AssignedList";
-import { BulkApproveDone, BulkApprovePrompt } from "../components/BulkApproveDialogs";
+import {
+  BulkDecisionDone,
+  BulkDecisionPrompt,
+  type BulkAction,
+} from "../components/BulkDecisionDialogs";
 
 import {
   useAdvanceRequests,
@@ -134,36 +139,46 @@ export default function AdvanceListScreen({ scope }: { scope?: RequestListScope 
 
   const [filterOpen, setFilterOpen] = useState(false);
 
-  /* ── Approving several at once ──────────────────────────────────────
+  /* ── Deciding several at once ───────────────────────────────────────
    *
-   * ONLY WHAT IS THIS USER'S TO APPROVE. The server decides per request
-   * (`can.approve`), so the ticks are offered on those rows and no others —
-   * and the chosen set is re-filtered at the moment of approving, because a
-   * filter change or a refresh can take a row off the list after it was
-   * ticked.
+   * ONLY WHAT IS THIS USER'S TO DECIDE. The server decides per request
+   * (`can.approve`, `can.reject`), so the ticks are offered on those rows and
+   * no others — and the chosen set is re-filtered at the moment of acting,
+   * because a filter change or a refresh can take a row off the list after it
+   * was ticked.
    */
   const [ticked, setTicked] = useState<ReadonlySet<number>>(new Set());
-  const [asking, setAsking] = useState(false);
+  const [asking, setAsking] = useState<BulkAction | null>(null);
   const [progress, setProgress] = useState("");
   const [outcome, setOutcome] = useState<{
+    action: BulkAction;
     done: string[];
     failed: [string, string][];
   } | null>(null);
 
   /**
-   * WHAT CAN HONESTLY BE APPROVED FROM A LIST.
+   * WHAT MAY BE DECIDED FROM A LIST, per action.
    *
-   * The server's `can.approve`, MINUS anything sitting at the Payment stage
-   * (`can.edit_payout`): approving one of those means filling in where the
-   * money goes, which cannot be done from a list — the server refuses it
-   * ("The payment details are not ready"), so offering the tick would only
-   * promise something that always fails. Those are approved on their own
-   * screen, where the details are.
+   * A row is tickable when EITHER decision is open to this user, and each
+   * action then takes only the rows it applies to — a request may be one this
+   * user can reject but not approve, and a tick should not have to mean both.
+   *
+   * APPROVE EXCLUDES THE PAYMENT STAGE (`can.edit_payout`): approving one of
+   * those means filling in where the money goes, which cannot be done from a
+   * list — the server refuses it ("The payment details are not ready"), so
+   * offering it here would promise something that always fails. REJECT has no
+   * such limit: sending a request back needs no payment details.
    */
   const canBulk = (entry: AdvanceRequestEntry) =>
-    Boolean(entry.api.can?.approve) && !entry.api.can?.edit_payout;
+    Boolean(entry.api.can?.approve || entry.api.can?.reject);
+  const canBulkDo = (entry: AdvanceRequestEntry, action: BulkAction) =>
+    action === "approve"
+      ? Boolean(entry.api.can?.approve) && !entry.api.can?.edit_payout
+      : Boolean(entry.api.can?.reject);
+
   const selectable = rows.filter(canBulk);
   const chosen = selectable.filter((entry) => ticked.has(entry.serverId));
+  const chosenFor = (action: BulkAction) => chosen.filter((entry) => canBulkDo(entry, action));
 
   const toggle = (id: number) =>
     setTicked((current) => {
@@ -178,15 +193,17 @@ export default function AdvanceListScreen({ scope }: { scope?: RequestListScope 
    * send it. There is no bulk endpoint, and firing them together would lose
    * which of them the server refused.
    */
-  const approveChosen = async (remarks: string) => {
+  const decideChosen = async (action: BulkAction, remarks: string) => {
+    const acting = chosenFor(action);
+    const word = action === "approve" ? "Approving" : "Rejecting";
     const done: string[] = [];
     const failed: [string, string][] = [];
-    for (const [index, entry] of chosen.entries()) {
-      setProgress(`Approving ${index + 1} of ${chosen.length}…`);
+    for (const [index, entry] of acting.entries()) {
+      setProgress(`${word} ${index + 1} of ${acting.length}…`);
       try {
         await advancePaymentService.act(
           entry.serverId,
-          "approve",
+          action,
           remarks,
           entry.api.flow?.version,
         );
@@ -198,9 +215,9 @@ export default function AdvanceListScreen({ scope }: { scope?: RequestListScope 
       }
     }
     setProgress("");
-    setAsking(false);
+    setAsking(null);
     setTicked(new Set());
-    setOutcome({ done, failed });
+    setOutcome({ action, done, failed });
     void onRefresh();
   };
 
@@ -219,10 +236,19 @@ export default function AdvanceListScreen({ scope }: { scope?: RequestListScope 
     patchFilters({ status: statusParam as StatusFilter });
   }, [statusParam, patchFilters]);
 
+  /**
+   * The page a pushed screen comes back to.
+   *
+   * NAMED HERE, not guessed there: this one component is both Tracking and
+   * Approval, and without it Back from a detail page asked the drawer — which
+   * holds no stack between drawer screens — and landed on the dashboard.
+   */
+  const origin = useOriginName();
+
   const openDetails = (entry: AdvanceRequestEntry) =>
     router.push({
       pathname: "/(main)/advance-payments/details",
-      params: { id: String(entry.serverId) },
+      params: { id: String(entry.serverId), from: origin },
     } as never);
 
   /** The bills and POs sent to this user and still waiting. */
@@ -253,7 +279,7 @@ export default function AdvanceListScreen({ scope }: { scope?: RequestListScope 
   const openProgress = (entry: AdvanceRequestEntry) =>
     router.push({
       pathname: "/(main)/advance-payments/tracking-progress",
-      params: { id: String(entry.serverId) },
+      params: { id: String(entry.serverId), from: origin },
     } as never);
 
   const renderEmpty = () => {
@@ -455,36 +481,59 @@ export default function AdvanceListScreen({ scope }: { scope?: RequestListScope 
             onPress={() => setTicked(new Set())}
             activeOpacity={0.8}
             accessibilityRole="button"
+            accessibilityLabel="Clear the selection"
           >
             <Ionicons name="close" size={16} color={COLORS.textSecondary} />
           </TouchableOpacity>
           <Text style={styles.bulkCount} numberOfLines={1}>
             {chosen.length} selected
           </Text>
-          <TouchableOpacity
-            style={styles.bulkApprove}
-            onPress={() => setAsking(true)}
-            activeOpacity={0.85}
-            accessibilityRole="button"
-          >
-            <Ionicons name="checkmark-done" size={16} color="#fff" />
-            <Text style={styles.bulkApproveText}>Approve {chosen.length}</Text>
-          </TouchableOpacity>
+
+          {/* EACH BUTTON COUNTS ITS OWN ROWS. A tick means "I have picked
+              this request", not "I can do both things to it" — so a selection
+              of five where one is at the Payment stage reads "Approve 4 ·
+              Reject 5" rather than silently doing four of five. A button with
+              nothing to act on is not shown at all. */}
+          {chosenFor("reject").length ? (
+            <TouchableOpacity
+              style={styles.bulkReject}
+              onPress={() => setAsking("reject")}
+              activeOpacity={0.85}
+              accessibilityRole="button"
+            >
+              <Ionicons name="close-circle" size={16} color="#fff" />
+              <Text style={styles.bulkActionText}>Reject {chosenFor("reject").length}</Text>
+            </TouchableOpacity>
+          ) : null}
+
+          {chosenFor("approve").length ? (
+            <TouchableOpacity
+              style={styles.bulkApprove}
+              onPress={() => setAsking("approve")}
+              activeOpacity={0.85}
+              accessibilityRole="button"
+            >
+              <Ionicons name="checkmark-done" size={16} color="#fff" />
+              <Text style={styles.bulkActionText}>Approve {chosenFor("approve").length}</Text>
+            </TouchableOpacity>
+          ) : null}
         </View>
       ) : null}
 
       {asking ? (
-        <BulkApprovePrompt
-          count={chosen.length}
+        <BulkDecisionPrompt
+          action={asking}
+          count={chosenFor(asking).length}
           busy={progress !== ""}
           progress={progress}
-          onClose={() => setAsking(false)}
-          onConfirm={(remarks) => void approveChosen(remarks)}
+          onClose={() => setAsking(null)}
+          onConfirm={(remarks) => void decideChosen(asking, remarks)}
         />
       ) : null}
 
       {outcome ? (
-        <BulkApproveDone
+        <BulkDecisionDone
+          action={outcome.action}
           done={outcome.done}
           failed={outcome.failed}
           onClose={() => setOutcome(null)}
@@ -744,12 +793,23 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: sp(6),
-    paddingHorizontal: sp(16),
+    paddingHorizontal: sp(14),
     height: ms(40),
     borderRadius: sp(12),
     backgroundColor: COLORS.success,
   },
-  bulkApproveText: { fontSize: fs(13.5), fontWeight: "800", color: "#fff" },
+  // The same button in the colour that says what it does. Reject sits LEFT of
+  // approve: the destructive one must not be where the thumb lands by habit.
+  bulkReject: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: sp(6),
+    paddingHorizontal: sp(14),
+    height: ms(40),
+    borderRadius: sp(12),
+    backgroundColor: COLORS.error,
+  },
+  bulkActionText: { fontSize: fs(13.5), fontWeight: "800", color: "#fff" },
   loadingWrap: { flex: 1, alignItems: "center", justifyContent: "center" },
   emptyWrap: { alignItems: "center", paddingVertical: sp(60), gap: sp(8) },
   emptyTitle: {

@@ -24,6 +24,7 @@ import BackDateRequestForm, {
   splitActions,
 } from "../components/BackDateRequestForm";
 import { messageFrom } from "../hooks/useBackDateMasters";
+import useBackToOrigin from "@/src/hooks/useBackToOrigin";
 
 /**
  * Correct a request that has not been decided yet.
@@ -38,6 +39,14 @@ import { messageFrom } from "../hooks/useBackDateMasters";
  * and a second copy would drift and offer a form that 403s on save.
  */
 export default function BackDateEditScreen() {
+  // BACK LEAVES THIS SCREEN THE WAY THE HEADER ARROW DOES.
+  // Every page under `(main)` is a DRAWER screen, so pushing between
+  // them builds no stack and the drawer falls back to its initial
+  // route — which is why Back from here landed on the dashboard
+  // instead of the list it was opened from. The fallback is only for
+  // a screen opened cold, by a deep link or a notification.
+  useBackToOrigin("/(main)/backdate/tracking");
+
   const params = useLocalSearchParams<{ id?: string }>();
   const id = Number(params.id);
 

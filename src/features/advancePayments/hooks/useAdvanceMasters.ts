@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import {
+  DOCUMENT_LIMIT,
   SAP_MAX_ROWS,
   advancePaymentError,
   advancePaymentService,
@@ -173,12 +174,63 @@ export function useOpenDocuments(
   company: AdvancePaymentCompany | "",
   kind: ReferenceKind | null,
   partner: string,
+  /**
+   * What the picker's search box holds.
+   *
+   * ONLY USED WHEN THE FIRST READ CAME BACK FULL. A vendor with more open
+   * bills or POs than `DOCUMENT_LIMIT` has older ones that no amount of
+   * scrolling reaches, so the search asks SAP as well and what it finds is
+   * merged in. Below the cap the whole list is already here and filtering it
+   * locally is both instant and complete.
+   */
+  search = "",
 ) {
   const [documents, setDocuments] = useState<OpenDocument[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
   const live = Boolean(kind && REFERENCE_KINDS[kind].live);
+  /** The first read filled the page, so SAP may be holding more. */
+  const capped = documents.length >= DOCUMENT_LIMIT;
+  /** Only bills and POs are searchable on the server. */
+  const searchable = kind === "VENDOR_BILL" || kind === "VENDOR_PO";
+  const term = search.trim();
+  const asksSap = searchable && capped && term.length >= 2;
+
+  // The server-side search, merged with what is already here. A separate
+  // effect so typing never re-reads the base list.
+  const [found, setFound] = useState<OpenDocument[]>([]);
+  useEffect(() => {
+    if (!company || !partner || !asksSap) {
+      setFound([]);
+      return;
+    }
+    let alive = true;
+    const timer = setTimeout(() => {
+      const ask =
+        kind === "VENDOR_PO"
+          ? advancePaymentService
+              .openVendorPurchaseOrders(company, partner, term)
+              .then((rows) => rows.map((row) => purchaseOrderToDocument(row, company)))
+          : advancePaymentService
+              .openVendorInvoices(company, partner, term)
+              .then((rows) => rows.map((row) => invoiceToDocument(row, company)));
+      ask
+        .then((rows) => {
+          if (alive) setFound(rows);
+        })
+        // A failed search leaves what is already on screen: the local filter
+        // still works, and an error here is not worth emptying the picker for.
+        .catch(() => {
+          if (alive) setFound([]);
+        });
+      // One query per pause in typing, not one per keystroke.
+    }, 350);
+    return () => {
+      alive = false;
+      clearTimeout(timer);
+    };
+  }, [company, partner, kind, term, asksSap]);
 
   useEffect(() => {
     if (!company || !kind || !partner || !live) {
@@ -230,7 +282,12 @@ export function useOpenDocuments(
     };
   }, [company, kind, partner, live]);
 
-  return { documents, loading, error };
+  /** What SAP found that the first page did not already hold. */
+  const merged = found.length
+    ? [...documents, ...found.filter((row) => !documents.some((seen) => seen.id === row.id))]
+    : documents;
+
+  return { documents: merged, loading, error, searchable: searchable && capped };
 }
 
 /**

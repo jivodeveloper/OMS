@@ -55,6 +55,8 @@ export default function DocumentSelector({
   error,
   onPick,
   onAllocationChange,
+  search,
+  onSearch,
 }: {
   kind: ReferenceKind;
   form: RequestForm;
@@ -63,6 +65,13 @@ export default function DocumentSelector({
   error: string;
   onPick: (ids: string[]) => void;
   onAllocationChange: (id: string, patch: Partial<Allocation>) => void;
+  /**
+   * The search box, shown ONLY when SAP holds more of this partner's
+   * documents than one read brings back. Below that cap every document is
+   * already on screen and a search box would imply otherwise.
+   */
+  search?: string;
+  onSearch?: (term: string) => void;
 }) {
   const def = REFERENCE_KINDS[kind];
   const rows = allocationRows(form);
@@ -119,6 +128,35 @@ export default function DocumentSelector({
 
       {open ? (
         <View style={styles.body}>
+          {/* A VENDOR WITH MORE OPEN DOCUMENTS THAN ONE READ BRINGS BACK.
+              Scrolling cannot reach the older ones, so the box asks SAP by
+              number or vendor reference and what it finds is added to the
+              list. Not shown otherwise: with everything already here, a
+              search box would suggest something is missing. */}
+          {onSearch && form.partner ? (
+            <View style={styles.searchWrap}>
+              <Ionicons name="search-outline" size={16} color={COLORS.textSecondary} />
+              <TextInput
+                style={styles.searchInput}
+                value={search}
+                onChangeText={onSearch}
+                placeholder={`Search ${def.pluralLabel.toLowerCase()} in SAP`}
+                placeholderTextColor={COLORS.textMuted}
+                autoCapitalize="characters"
+                autoCorrect={false}
+              />
+              {search ? (
+                <TouchableOpacity
+                  onPress={() => onSearch("")}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  accessibilityLabel="Clear the search"
+                >
+                  <Ionicons name="close-circle" size={16} color={COLORS.textSecondary} />
+                </TouchableOpacity>
+              ) : null}
+            </View>
+          ) : null}
+
           {!form.partner ? (
             <Notice tone="info">
               <NoticeText tone="info" text="Pick the business partner first." />
@@ -463,6 +501,21 @@ const styles = StyleSheet.create({
   },
   sideTagText: { fontSize: 10, fontWeight: "900" },
   docNote: { fontSize: 11, color: COLORS.warning, fontWeight: "700", marginTop: 2 },
+
+  // The SAP search, in the same box the lists use.
+  searchWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: SPACING.sm - 2,
+    height: 44,
+    paddingHorizontal: SPACING.sm + 2,
+    marginBottom: SPACING.sm,
+    borderRadius: RADIUS.md,
+    borderWidth: 1.5,
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.inputBackground,
+  },
+  searchInput: { flex: 1, minWidth: 0, fontSize: 13, color: COLORS.text, paddingVertical: 0 },
   // SAP's own deduction: a fact about the document, not a warning about it.
   docTds: { fontSize: 11, color: COLORS.textSecondary, marginTop: 2 },
 

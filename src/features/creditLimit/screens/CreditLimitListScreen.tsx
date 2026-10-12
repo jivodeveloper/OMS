@@ -21,6 +21,7 @@ import { can } from "@/src/constants/permissions";
 import { COLORS } from "@/src/constants/theme";
 import { useAuth } from "@/src/context/AuthContext";
 import useAndroidBackOverride from "@/src/hooks/useAndroidBackOverride";
+import { useOriginName } from "@/src/hooks/useBackToOrigin";
 import { useRefreshOnFocus } from "@/src/hooks/useRefreshOnFocus";
 import { fs, ms, sp } from "@/src/utils/responsive";
 import {
@@ -134,16 +135,19 @@ export default function CreditLimitListScreen({ scope }: { scope?: ListView }) {
     ...(holdsMine ? [{ label: VIEW_LABEL.mine, value: "mine" as ListView }] : []),
   ];
 
+  /** The page Back returns to — see `useOriginName`. */
+  const origin = useOriginName();
+
   const openDetails = (request: CreditLimitRequest) =>
     router.push({
       pathname: "/(main)/credit-limit/details",
-      params: { id: String(request.id) },
+      params: { id: String(request.id), from: origin },
     } as never);
 
   const openProgress = (request: CreditLimitRequest) =>
     router.push({
       pathname: "/(main)/credit-limit/progress",
-      params: { id: String(request.id) },
+      params: { id: String(request.id), from: origin },
     } as never);
 
   const renderEmpty = () => {

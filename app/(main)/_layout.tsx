@@ -779,7 +779,7 @@ export default function MainLayout() {
         <Drawer.Screen
           name="advance-payments/create"
           options={{
-            title: "Advance Payment Request",
+            title: "New Payment Request",
             drawerIcon: ({ color }) => (
               <Ionicons name="wallet-outline" size={22} color={color} />
             ),
@@ -793,8 +793,8 @@ export default function MainLayout() {
         <Drawer.Screen
           name="advance-payments/tracking"
           options={{
-            title: "Advance Payments",
-            drawerLabel: "Advances",
+            title: "Payments",
+            drawerLabel: "Payments",
             drawerIcon: ({ color }) => (
               <Ionicons name="card-outline" size={22} color={color} />
             ),
@@ -806,7 +806,7 @@ export default function MainLayout() {
         <Drawer.Screen
           name="advance-payments/approval"
           options={{
-            title: "Advance Payment Approval",
+            title: "Payment Approvals",
             // ONE ENTRY FOR THE MODULE, not two. The page itself asks whose
             // work you are looking at — To Approve, My Requests, Assigned to
             // me — so a second sidebar row for the desk was the same list
@@ -839,7 +839,7 @@ export default function MainLayout() {
         <Drawer.Screen
           name="advance-payments/details"
           options={{
-            title: "Advance Payment Details",
+            title: "Payment Request Details",
             // Reached from a list card or a deep link, never from the drawer.
             drawerItemStyle: hiddenStyle,
           }}
@@ -847,7 +847,7 @@ export default function MainLayout() {
         <Drawer.Screen
           name="advance-payments/tracking-progress"
           options={{
-            title: "Advance Payment Progress",
+            title: "Payment Request Progress",
             // Reached from a list card or a push, never from the drawer.
             drawerItemStyle: hiddenStyle,
           }}
@@ -855,7 +855,7 @@ export default function MainLayout() {
         <Drawer.Screen
           name="advance-payments/edit-request"
           options={{
-            title: "Edit Advance Payment",
+            title: "Edit Payment Request",
             drawerItemStyle: hiddenStyle,
           }}
         />

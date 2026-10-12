@@ -37,6 +37,7 @@ import paymentsService, {
   type BankDeposit,
   type StatusHistoryRow,
 } from "@/src/services/payments.service";
+import useBackToOrigin from "@/src/hooks/useBackToOrigin";
 
 const STATUS_LABEL: Record<string, string> = {
   DRAFT: "Draft",
@@ -95,6 +96,14 @@ const shortDate = (value?: string | null) => {
 };
 
 export default function DepositDetailsScreen() {
+  // BACK LEAVES THIS SCREEN THE WAY THE HEADER ARROW DOES.
+  // Every page under `(main)` is a DRAWER screen, so pushing between
+  // them builds no stack and the drawer falls back to its initial
+  // route — which is why Back from here landed on the dashboard
+  // instead of the list it was opened from. The fallback is only for
+  // a screen opened cold, by a deep link or a notification.
+  useBackToOrigin("/(main)/payments/deposit-tracking");
+
   const params = useLocalSearchParams<{ id?: string; refreshAt?: string }>();
   const id = Number(params.id);
   // Bumped by the edit form when it navigates back here. Without it the screen
