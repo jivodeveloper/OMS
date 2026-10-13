@@ -203,7 +203,7 @@ const getFrameworkMeta = (item: FrameworkNotification): NotificationMeta => {
   // see `moduleForEntity`. A payment REQUEST is not a payment taken in, and
   // showing it under the cash icon put two unrelated workflows behind one
   // symbol in a list people scan rather than read.
-  const byEntity = moduleForEntity(item.entity_type);
+  const byEntity = moduleForEntity(item.entity_type, item.event_type);
   if (byEntity === "advances")
     return { title: item.title || "Payment request", icon: "wallet-outline", color: "#B45309", iconBg: "#FEF3C7" };
   if (byEntity === "creditLimit")
@@ -215,7 +215,7 @@ const toFrameworkCard = (item: FrameworkNotification): NotificationCard => {
   const meta = getFrameworkMeta(item);
   // The entity decides, and the server's own label is only the fallback: it
   // knows two modules and calls the rest "other" (see `moduleForEntity`).
-  const named = moduleForEntity(item.entity_type) || item.module;
+  const named = moduleForEntity(item.entity_type, item.event_type) || item.module;
   const mod: NotificationModule = KNOWN_MODULES.includes(
     named as NotificationModule,
   )

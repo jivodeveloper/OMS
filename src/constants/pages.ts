@@ -246,6 +246,36 @@ const ALL_PRODUCTION_ACTIONS = ["Production_Order", "Production_Order_Approval"]
 const ALL_ADVANCE_PAYMENT_ACTIONS = ["Advance_Payment", "Advance_Payment_Approval"];
 const ALL_CREDIT_LIMIT_ACTIONS = ["Credit_Limit", "Credit_Limit_Approval"];
 
+/**
+ * Every key that means "this user is sent notifications".
+ *
+ * THE INBOX BELONGS TO NO ONE MODULE. The notification framework
+ * (`notifications/`) delivers for Payments, Deposits, BackDate, Production,
+ * Credit Limit and payment requests alike, and the server decides who is told
+ * from the module's own rules — not from a role.
+ *
+ * THE BUG THIS FIXES. The grant below listed the four PAYMENT keys only, so a
+ * user whose single module was Advance Payments or Credit Limit was sent
+ * notifications by the server and shown NOWHERE to read them: no bell in the
+ * header, no Notifications row in the drawer, and the inbox itself refusing to
+ * open if they ever reached it. Five events per payment request
+ * (`advance_payment/services/notify.py`) went to people who could not see one
+ * of them.
+ *
+ * Dispatch and view-all are deliberately included: a dispatcher is the actor
+ * ADVANCE_PAYMENT_ASSIGNED is about, and a supervisor reading every desk is
+ * exactly who a stalled request should reach.
+ */
+const ALL_NOTIFIED_ACTIONS = [
+  ...ALL_PAYMENT_ACTIONS,
+  ...ALL_BACKDATE_ACTIONS,
+  ...ALL_PRODUCTION_ACTIONS,
+  ...ALL_ADVANCE_PAYMENT_ACTIONS,
+  ...ALL_CREDIT_LIMIT_ACTIONS,
+  "Advance_Payment_Dispatch",
+  "Advance_Payment_View_All",
+];
+
 export type PaymentAction =
   (typeof PAYMENT_ACTIONS)[keyof typeof PAYMENT_ACTIONS];
 
@@ -455,9 +485,10 @@ export const canAccessScreen = (
   // An explicit per-user page grant still opens its screens.
   if (screensFromExtraPages(permissionKeysOf(user)).has(screen)) return true;
 
-  // Notifications is shared across modules: anyone holding a payment action
-  // reaches the inbox, in ADDITION to the roles listed in SCREEN_ROLES.
-  if (screen === "notifications" && canAny(user, ALL_PAYMENT_ACTIONS)) {
+  // Notifications is shared across EVERY module: anyone the server sends a
+  // notification to reaches the inbox, in ADDITION to the roles listed in
+  // SCREEN_ROLES. See `ALL_NOTIFIED_ACTIONS` for why this is not just payments.
+  if (screen === "notifications" && canAny(user, ALL_NOTIFIED_ACTIONS)) {
     return true;
   }
 

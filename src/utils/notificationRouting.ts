@@ -168,10 +168,17 @@ const EVENT_ROUTES: Record<
  * modules under one heading nobody chose. The entity type is already on every
  * framework notification and is exact, so it answers the question instead.
  *
- * Returns "" when the entity is unknown, which the caller reads as "other".
+ * WHEN THERE IS NO ENTITY, the EVENT still names the module. ASSIGNED is sent
+ * about several bills at once and names none of them, so going by the entity
+ * alone filed the one notification that tells somebody to go and do something
+ * under "other", away from the module it belongs to. The event prefix is the
+ * module's own (`ADVANCE_PAYMENT_…`, `CREDIT_LIMIT_…`), so it answers.
+ *
+ * Returns "" when neither is known, which the caller reads as "other".
  */
 export const moduleForEntity = (
   entityType: string | null | undefined,
+  eventType?: string | null,
 ): string => {
   switch (String(entityType || "").toLowerCase()) {
     case "paymentreceipt":
@@ -187,8 +194,13 @@ export const moduleForEntity = (
     case "advancerequest":
       return "advances";
     default:
-      return "";
+      break;
   }
+
+  const event = String(eventType || "").toUpperCase();
+  if (event.startsWith("ADVANCE_PAYMENT_")) return "advances";
+  if (event.startsWith("CREDIT_LIMIT_")) return "creditLimit";
+  return "";
 };
 
 /**

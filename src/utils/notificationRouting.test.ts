@@ -222,6 +222,15 @@ describe("moduleForEntity", () => {
     assert.equal(moduleForEntity("advancerequest"), "advances");
   });
 
+  it("falls back to the EVENT when there is no entity to read", () => {
+    // ASSIGNED names no entity, and without this the one notification that
+    // tells somebody to go and raise a request is filed away from its module.
+    assert.equal(moduleForEntity(null, "ADVANCE_PAYMENT_ASSIGNED"), "advances");
+    assert.equal(moduleForEntity("", "CREDIT_LIMIT_AWAITING_APPROVAL"), "creditLimit");
+    // The entity still wins where there is one.
+    assert.equal(moduleForEntity("bankdeposit", "ADVANCE_PAYMENT_ASSIGNED"), "deposits");
+  });
+
   it("is case-insensitive and says nothing about what it does not know", () => {
     assert.equal(moduleForEntity("AdvanceRequest"), "advances");
     assert.equal(moduleForEntity("somethingelse"), "");
