@@ -16,6 +16,21 @@ import type { AdvanceRequestEntry } from "../logic/approvalData";
 import { balanceSide, formatDate, formatINR } from "../logic/rules";
 
 /** The group's companies as a person names them, not as SAP codes them. */
+/**
+ * How the server says it found the partner, in words an approver reads.
+ *
+ * `self` is the same card code in the other company and needs no explanation —
+ * the code is already shown beside it. An unknown reason falls back to the
+ * code alone rather than to a phrase that would claim more than the server
+ * said.
+ */
+const MATCH_LABEL: Record<string, string> = {
+  GSTIN: "Same GSTIN",
+  PAN: "Same PAN",
+  "bank account": "Same bank account",
+  name: "Matched by name",
+};
+
 const COMPANY_LABEL: Record<string, string> = {
   OIL: "Oil",
   BEVERAGES: "Beverages",
@@ -174,24 +189,33 @@ export default function PartnerLedgerCard({ entry }: { entry: AdvanceRequestEntr
               the group — the question an approver asks next. */}
           {others.map((row) => {
             const theirs = row.balance === null ? null : balanceSide(row.balance, who);
+            // The code is part of the key, not just the label: the same vendor
+            // may be filed under more than one code in one company, and the
+            // server returns a row for each.
+            const elsewhere = row.card_code && row.card_code !== cardCode;
             return (
-              <View key={row.company} style={styles.balanceRow}>
-                <Text style={styles.balanceLabel}>Balance in {COMPANY_LABEL[row.company]}</Text>
+              <View key={`${row.company}:${row.card_code}`} style={styles.balanceRow}>
+                <Text style={styles.balanceLabel}>
+                  Balance in {COMPANY_LABEL[row.company]}
+                  {elsewhere ? ` (${row.card_code})` : ""}
+                </Text>
                 <View style={styles.balanceValueWrap}>
                   <Text style={styles.balanceValue}>
                     {row.error || !theirs
                       ? "Could not read SAP"
                       : `${formatINR(theirs.amount)}${theirs.side ? ` ${theirs.side}` : ""}`}
                   </Text>
-                  {/* HOW IT WAS MATCHED, because "same code" is not the same
-                      as "same business": by PAN is certain, by name is a
-                      judgement the reader should be able to weigh. */}
+                  {/* HOW IT WAS MATCHED, because "same code" is not the
+                      same as "same business". GSTIN and PAN are documentary;
+                      a shared bank account is strong but circumstantial; a
+                      name is a judgement, and the reader is the one who should
+                      be weighing it. The server's own word is used rather than
+                      a phrase of ours, so a reason added there is never
+                      silently rendered as "matched" with no reason at all. */}
                   <Text style={styles.balanceMeaning}>
-                    {row.matched_by === "PAN"
-                      ? `Same PAN · ${row.card_code}`
-                      : row.matched_by === "name"
-                        ? `Matched by name · ${row.card_code}`
-                        : row.card_code}
+                    {MATCH_LABEL[row.matched_by]
+                      ? `${MATCH_LABEL[row.matched_by]} · ${row.card_code}`
+                      : row.card_code}
                   </Text>
                 </View>
               </View>

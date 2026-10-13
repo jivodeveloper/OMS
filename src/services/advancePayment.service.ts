@@ -272,15 +272,22 @@ export interface SapRelatedAttachment {
  * The same business partner's balance in another of the group's companies.
  *
  * ONLY WHERE IT IS THE SAME BUSINESS: a card code can belong to someone else
- * entirely in another company, so the server matches on PAN, else on name, and
- * says which by `matched_by` (`sap_relations.partner_balances`).
+ * entirely in another company, so the server matches on GSTIN, PAN, bank
+ * account or name, and says which by `matched_by`
+ * (`sap_relations.partner_balances`).
+ *
+ * UNDER ANY CODE, NOT ONLY THE SAME ONE (12 Oct 2026). The same vendor is
+ * routinely filed under a different card code in each company, so the match no
+ * longer starts from the code: a company can therefore return SEVERAL rows,
+ * and `company` alone is not a key. Pair it with `card_code`.
  */
 export interface SapPartnerCompanyBalance {
   company: AdvancePaymentCompany;
   card_code: string;
   card_name: string;
   balance: string | null;
-  matched_by: "self" | "PAN" | "name" | "";
+  /** In the server's own words, so the reader can weigh how sure the match is. */
+  matched_by: "self" | "PAN" | "GSTIN" | "bank account" | "name" | "";
   error?: string;
 }
 

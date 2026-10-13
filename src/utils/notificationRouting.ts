@@ -52,6 +52,15 @@ export const PRODUCTION_DETAILS_ROUTE =
 // (CreditLimitListScreen.openDetails). Keyed by { id }.
 export const CREDIT_LIMIT_DETAILS_ROUTE =
   "/(main)/credit-limit/details" as const;
+// Payment request (the module the backend still calls advance_payment) detail:
+// the SAME screen the list cards open on "View Details"
+// (AdvanceListScreen.openDetails). Keyed by { id, from }.
+export const ADVANCE_DETAILS_ROUTE =
+  "/(main)/advance-payments/details" as const;
+// The module's list, which is also where "Assigned to me" lives — the only
+// place a recipient can act on a bill or PO that was sent to them.
+export const ADVANCE_LIST_ROUTE =
+  "/(main)/advance-payments/tracking" as const;
 
 /**
  * Map a backend `entity_type` (Django model name) to the exact mobile detail
@@ -111,6 +120,75 @@ const ENTITY_ROUTES: Record<
     pathname: CREDIT_LIMIT_DETAILS_ROUTE,
     params: (id, from) => ({ id, ...(from ? { from } : {}) }),
   },
+  // `advancerequest` — the model is `AdvanceRequest`
+  // (`advance_payment/models.py`), so `content_type.model` is one word with no
+  // underscore. Verified against the model, not guessed: a wrong key here
+  // fails silently, landing a tapped push in the inbox instead of the request.
+  //
+  // ONE SCREEN FOR BOTH SIDES, as with Credit Limit and unlike the web client,
+  // which sends approvers and requesters to two different pages. This screen
+  // offers Approve and Reject only when the server says the request is this
+  // user's to act on, so every one of the four request events — awaiting,
+  // completed, rejected, returned — can land on it.
+  advancerequest: {
+    pathname: ADVANCE_DETAILS_ROUTE,
+    params: (id, from) => ({ id, ...(from ? { from } : {}) }),
+  },
+};
+
+/**
+ * Events that name no entity, and the screen that answers them anyway.
+ *
+ * ADVANCE_PAYMENT_ASSIGNED is sent when bills or POs are handed to somebody to
+ * raise a payment request FROM (`advance_payment/services/notify.py` sends it
+ * with `entity=None`, because several documents are one notification and no
+ * single one of them is what it is about). Dropping such a tap in the inbox
+ * would be the one case where the notification tells the user to do something
+ * and then does not take them to where it is done: the list's "Assigned to me"
+ * view is that place.
+ */
+const EVENT_ROUTES: Record<
+  string,
+  { pathname: string; params: (from?: string) => Record<string, string> }
+> = {
+  ADVANCE_PAYMENT_ASSIGNED: {
+    pathname: ADVANCE_LIST_ROUTE,
+    params: (from): Record<string, string> => (from ? { from } : {}),
+  },
+};
+
+/**
+ * The coarse module a notification belongs to, read from the ENTITY rather
+ * than from the `module` the server sends.
+ *
+ * WHY NOT THE SERVER'S. `notifications/serializers.py::_ENTITY_MODULE` names
+ * only `paymentreceipt` and `bankdeposit`; everything else — BackDate,
+ * Production, Credit Limit and payment requests alike — is labelled "other".
+ * The inbox filters on this, so taking the server's word for it files four
+ * modules under one heading nobody chose. The entity type is already on every
+ * framework notification and is exact, so it answers the question instead.
+ *
+ * Returns "" when the entity is unknown, which the caller reads as "other".
+ */
+export const moduleForEntity = (
+  entityType: string | null | undefined,
+): string => {
+  switch (String(entityType || "").toLowerCase()) {
+    case "paymentreceipt":
+      return "payments";
+    case "bankdeposit":
+      return "deposits";
+    case "backdate":
+      return "backdate";
+    case "productionorder":
+      return "production";
+    case "creditlimitrequest":
+      return "creditLimit";
+    case "advancerequest":
+      return "advances";
+    default:
+      return "";
+  }
 };
 
 /**
@@ -198,6 +276,17 @@ export const resolveNotificationRoute = (
     return {
       pathname: entityRoute.pathname,
       params: entityRoute.params(entityId, originScreen || undefined),
+    } as Href;
+  }
+
+  // An event that names no entity but still has somewhere to go — see
+  // `EVENT_ROUTES`. Checked AFTER the entity, so an event that does carry one
+  // still opens that particular record.
+  const eventRoute = EVENT_ROUTES[String(data.event_type || "").toUpperCase()];
+  if (eventRoute) {
+    return {
+      pathname: eventRoute.pathname,
+      params: eventRoute.params(originScreen || undefined),
     } as Href;
   }
 

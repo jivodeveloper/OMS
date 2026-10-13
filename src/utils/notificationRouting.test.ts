@@ -14,8 +14,12 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
+  ADVANCE_DETAILS_ROUTE,
+  ADVANCE_LIST_ROUTE,
   CREDIT_LIMIT_DETAILS_ROUTE,
   DEPOSIT_DETAILS_ROUTE,
+  moduleForEntity,
+  NOTIFICATIONS_ROUTE,
   PAYMENT_DETAILS_ROUTE,
   resolveNotificationRoute,
 } from "./notificationRouting.ts";
@@ -122,5 +126,106 @@ describe("payment vs deposit notification routing", () => {
 
     assert.equal(href?.pathname, DEPOSIT_DETAILS_ROUTE);
     assert.equal(href?.params?.from, "payments/deposit-tracking");
+  });
+});
+
+/**
+ * A payment-request notification opens that request.
+ *
+ * The module the backend calls `advance_payment` sends five events
+ * (`advance_payment/services/notify.py`). Four of them name the request they
+ * are about and must open it; the fifth names no entity at all and must still
+ * land somewhere a person can act.
+ *
+ * WHY THIS IS ASSERTED. The entity key is `content_type.model`, which for
+ * `AdvanceRequest` is "advancerequest" - one word. A wrong key does not throw:
+ * it falls through to the inbox, and the notification silently stops leading
+ * anywhere. That is exactly what it did before these routes existed.
+ */
+describe("payment request (advance payment) notification routing", () => {
+  const EVENTS = [
+    "ADVANCE_PAYMENT_AWAITING_APPROVAL",
+    "ADVANCE_PAYMENT_COMPLETED",
+    "ADVANCE_PAYMENT_REJECTED",
+    "ADVANCE_PAYMENT_RETURNED",
+  ];
+
+  it("opens the request named by each of the four request events", () => {
+    for (const event of EVENTS) {
+      const href = routeOf({
+        entity_type: "advancerequest",
+        entity_id: 62,
+        event_type: event,
+      });
+      assert.equal(href?.pathname, ADVANCE_DETAILS_ROUTE, event);
+      assert.equal(href?.params?.id, "62", event);
+    }
+  });
+
+  it("is case-insensitive about the entity type", () => {
+    assert.equal(
+      routeOf({ entity_type: "AdvanceRequest", entity_id: 62 })?.pathname,
+      ADVANCE_DETAILS_ROUTE,
+    );
+  });
+
+  it("does not confuse a request with a receipt that shares its id", () => {
+    // Receipt 62 and request 62 both exist. Only the entity type tells them
+    // apart, and opening the wrong one would offer approval actions for a
+    // document the reader was never asked to approve.
+    const request = routeOf({ entity_type: "advancerequest", entity_id: 62 });
+    const receipt = routeOf({ entity_type: "paymentreceipt", entity_id: 62 });
+    assert.equal(request?.pathname, ADVANCE_DETAILS_ROUTE);
+    assert.equal(receipt?.pathname, PAYMENT_DETAILS_ROUTE);
+    assert.notEqual(request?.pathname, receipt?.pathname);
+  });
+
+  it("sends ASSIGNED to the list, which is where the work is", () => {
+    // Bills and POs are sent several at a time and the notification names
+    // none of them, so there is no request to open - but "raise the payment
+    // request" is an instruction, and the inbox is not where it is carried
+    // out. The list holds the Assigned to me view.
+    const href = routeOf({ event_type: "ADVANCE_PAYMENT_ASSIGNED" });
+    assert.equal(href?.pathname, ADVANCE_LIST_ROUTE);
+  });
+
+  it("prefers the request over the event when both are present", () => {
+    // An entity is always more specific than the event that carried it.
+    const href = routeOf({
+      entity_type: "advancerequest",
+      entity_id: 9,
+      event_type: "ADVANCE_PAYMENT_ASSIGNED",
+    });
+    assert.equal(href?.pathname, ADVANCE_DETAILS_ROUTE);
+  });
+
+  it("still falls back to the inbox for an event it has no screen for", () => {
+    const href = routeOf({ event_type: "SOMETHING_NEW" });
+    assert.equal(href, NOTIFICATIONS_ROUTE);
+  });
+});
+
+/**
+ * The inbox groups by the ENTITY, not by the `module` the server sends.
+ *
+ * `notifications/serializers.py::_ENTITY_MODULE` names only two models, so
+ * BackDate, Production, Credit Limit and payment requests all arrive labelled
+ * "other" and would be filed under one heading nobody chose.
+ */
+describe("moduleForEntity", () => {
+  it("names the module for each entity the inbox can open", () => {
+    assert.equal(moduleForEntity("paymentreceipt"), "payments");
+    assert.equal(moduleForEntity("bankdeposit"), "deposits");
+    assert.equal(moduleForEntity("backdate"), "backdate");
+    assert.equal(moduleForEntity("productionorder"), "production");
+    assert.equal(moduleForEntity("creditlimitrequest"), "creditLimit");
+    assert.equal(moduleForEntity("advancerequest"), "advances");
+  });
+
+  it("is case-insensitive and says nothing about what it does not know", () => {
+    assert.equal(moduleForEntity("AdvanceRequest"), "advances");
+    assert.equal(moduleForEntity("somethingelse"), "");
+    assert.equal(moduleForEntity(null), "");
+    assert.equal(moduleForEntity(undefined), "");
   });
 });

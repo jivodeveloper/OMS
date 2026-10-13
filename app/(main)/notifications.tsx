@@ -21,7 +21,10 @@ import {
   FrameworkNotification,
   frameworkNotificationService,
 } from "@/src/services/frameworkNotification.service";
-import { resolveNotificationRoute } from "@/src/utils/notificationRouting";
+import {
+  moduleForEntity,
+  resolveNotificationRoute,
+} from "@/src/utils/notificationRouting";
 import { storage } from "@/src/utils/storage";
 import { COLORS, GRADIENTS, RADIUS, SHADOWS, SPACING } from "@/src/constants/theme";
 import { refreshNotifications } from "@/src/cache";
@@ -37,22 +40,29 @@ type NotificationModule =
   | "deposits"
   | "backdate"
   | "production"
+  // Payment requests (the backend still calls the module advance_payment) and
+  // Credit Limit. Both reached users under "other" until this list caught up.
+  | "advances"
+  | "creditLimit"
   | "other";
 
 /**
- * The module labels the backend actually sends
- * (`notifications/serializers.py::_ENTITY_MODULE`).
+ * The modules this inbox can group by.
  *
- * Anything absent here falls to "other" — which is correct for a module this
- * inbox has no opinion about, and wrong the moment one ships. BackDate and
- * Production both reached users grouped under "other" until this list caught
- * up with them.
+ * NOT the server's list. `notifications/serializers.py::_ENTITY_MODULE` names
+ * only `paymentreceipt` and `bankdeposit`, so everything else — BackDate,
+ * Production, Credit Limit, payment requests — arrives labelled "other" and
+ * four modules end up under one heading. The entity type is on every framework
+ * notification and is exact, so `moduleForEntity` answers it instead and this
+ * list says which answers the filter row knows a label for.
  */
 const KNOWN_MODULES: NotificationModule[] = [
   "payments",
   "deposits",
   "backdate",
   "production",
+  "advances",
+  "creditLimit",
 ];
 
 type NotificationMeta = {
@@ -82,6 +92,8 @@ type NotificationCard = {
   // Generic framework navigation.
   entityType: string | null;
   entityId: number | null;
+  /** The event, for the notifications that name no entity to open. */
+  eventType: string | null;
 };
 
 const normalizeText = (value: string | null | undefined) =>
@@ -168,6 +180,8 @@ const toNotificationCard = (item: OrderNotification): NotificationCard => {
     orderId: item.order_id || null,
     entityType: null,
     entityId: null,
+    // Orders route by `order_id` and never reach the event table.
+    eventType: null,
   };
 };
 
@@ -185,15 +199,27 @@ const getFrameworkMeta = (item: FrameworkNotification): NotificationMeta => {
     return { title: item.title || "BackDate update", icon: "time-outline", color: "#0891B2", iconBg: "#E0F7FA" };
   if (item.module === "production")
     return { title: item.title || "Production update", icon: "cube-outline", color: "#7C3AED", iconBg: "#F1E9FF" };
+  // Read from the ENTITY, because the server labels both of these "other" —
+  // see `moduleForEntity`. A payment REQUEST is not a payment taken in, and
+  // showing it under the cash icon put two unrelated workflows behind one
+  // symbol in a list people scan rather than read.
+  const byEntity = moduleForEntity(item.entity_type);
+  if (byEntity === "advances")
+    return { title: item.title || "Payment request", icon: "wallet-outline", color: "#B45309", iconBg: "#FEF3C7" };
+  if (byEntity === "creditLimit")
+    return { title: item.title || "Credit limit update", icon: "card-outline", color: "#0F766E", iconBg: "#CCFBF1" };
   return { title: item.title || "Payment update", icon: "cash-outline", color: "#7C3AED", iconBg: "#F1E9FF" };
 };
 
 const toFrameworkCard = (item: FrameworkNotification): NotificationCard => {
   const meta = getFrameworkMeta(item);
+  // The entity decides, and the server's own label is only the fallback: it
+  // knows two modules and calls the rest "other" (see `moduleForEntity`).
+  const named = moduleForEntity(item.entity_type) || item.module;
   const mod: NotificationModule = KNOWN_MODULES.includes(
-    item.module as NotificationModule,
+    named as NotificationModule,
   )
-    ? (item.module as NotificationModule)
+    ? (named as NotificationModule)
     : "other";
   return {
     key: `framework:${item.id}`,
@@ -212,6 +238,11 @@ const toFrameworkCard = (item: FrameworkNotification): NotificationCard => {
     orderId: null,
     entityType: item.entity_type,
     entityId: item.entity_id,
+    // Carried so a tap can be routed by the EVENT where there is no entity to
+    // route by — ADVANCE_PAYMENT_ASSIGNED is sent about several documents at
+    // once and names none of them. Without this the inbox dropped such a tap
+    // back onto the inbox it was already showing.
+    eventType: item.event_type,
   };
 };
 
@@ -223,6 +254,10 @@ const MODULE_FILTERS: { key: NotificationModule | "all"; label: string }[] = [
   { key: "deposits", label: "Deposits" },
   { key: "backdate", label: "BackDate" },
   { key: "production", label: "Production" },
+  // "Payment Requests", not "Payments": the Payments row above is money taken
+  // IN, and this one is money asked to be paid OUT.
+  { key: "advances", label: "Payment Requests" },
+  { key: "creditLimit", label: "Credit Limit" },
 ];
 
 const GROUP_ORDER: DateGroup[] = ["Today", "Yesterday", "Older"];
@@ -439,6 +474,7 @@ export default function NotificationsScreen() {
           order_id: item.orderId,
           entity_type: item.entityType,
           entity_id: item.entityId,
+          event_type: item.eventType,
         },
         "notifications",
       );
