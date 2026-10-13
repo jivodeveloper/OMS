@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
-  Linking,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -33,6 +32,7 @@ import { showToast } from "@/src/components/common/Toast";
 import { handoverDays } from "@/src/features/payments/handoverSpan";
 import { COLORS } from "@/src/constants/theme";
 import { fs, ms, sp } from "@/src/utils/responsive";
+import { openFile } from "@/src/utils/openFile";
 import paymentsService, {
   type BankDeposit,
   type StatusHistoryRow,
@@ -435,7 +435,10 @@ export default function DepositDetailsScreen() {
         attachment.id,
         attachment.name,
       );
-      await Linking.openURL(uri);
+      const opened = await openFile(uri, attachment.name);
+      if (!opened) {
+        showToast(`${attachment.name} was downloaded, but no app on this device can open it.`, "info");
+      }
     } catch (err) {
       showToast(
         (err as Error)?.message || "Could not download the file.",

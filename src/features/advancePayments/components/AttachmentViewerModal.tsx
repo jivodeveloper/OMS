@@ -3,7 +3,6 @@ import React, { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Image,
-  Linking,
   Modal,
   StyleSheet,
   Text,
@@ -27,6 +26,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { appAlert } from "@/src/components/common/AppDialog";
 import { COLORS } from "@/src/constants/theme";
 import { fs, sp } from "@/src/utils/responsive";
+import { openFile } from "@/src/utils/openFile";
 
 const MIN_SCALE = 1;
 const MAX_SCALE = 4;
@@ -136,9 +136,8 @@ export default function AttachmentViewerModal({
       setSaving(true);
       try {
         const fileUri = await source.save();
-        const can = await Linking.canOpenURL(fileUri).catch(() => false);
-        if (can) {
-          await Linking.openURL(fileUri);
+        const opened = await openFile(fileUri, source.name);
+        if (opened) {
           if (thenClose) onClose();
         } else {
           appAlert(

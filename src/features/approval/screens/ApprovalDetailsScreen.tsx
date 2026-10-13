@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   LayoutAnimation,
-  Linking,
   Platform,
   RefreshControl,
   ScrollView,
@@ -20,6 +19,7 @@ import {
 import { useIsFocused } from "@react-navigation/native";
 import { COLORS } from "@/src/constants/theme";
 import { fs, ms, sp } from "@/src/utils/responsive";
+import { openFile } from "@/src/utils/openFile";
 import { showToast } from "@/src/components/common/Toast";
 import { setHeaderEditHandler } from "@/src/utils/headerEdit";
 import ApprovalHeaderCard from "../components/ApprovalHeaderCard";
@@ -312,7 +312,10 @@ export default function ApprovalDetailsScreen() {
         attachment.id,
         attachment.name,
       );
-      await Linking.openURL(uri);
+      const opened = await openFile(uri, attachment.name);
+      if (!opened) {
+        showToast(`${attachment.name} was downloaded, but no app on this device can open it.`, "info");
+      }
     } catch (err) {
       showToast(
         (err as Error)?.message || "Could not download the file.",

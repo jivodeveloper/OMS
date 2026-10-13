@@ -3,7 +3,6 @@ import {
   ActivityIndicator,
   Alert,
   Image,
-  Linking,
   Modal,
   StyleSheet,
   Text,
@@ -27,6 +26,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { COLORS } from "@/src/constants/theme";
 import { fs, sp } from "@/src/utils/responsive";
+import { openFile } from "@/src/utils/openFile";
 import { paymentsService } from "@/src/services/payments.service";
 
 const MIN_SCALE = 1;
@@ -108,10 +108,8 @@ export default function ReceiptViewerModal({
     setSaving(true);
     try {
       const fileUri = await paymentsService.saveReceiptToDevice(receiptId, receiptNo);
-      const canOpen = await Linking.canOpenURL(fileUri).catch(() => false);
-      if (canOpen) {
-        await Linking.openURL(fileUri);
-      } else {
+      const opened = await openFile(fileUri, "receipt.pdf", "application/pdf");
+      if (!opened) {
         Alert.alert(
           "Downloaded",
           "The receipt PDF was saved to the app. No app is installed to open a PDF, so it could not be opened automatically.",

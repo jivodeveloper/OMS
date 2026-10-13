@@ -2,7 +2,6 @@ import { Ionicons } from "@expo/vector-icons";
 import React, { useState } from "react";
 import {
   Image,
-  Linking,
   Modal,
   Pressable,
   StyleSheet,
@@ -13,6 +12,7 @@ import {
 
 import { COLORS } from "@/src/constants/theme";
 import { fs, ms, sp } from "@/src/utils/responsive";
+import { openFile } from "@/src/utils/openFile";
 
 import { formatSize, type FileAttachment } from "../logic/attachments";
 
@@ -50,12 +50,8 @@ export default function PickedFileViewer({
   const openOutside = async () => {
     setError("");
     try {
-      const can = await Linking.canOpenURL(uri).catch(() => false);
-      if (!can) {
-        setError("This device has no app that can open this file.");
-        return;
-      }
-      await Linking.openURL(uri);
+      const opened = await openFile(uri, attachment.name, attachment.file?.mimeType);
+      if (!opened) setError("This device has no app that can open this file.");
     } catch {
       setError("This file could not be opened on this device.");
     }

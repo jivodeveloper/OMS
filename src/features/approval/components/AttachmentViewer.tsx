@@ -13,6 +13,8 @@ import { Ionicons } from "@expo/vector-icons";
 import { COLORS } from "@/src/constants/theme";
 import { fs, ms, sp } from "@/src/utils/responsive";
 import { API_BASE_URL } from "@/src/services/api";
+import { paymentsService } from "@/src/services/payments.service";
+import { openFile } from "@/src/utils/openFile";
 import { storage } from "@/src/utils/storage";
 import type { ApprovalAttachment } from "../types";
 
@@ -32,13 +34,34 @@ interface Props {
  * Instead the bytes are fetched WITH the bearer token and rendered from a data
  * URI. That keeps everything in-app (no extra native module, no file left on
  * disk) and works identically on both platforms.
+ *
+ * A PDF cannot be rendered by <Image>, so it is downloaded (with the token)
+ * and handed to the device's PDF app instead; the modal closes itself once
+ * that app opens, and stays up with the reason if it cannot.
  */
 export default function AttachmentViewer({ attachment, onClose }: Props) {
   const [dataUri, setDataUri] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  const isPdf = attachment?.kind === "pdf";
+  const isPdf =
+    attachment?.kind === "pdf" || /\.pdf$/i.test(attachment?.name ?? "");
+
+  const openPdf = useCallback(async () => {
+    if (!attachment?.downloadUrl) return;
+    setLoading(true);
+    setError("");
+    try {
+      const uri = await paymentsService.downloadAttachment(attachment.id, attachment.name);
+      const opened = await openFile(uri, attachment.name, "application/pdf");
+      if (opened) onClose();
+      else setError("The PDF was downloaded, but no app on this device can open it.");
+    } catch (err) {
+      setError((err as Error)?.message || "Could not open the PDF.");
+    } finally {
+      setLoading(false);
+    }
+  }, [attachment, onClose]);
 
   const load = useCallback(async () => {
     if (!attachment?.downloadUrl || isPdf) return;
@@ -76,8 +99,12 @@ export default function AttachmentViewer({ attachment, onClose }: Props) {
   }, [attachment, isPdf]);
 
   useEffect(() => {
-    if (attachment) void load();
-  }, [attachment, load]);
+    if (!attachment) return;
+    if (isPdf) void openPdf();
+    else void load();
+    // openPdf changes with onClose, which would re-fire the download.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [attachment, isPdf, load]);
 
   return (
     <Modal
@@ -113,21 +140,6 @@ export default function AttachmentViewer({ attachment, onClose }: Props) {
                 color={COLORS.error}
               />
               <Text style={styles.messageText}>{error}</Text>
-            </View>
-          ) : isPdf ? (
-            // A PDF cannot be shown by <Image>. Saying so beats a blank screen.
-            <View style={styles.message}>
-              <Ionicons
-                name="document-text-outline"
-                size={ms(48)}
-                color="#fff"
-              />
-              <Text style={styles.messageText}>
-                {attachment?.name}
-              </Text>
-              <Text style={styles.messageHint}>
-                PDF preview is not supported in the app yet.
-              </Text>
             </View>
           ) : dataUri ? (
             <Image
@@ -183,11 +195,6 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontSize: fs(14),
     fontWeight: "600",
-    textAlign: "center",
-  },
-  messageHint: {
-    color: "rgba(255,255,255,0.7)",
-    fontSize: fs(12),
     textAlign: "center",
   },
   hint: {

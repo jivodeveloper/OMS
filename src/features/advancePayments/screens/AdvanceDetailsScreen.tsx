@@ -8,7 +8,6 @@ import {
   Dimensions,
   Keyboard,
   KeyboardAvoidingView,
-  Linking,
   Platform,
   RefreshControl,
   ScrollView,
@@ -28,6 +27,7 @@ import useBackToOrigin, { useOriginName } from "@/src/hooks/useBackToOrigin";
 import { useRefreshOnFocus } from "@/src/hooks/useRefreshOnFocus";
 import { setHeaderEditHandler } from "@/src/utils/headerEdit";
 import { fs, ms, sp } from "@/src/utils/responsive";
+import { openFile } from "@/src/utils/openFile";
 import {
   advancePaymentService,
   type AdvancePaymentCompany,
@@ -332,9 +332,8 @@ export default function AdvanceDetailsScreen() {
     if (serverId === undefined) return;
     try {
       const uri = await advancePaymentService.saveRequestFile(requestId, serverId, name);
-      const can = await Linking.canOpenURL(uri).catch(() => false);
-      if (can) await Linking.openURL(uri);
-      else appAlert("Saved to this device", `${name} was downloaded.`);
+      const opened = await openFile(uri, name);
+      if (!opened) appAlert("Saved to this device", `${name} was downloaded.`);
     } catch (err) {
       showFailure("Could not download", err);
     }
