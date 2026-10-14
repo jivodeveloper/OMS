@@ -57,3 +57,8 @@ Thumbs.db
 
 # Xcode "Distribute App" export output
 ios/OMSAPP 20*/
+
+# Additional generated Android caches
+android/.kotlin/
+android/build/
+android/app/.cxx/

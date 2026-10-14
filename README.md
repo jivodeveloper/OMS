@@ -48,3 +48,38 @@ Join our community of developers creating universal apps.
 
 - [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
 - [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+
+## Android release builds
+
+Android reads versionName and versionCode directly from app.json. This release is 1.1.8 (18), package com.jivo.oms.
+
+Run in Windows PowerShell from the OMS directory:
+
+```powershell
+cd C:\Users\JIVO\Desktop\PROJECT\OMS
+# Stop daemons before clearing native caches.
+cd android
+.\gradlew.bat --stop
+cd ..
+# Clean generated native caches, then build both signed release artifacts.
+npm run build:android
+```
+
+Separate builds after cleaning:
+
+```powershell
+npm run clean:android
+npm run build:apk
+npm run build:aab
+```
+
+Outputs:
+
+- APK: android/app/build/outputs/apk/release/app-release.apk
+- AAB (Google Play): android/app/build/outputs/bundle/release/app-release.aab
+
+Requires Node dependencies, JDK 17, Android SDK, google-services.json and the existing release key configured in android/keystore.properties (storeFile, storePassword, keyAlias, keyPassword). Use the existing upload key for store updates. Do not commit signing credentials. Cleanup preserves source files and signing keys.
+
+EAS profiles are preview (APK) and production (AAB), with local version management and automatic increments disabled. The local Gradle commands above use the release signing configuration already present on this machine.
+
+Before upload, verify artifact versions and signatures. Google Play requires an unused versionCode greater than previously uploaded releases; if 18 has already been used, choose a higher code in app.json and rebuild. Changing the version does not resolve unrelated Play policy rejection reasons.

@@ -24,11 +24,16 @@
 const fs = require("fs");
 const path = require("path");
 
-const root = path.join(__dirname, "..");
+const root = path.resolve(__dirname, "..");
 const removed = [];
 const locked = [];
 
 function rm(target) {
+  const resolved = path.resolve(target);
+  if (!resolved.startsWith(root + path.sep)) {
+    throw new Error(`Refusing to clean outside the project: ${resolved}`);
+  }
+  target = resolved;
   if (!fs.existsSync(target)) return;
   try {
     // Retries cover the usual Windows case of a file scanner or an editor
@@ -56,7 +61,7 @@ for (const rel of ["android/app/.cxx", "android/app/build", "android/build", "an
 // Every autolinked library that carries a native build.
 function sweep(dir) {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    if (!entry.isDirectory()) continue;
+    if (!entry.isDirectory() || entry.isSymbolicLink()) continue;
     const pkg = path.join(dir, entry.name);
     // Scoped packages (@scope/name) nest one level deeper.
     if (entry.name.startsWith("@")) {

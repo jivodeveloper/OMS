@@ -8,7 +8,14 @@
       "developmentClient": true,
       "distribution": "internal"
     },
+    "production": {
+      "autoIncrement": false,
+      "android": {
+        "buildType": "app-bundle"
+      }
+    },
     "preview": {
+      "autoIncrement": false,
       "distribution": "internal",
       "android": {
         "buildType": "apk"
