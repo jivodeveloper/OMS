@@ -14,6 +14,8 @@ import {
 } from "react-native";
 
 import { showToast } from "@/src/components/common/Toast";
+import { can } from "@/src/constants/permissions";
+import { useAuth } from "@/src/context/AuthContext";
 import { setHeaderEditHandler } from "@/src/utils/headerEdit";
 import { COLORS, RADIUS } from "@/src/constants/theme";
 import ApprovalBottomBar from "@/src/features/approval/components/ApprovalBottomBar";
@@ -95,6 +97,8 @@ export default function BackDateDetailsScreen() {
     refreshAt?: string;
   }>();
   const id = Number(params.id);
+  const { user } = useAuth();
+  const canApprove = can(user, "BackDate_Approval");
 
   const [request, setRequest] = useState<BackDateRequest | null>(null);
   const [loading, setLoading] = useState(true);
@@ -129,11 +133,18 @@ export default function BackDateDetailsScreen() {
         const fresh = await backdateService.getRequest(id);
         setRequest(fresh);
         if (params.actionable === undefined) {
-          // Deep-linked: ask the queue whether this one is ours to decide.
-          const queue = await backdateService.approvalQueue({
-            search: String(id),
-          });
-          setActionable(queue.some((r) => r.id === id));
+          // Opened without the list's answer (the home page's recent list, a
+          // deep link, a push): ask the queue whether this one is ours to
+          // decide. Only an approver can read the queue — a raiser is refused
+          // it — and even for an approver the answer only adds the buttons,
+          // so a failure here must never cost the user the request itself.
+          setActionable(
+            canApprove &&
+              (await backdateService
+                .approvalQueue({ search: String(id) })
+                .then((queue) => queue.some((r) => r.id === id))
+                .catch(() => false)),
+          );
         }
       } catch (err) {
         setError(messageFrom(err, "Could not load this request."));
@@ -142,7 +153,7 @@ export default function BackDateDetailsScreen() {
         setRefreshing(false);
       }
     },
-    [id, params.actionable],
+    [id, params.actionable, canApprove],
   );
 
   useEffect(() => {

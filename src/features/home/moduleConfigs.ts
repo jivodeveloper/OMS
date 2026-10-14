@@ -82,6 +82,42 @@ const filterParamsFor = (
   return { statusLabel: LABEL_FOR[bucket] };
 };
 
+/**
+ * Every list this user MIGHT read, merged — the first copy of an id wins.
+ *
+ * A module splits its rows by permission: the raiser's own list on one key,
+ * the approval queue and history on another. `load()` cannot know which keys
+ * this user holds, so it asks for all of them and keeps what came back; a 403
+ * on the side the user does not have is expected, not an error to show.
+ *
+ * ONLY WHEN EVERY SOURCE FAILED is that an error worth showing — and then a
+ * real failure (network, 500) is reported in preference to a permission
+ * refusal, which would only be the noise of the side this user lacks.
+ */
+function mergeSources<T extends { id: number }>(
+  settled: PromiseSettledResult<T[]>[],
+): T[] {
+  const seen = new Set<number>();
+  const merged: T[] = [];
+  const failures: unknown[] = [];
+  for (const result of settled) {
+    if (result.status === "rejected") {
+      failures.push(result.reason);
+      continue;
+    }
+    for (const row of result.value) {
+      if (seen.has(row.id)) continue;
+      seen.add(row.id);
+      merged.push(row);
+    }
+  }
+  if (failures.length === settled.length) {
+    const statusOf = (err: unknown) => (err as { status?: number })?.status;
+    throw failures.find((err) => statusOf(err) !== 403) ?? failures[0];
+  }
+  return merged;
+}
+
 const shortDate = (iso: string | null) => {
   if (!iso) return "";
   const d = new Date(iso);
@@ -100,8 +136,15 @@ export const productionHome: ModuleHomeConfig = {
   empty: "No recent production orders",
   trackingRoute: "/(main)/production/tracking",
   filterParamsFor,
+  // The queue first: only it says the order is awaiting this user.
   load: async (): Promise<HomeRow[]> => {
-    const orders = await productionService.listOrders();
+    const orders = mergeSources<ProductionOrder>(
+      await Promise.allSettled([
+        productionService.approvalQueue(),
+        productionService.approvalHistory(),
+        productionService.listOrders(),
+      ]),
+    );
     return orders.map((order: ProductionOrder) => ({
       id: order.id,
       // DocNum is the number a person quotes; DocEntry is internal and unique
@@ -136,8 +179,16 @@ export const backdateHome: ModuleHomeConfig = {
   empty: "No recent requests",
   trackingRoute: "/(main)/backdate/tracking",
   filterParamsFor,
+  // `BackDate` reads the raiser's own requests, `BackDate_Approval` the queue
+  // and what this user decided — either key alone must fill the page.
   load: async (): Promise<HomeRow[]> => {
-    const requests = await backdateService.listRequests();
+    const requests = mergeSources<BackDateRequest>(
+      await Promise.allSettled([
+        backdateService.approvalQueue(),
+        backdateService.approvalHistory(),
+        backdateService.listRequests(),
+      ]),
+    );
     return requests.map((request: BackDateRequest) => ({
       id: request.id,
       docNo: `BKDT-${request.id}`,

@@ -23,6 +23,8 @@ import Dropdown from "@/src/components/common/DropdownProps";
 import StateWrapper from "@/src/components/common/StateWrapper";
 import { appAlert } from "@/src/components/common/AppDialog";
 import { showToast } from "@/src/components/common/Toast";
+import { paymentsService } from "@/src/services/payments.service";
+import { openFile } from "@/src/utils/openFile";
 import AttachmentPicker from "@/app/(main)/payments/_components/AttachmentPicker";
 import type { AttachmentStub } from "@/app/(main)/payments/_lib/types";
 import { MAX_PO_FILES, orderService as poOrderService } from "@/src/services/order.service";
@@ -643,10 +645,22 @@ export function OrderEntryScreen({
    */
   const [poFiles, setPoFiles] = useState<AttachmentStub[]>([]);
   const [existingPo, setExistingPo] = useState<{ id: number; file_type: string }[]>([]);
+  // What the collapsed Purchase Order box says, so its contents are visible
+  // without opening it: "PO 4521 · 2 files".
+  const poFileCount = poFiles.length + existingPo.length;
+  const poSummary = [
+    String(poNumber ?? "").trim() ? `PO ${String(poNumber).trim()}` : "",
+    poFileCount > 0 ? `${poFileCount} file${poFileCount === 1 ? "" : "s"}` : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
   const [delivery, setDeliveryDate] = useState(getDefaultDeliveryDate());
   const [showPicker, setShowPicker] = useState(false);
   const [showAdditionalOrderDetails, setShowAdditionalOrderDetails] =
     useState(false);
+  // The Purchase Order box, collapsed like Dispatch & Addresses above it.
+  const [showPoDetails, setShowPoDetails] = useState(false);
+  const [openingPoId, setOpeningPoId] = useState<number | null>(null);
 
   // ── Address dropdowns ─────────────────────────────────────────────────────
   const [billToAddresses, setBillToAddresses] = useState<
@@ -1305,6 +1319,40 @@ export function OrderEntryScreen({
         },
       },
     ]);
+  };
+
+  /** A PO picked on this device, not uploaded yet: open the local copy. */
+  const openPickedPo = async (file: AttachmentStub) => {
+    try {
+      const opened = await openFile(file.uri, file.name, file.mimeType);
+      if (!opened) appAlert("Cannot open", `No app on this device can open ${file.name}.`);
+    } catch (err) {
+      appAlert("Could not open the PO", err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  /**
+   * A PO already on the server. Fetched WITH the token and opened from the
+   * local copy, exactly as the order details screen does (`OrderPoAttachments`).
+   */
+  const openAttachedPo = async (file: { id: number; file_type: string }, index: number) => {
+    if (openingPoId !== null) return;
+    setOpeningPoId(file.id);
+    try {
+      const name = `PO ${index + 1}.${file.file_type || "pdf"}`;
+      const uri = await paymentsService.downloadAttachment(file.id, name);
+      const opened = await openFile(uri, name);
+      if (!opened) {
+        appAlert(
+          "Saved to this device",
+          `${name} was downloaded, but no app on this device can open that kind of file.`,
+        );
+      }
+    } catch (err) {
+      appAlert("Could not open the PO", err instanceof Error ? err.message : String(err));
+    } finally {
+      setOpeningPoId(null);
+    }
   };
 
   const handleTemplateOrderChange = async (orderId: number) => {
@@ -3056,6 +3104,7 @@ export function OrderEntryScreen({
     // PO number is mandatory only when the field is shown AND admin-marked
     // required (controlled from the web UI Labels admin screen).
     if (shouldShowPoNumber && poField.required && !String(poNumber).trim()) {
+      setShowPoDetails(true); // the field lives in a collapsed box
       return appAlert("Error", `${poField.label} is required`);
     }
     if (!delivery) return appAlert("Error", "Select delivery date");
@@ -3919,20 +3968,153 @@ export function OrderEntryScreen({
               )}
             </View>
 
-            {shouldShowPoNumber && (
-              <View style={styles.field}>
-                <FixedLabelTextInput
-                  label={poField.required ? `${poField.label} *` : poField.label}
-                  value={poNumber}
-                  onChangeText={setPoNumber}
-                  mode="outlined"
-                  textColor={COLORS.black}
-                  style={styles.input}
-                  outlineColor={COLORS.border}
-                  activeOutlineColor={COLORS.primary}
+            {/* ── Purchase Order ─────────────────────────────────────────────
+                Same collapsible box as Dispatch & Addresses, collapsed by
+                default. The customer's PO is OPTIONAL — plenty of orders
+                arrive by phone — but where there is one it is the paper the
+                order is raised from, and every desk that reviews the order
+                checks it against this.
+
+                PICKED NOW, SENT AFTER THE SAVE: the files hang off the order,
+                which has no id until the server answers. See `uploadPickedPo`. */}
+            <View style={styles.additionalDetailsBox}>
+              <TouchableOpacity
+                style={[
+                  styles.additionalDetailsHeader,
+                  showPoDetails && styles.additionalDetailsHeaderExpanded,
+                ]}
+                activeOpacity={0.75}
+                onPress={() => setShowPoDetails((isVisible) => !isVisible)}
+                accessibilityRole="button"
+                accessibilityState={{ expanded: showPoDetails }}
+                accessibilityLabel="Purchase order details"
+              >
+                <View style={styles.additionalDetailsIcon}>
+                  <Ionicons
+                    name="document-attach-outline"
+                    size={18}
+                    color={COLORS.primary}
+                  />
+                </View>
+                <View style={styles.additionalDetailsHeading}>
+                  <Text style={styles.additionalDetailsTitle}>
+                    Purchase Order
+                    {shouldShowPoNumber && poField.required ? " *" : ""}
+                  </Text>
+                  <Text style={styles.additionalDetailsHint} numberOfLines={1}>
+                    {showPoDetails
+                      ? "Tap to hide"
+                      : poSummary || "Tap to view"}
+                  </Text>
+                </View>
+                <Ionicons
+                  name={showPoDetails ? "chevron-up" : "chevron-down"}
+                  size={20}
+                  color={COLORS.primary}
                 />
-              </View>
-            )}
+              </TouchableOpacity>
+
+              {showPoDetails && (
+                <View style={styles.additionalDetailsContent}>
+                  {shouldShowPoNumber && (
+                    <View style={styles.field}>
+                      <FixedLabelTextInput
+                        label={poField.required ? `${poField.label} *` : poField.label}
+                        value={poNumber}
+                        onChangeText={setPoNumber}
+                        mode="outlined"
+                        textColor={COLORS.black}
+                        style={styles.input}
+                        outlineColor={COLORS.border}
+                        activeOutlineColor={COLORS.primary}
+                      />
+                    </View>
+                  )}
+
+                  <View style={styles.additionalDetailsLastField}>
+                    <AttachmentPicker
+                      label="PO Attachments"
+                      attachments={poFiles}
+                      // The server's own cap, counting what is already attached: on an
+                      // edit the two together must not exceed it, or the upload is
+                      // refused after the order has already saved.
+                      maxFiles={Math.max(0, MAX_PO_FILES - existingPo.length)}
+                      onOpen={openPickedPo}
+                      onAdd={(added) =>
+                        setPoFiles((current) => {
+                          const next = [...current];
+                          for (const file of added) {
+                            if (next.length + existingPo.length >= MAX_PO_FILES) break;
+                            // The same file twice is a mis-tap, not a second document.
+                            if (next.some((f) => f.name === file.name && f.size === file.size)) {
+                              continue;
+                            }
+                            next.push({
+                              id: `${file.name}-${file.size}`,
+                              name: file.name,
+                              uri: file.uri,
+                              mimeType: file.mimeType,
+                              size: file.size,
+                            });
+                          }
+                          return next;
+                        })
+                      }
+                      onRemove={(id) =>
+                        setPoFiles((current) => current.filter((f) => f.id !== id))
+                      }
+                    />
+                    {/* Already on the server, from a previous save. Tapping one
+                        downloads it with the token and opens it on the device. */}
+                    {existingPo.length > 0 ? (
+                      <View style={styles.poAttachedList}>
+                        <Text style={styles.poAttachedNote}>
+                          Already attached to this order
+                        </Text>
+                        {existingPo.map((file, index) => (
+                          <View key={file.id} style={styles.poAttachedRow}>
+                            <TouchableOpacity
+                              style={styles.poAttachedOpen}
+                              onPress={() => openAttachedPo(file, index)}
+                              disabled={openingPoId !== null}
+                              accessibilityRole="button"
+                              accessibilityLabel={`Open PO ${index + 1}`}
+                            >
+                              {openingPoId === file.id ? (
+                                <ActivityIndicator size="small" color={COLORS.primary} />
+                              ) : (
+                                <Ionicons
+                                  name={
+                                    file.file_type === "pdf"
+                                      ? "document-text-outline"
+                                      : "image-outline"
+                                  }
+                                  size={16}
+                                  color={COLORS.primary}
+                                />
+                              )}
+                              <Text style={styles.poAttachedName} numberOfLines={1}>
+                                PO {index + 1}
+                                {file.file_type ? ` · ${file.file_type.toUpperCase()}` : ""}
+                              </Text>
+                              <Ionicons name="open-outline" size={15} color={COLORS.primary} />
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                              onPress={() => removeAttachedPo(file.id)}
+                              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                              accessibilityRole="button"
+                              accessibilityLabel={`Remove PO ${index + 1}`}
+                            >
+                              <Ionicons name="close-circle" size={18} color={COLORS.error} />
+                            </TouchableOpacity>
+                          </View>
+                        ))}
+                      </View>
+                    ) : null}
+                  </View>
+                </View>
+              )}
+            </View>
 
 
             {/* Delivery Date — web: native <input type="date">, app: DateTimePicker */}
@@ -4687,83 +4869,6 @@ export function OrderEntryScreen({
             />
           </Surface>
 
-          {/* ── The customer's purchase order ──────────────────────────────
-              OPTIONAL, because plenty of orders arrive by phone. Where there
-              IS a PO it is the paper the order is raised from — the rates and
-              quantities the customer actually asked for — and every desk that
-              reviews the order is checking it against exactly this. Attaching
-              it here is what stops it being emailed round separately.
-
-              PICKED NOW, SENT AFTER THE SAVE: the files hang off the order,
-              which has no id until the server answers. See `uploadPickedPo`. */}
-          <Surface style={styles.card}>
-            <AttachmentPicker
-              label="Customer PO (Optional)"
-              attachments={poFiles}
-              // The server's own cap, counting what is already attached: on an
-              // edit the two together must not exceed it, or the upload is
-              // refused after the order has already saved.
-              maxFiles={Math.max(0, MAX_PO_FILES - existingPo.length)}
-              onAdd={(added) =>
-                setPoFiles((current) => {
-                  const next = [...current];
-                  for (const file of added) {
-                    if (next.length + existingPo.length >= MAX_PO_FILES) break;
-                    // The same file twice is a mis-tap, not a second document.
-                    if (next.some((f) => f.name === file.name && f.size === file.size)) {
-                      continue;
-                    }
-                    next.push({
-                      id: `${file.name}-${file.size}`,
-                      name: file.name,
-                      uri: file.uri,
-                      mimeType: file.mimeType,
-                      size: file.size,
-                    });
-                  }
-                  return next;
-                })
-              }
-              onRemove={(id) =>
-                setPoFiles((current) => current.filter((f) => f.id !== id))
-              }
-            />
-            {/* Already on the server, from a previous save. Listed rather than
-                shown as tiles because they are not local files: there is
-                nothing here to preview and nothing to remove without asking
-                the server, which is the details screen's job. */}
-            {existingPo.length > 0 ? (
-              <View style={styles.poAttachedList}>
-                <Text style={styles.poAttachedNote}>
-                  Already attached to this order
-                </Text>
-                {existingPo.map((file, index) => (
-                  <View key={file.id} style={styles.poAttachedRow}>
-                    <Ionicons
-                      name={
-                        file.file_type === "pdf" ? "document-text-outline" : "image-outline"
-                      }
-                      size={16}
-                      color={COLORS.primary}
-                    />
-                    <Text style={styles.poAttachedName} numberOfLines={1}>
-                      PO {index + 1}
-                      {file.file_type ? ` · ${file.file_type.toUpperCase()}` : ""}
-                    </Text>
-                    <TouchableOpacity
-                      onPress={() => removeAttachedPo(file.id)}
-                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Remove PO ${index + 1}`}
-                    >
-                      <Ionicons name="close-circle" size={18} color={COLORS.error} />
-                    </TouchableOpacity>
-                  </View>
-                ))}
-              </View>
-            ) : null}
-          </Surface>
-
           <View style={{ height: 120 }} />
         </ScrollView>
 
@@ -5368,6 +5473,13 @@ const styles = StyleSheet.create({
   },
   // `minWidth: 0` so a long line is cut rather than pushing the remove icon
   // off the row.
+  poAttachedOpen: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
   poAttachedName: { flex: 1, minWidth: 0, fontSize: 12.5, color: COLORS.text },
   commentInput: { minHeight: 80 },
   addBtn: {

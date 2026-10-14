@@ -15,6 +15,8 @@ import {
 } from "react-native";
 
 import { showToast } from "@/src/components/common/Toast";
+import { can } from "@/src/constants/permissions";
+import { useAuth } from "@/src/context/AuthContext";
 import { COLORS } from "@/src/constants/theme";
 import ApprovalBottomBar from "@/src/features/approval/components/ApprovalBottomBar";
 import ApprovalLoadingDialog from "@/src/features/approval/components/dialogs/ApprovalLoadingDialog";
@@ -111,6 +113,8 @@ export default function ProductionDetailsScreen() {
    * asked directly rather than guessed at.
    */
   const [actionable, setActionable] = useState(params.actionable === "1");
+  const { user } = useAuth();
+  const canApprove = can(user, "Production_Order_Approval");
 
   /** A second tap must not become a second POST before React has re-rendered. */
   const inFlight = useRef(false);
@@ -125,8 +129,15 @@ export default function ProductionDetailsScreen() {
         const fresh = await productionService.getOrder(id);
         setOrder(fresh);
         if (params.actionable === undefined) {
-          const queue = await productionService.approvalQueue();
-          setActionable(queue.some((row) => row.id === id));
+          // Only an approver can read the queue, and its answer only adds the
+          // Approve/Reject buttons — a refusal must not cost the order itself.
+          setActionable(
+            canApprove &&
+              (await productionService
+                .approvalQueue()
+                .then((queue) => queue.some((row) => row.id === id))
+                .catch(() => false)),
+          );
         }
       } catch (err) {
         setError(messageFor(err, "Could not load this order."));
@@ -135,7 +146,7 @@ export default function ProductionDetailsScreen() {
         setRefreshing(false);
       }
     },
-    [id, params.actionable],
+    [id, params.actionable, canApprove],
   );
 
   useEffect(() => {

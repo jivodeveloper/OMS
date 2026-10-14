@@ -1256,29 +1256,37 @@ export default function OrderDetailsScreen() {
                 value above it — the two it is derived from, in the order a
                 reader meets them. Nothing is shown for an order whose lines
                 carry no litres, which is every order of non-oil items. */}
-            {realisation.length > 0 && (
-              <View style={styles.realisationCard}>
-                <Text style={styles.realisationTitle}>Realisation</Text>
-                <Text style={styles.realisationHint}>
-                  Basic value per litre shipped, free litres included
-                </Text>
-                {realisation.map((entry) => (
-                  <View key={entry.label} style={styles.realisationRow}>
-                    <View style={styles.realisationLabelWrap}>
-                      <Text style={styles.realisationLabel}>{entry.label}</Text>
-                      <Text style={styles.realisationMeta} numberOfLines={1}>
-                        ₹{formatCurrencyAmount(entry.amount)} over{" "}
-                        {entry.litres.toFixed(2)} L
-                      </Text>
-                    </View>
-                    <Text style={styles.realisationRate}>
-                      ₹{formatCurrencyAmount(entry.perLitre)}
-                      <Text style={styles.realisationPerL}> / L</Text>
-                    </Text>
-                  </View>
-                ))}
+            {/* Same card as Total Ltrs, one per variety: the rate is the
+                headline figure, and the value / litres it comes from sits
+                under the label. Basic value per litre shipped, free litres
+                included. */}
+            {realisation.map((entry) => (
+              <View
+                key={entry.label}
+                style={[styles.totalCard, styles.litresCard]}
+              >
+                <View style={styles.totalInfo}>
+                  <Text style={[styles.totalLabel, styles.litresLabel]}>
+                    Realisation
+                  </Text>
+                  <Text
+                    style={[styles.totalSubLabel, styles.litresSubLabel]}
+                    numberOfLines={2}
+                  >
+                    {entry.label} · ₹{formatCurrencyAmount(entry.amount)} over{" "}
+                    {entry.litres.toFixed(2)} L
+                  </Text>
+                </View>
+                <View style={styles.totalAmountWrap}>
+                  <Text style={[styles.totalValue, styles.litresValue]}>
+                    ₹{formatCurrencyAmount(entry.perLitre)}
+                  </Text>
+                  <Text style={[styles.totalAmountHint, styles.litresHint]}>
+                    Per litre
+                  </Text>
+                </View>
               </View>
-            )}
+            ))}
           </ScrollView>
 
           {/* ===== Fixed bottom action bar ===== */}
@@ -1597,41 +1605,6 @@ const styles = StyleSheet.create({
     gap: sp(6),
     flexShrink: 1,
   },
-  realisationCard: {
-    marginTop: sp(10),
-    padding: sp(14),
-    borderRadius: RADIUS.lg,
-    borderWidth: 1,
-    borderColor: "#E5E9F0",
-    backgroundColor: "#fff",
-    gap: sp(2),
-  },
-  realisationTitle: {
-    fontSize: fs(13),
-    fontWeight: "800",
-    color: COLORS.text,
-  },
-  realisationHint: {
-    fontSize: fs(11),
-    color: COLORS.textSecondary,
-    marginBottom: sp(6),
-  },
-  realisationRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: sp(10),
-    paddingVertical: sp(7),
-    borderTopWidth: 1,
-    borderTopColor: "#F1F4F8",
-  },
-  // `minWidth: 0` so a long "over N L" is cut rather than pushing the rate
-  // off the row — the rate is the number people came for.
-  realisationLabelWrap: { flex: 1, minWidth: 0 },
-  realisationLabel: { fontSize: fs(12.5), fontWeight: "700", color: COLORS.text },
-  realisationMeta: { fontSize: fs(11), color: COLORS.textSecondary, marginTop: 1 },
-  realisationRate: { fontSize: fs(15), fontWeight: "900", color: COLORS.primary },
-  realisationPerL: { fontSize: fs(11), fontWeight: "600", color: COLORS.textSecondary },
-
   varietyTab: {
     flexDirection: "row",
     alignItems: "center",
