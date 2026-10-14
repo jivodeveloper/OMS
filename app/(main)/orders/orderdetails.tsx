@@ -15,7 +15,7 @@ import { useNavigation } from "@react-navigation/native";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { COLORS } from "@/constants/theme";
+import { COLORS, RADIUS } from "@/constants/theme";
 import { appAlert } from "@/src/components/common/AppDialog";
 import StateWrapper from "@/src/components/common/StateWrapper";
 import { orderService, productService } from "@/src/services/order.service";
@@ -26,6 +26,8 @@ import RejectDialog from "@/src/features/approval/components/dialogs/RejectDialo
 import useAndroidBackOverride from "@/src/hooks/useAndroidBackOverride";
 import { refreshOrderData } from "@/src/cache";
 import { fs, ms, sp } from "@/src/utils/responsive";
+import OrderPoAttachments from "@/src/features/orders/components/OrderPoAttachments";
+import { varietyRealisation } from "@/src/features/orders/varietyRealisation";
 
 if (
   Platform.OS === "android" &&
@@ -592,6 +594,17 @@ export default function OrderDetailsScreen() {
     );
     return sum + toNumber(item?.ltrs) + schemeQty;
   }, 0);
+  /*
+   * WHAT EACH VARIETY EARNS PER LITRE.
+   *
+   * The totals above say what the order is worth; they cannot say whether the
+   * rate is any good, because a bigger order is worth more at any rate.
+   * Dividing by volume can — and counting the free litres in the divisor is
+   * what makes an order carrying heavy giveaways show the lower rate it
+   * actually achieves. See `varietyRealisation`.
+   */
+  const realisation = useMemo(() => varietyRealisation(itemsList), [itemsList]);
+
   const totalSubLabelText =
     calculatedTaxAmount > 0
       ? `Includes tax of ₹${formatCurrencyAmount(calculatedTaxAmount)}`
@@ -825,6 +838,13 @@ export default function OrderDetailsScreen() {
               <InfoRow label="PO Number" value={order.po_number} />
               <InfoRow label="Bill To" value={order.bill_to_address} />
               <InfoRow label="Ship To" value={order.ship_to_address} />
+              {/* THE CUSTOMER'S OWN PO, under the PO number it belongs to.
+                  Every desk that reviews this order is checking it against
+                  that document, and this is the one screen all of them open
+                  (billing, auditor and the rate approver all push here), so
+                  it is attached once rather than to each of their lists.
+                  Renders nothing when the order has no PO. */}
+              <OrderPoAttachments orderId={Number(order.id)} />
               {/* Comment moved to the "Remarks & Comments" section below. */}
             </View>
 
@@ -1230,6 +1250,35 @@ export default function OrderDetailsScreen() {
                 </Text>
               </View>
             </View>
+
+            {/* ===== Realisation per variety =====
+                Under Total Ltrs because it is that figure divided into the
+                value above it — the two it is derived from, in the order a
+                reader meets them. Nothing is shown for an order whose lines
+                carry no litres, which is every order of non-oil items. */}
+            {realisation.length > 0 && (
+              <View style={styles.realisationCard}>
+                <Text style={styles.realisationTitle}>Realisation</Text>
+                <Text style={styles.realisationHint}>
+                  Basic value per litre shipped, free litres included
+                </Text>
+                {realisation.map((entry) => (
+                  <View key={entry.label} style={styles.realisationRow}>
+                    <View style={styles.realisationLabelWrap}>
+                      <Text style={styles.realisationLabel}>{entry.label}</Text>
+                      <Text style={styles.realisationMeta} numberOfLines={1}>
+                        ₹{formatCurrencyAmount(entry.amount)} over{" "}
+                        {entry.litres.toFixed(2)} L
+                      </Text>
+                    </View>
+                    <Text style={styles.realisationRate}>
+                      ₹{formatCurrencyAmount(entry.perLitre)}
+                      <Text style={styles.realisationPerL}> / L</Text>
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            )}
           </ScrollView>
 
           {/* ===== Fixed bottom action bar ===== */}
@@ -1548,6 +1597,41 @@ const styles = StyleSheet.create({
     gap: sp(6),
     flexShrink: 1,
   },
+  realisationCard: {
+    marginTop: sp(10),
+    padding: sp(14),
+    borderRadius: RADIUS.lg,
+    borderWidth: 1,
+    borderColor: "#E5E9F0",
+    backgroundColor: "#fff",
+    gap: sp(2),
+  },
+  realisationTitle: {
+    fontSize: fs(13),
+    fontWeight: "800",
+    color: COLORS.text,
+  },
+  realisationHint: {
+    fontSize: fs(11),
+    color: COLORS.textSecondary,
+    marginBottom: sp(6),
+  },
+  realisationRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: sp(10),
+    paddingVertical: sp(7),
+    borderTopWidth: 1,
+    borderTopColor: "#F1F4F8",
+  },
+  // `minWidth: 0` so a long "over N L" is cut rather than pushing the rate
+  // off the row — the rate is the number people came for.
+  realisationLabelWrap: { flex: 1, minWidth: 0 },
+  realisationLabel: { fontSize: fs(12.5), fontWeight: "700", color: COLORS.text },
+  realisationMeta: { fontSize: fs(11), color: COLORS.textSecondary, marginTop: 1 },
+  realisationRate: { fontSize: fs(15), fontWeight: "900", color: COLORS.primary },
+  realisationPerL: { fontSize: fs(11), fontWeight: "600", color: COLORS.textSecondary },
+
   varietyTab: {
     flexDirection: "row",
     alignItems: "center",

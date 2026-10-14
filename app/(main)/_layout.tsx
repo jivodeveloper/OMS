@@ -859,6 +859,18 @@ export default function MainLayout() {
             drawerItemStyle: hiddenStyle,
           }}
         />
+        <Drawer.Screen
+          name="advance-payments/expense-dashboard"
+          options={{
+            title: "Payments & Expenses",
+            // In the drawer as well as the Reports tab: it is a place people
+            // go back to, and hunting for it behind a tab that may offer a
+            // choice of three is a worse way to return to it.
+            drawerItemStyle: isVisible("advance-payments/expense-dashboard")
+              ? visibleStyle
+              : hiddenStyle,
+          }}
+        />
 
         {/* ── Credit Limit ──────────────────────────────────────────────
             ONE DRAWER ENTRY for the module: the page itself asks whose work

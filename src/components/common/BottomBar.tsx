@@ -15,7 +15,7 @@ import { COLORS } from "@/src/constants/theme";
 import {
   canAccessScreen,
   createTargetsFor,
-  resolveReportsRoute,
+  reportTargetsFor,
   resolveWorkQueueRoute,
 } from "@/src/constants/pages";
 import { useDrawerOpen } from "@/src/utils/drawerState";
@@ -45,6 +45,7 @@ export default function BottomBar({
   const drawerOpen = useDrawerOpen();
   const [deniedLabel, setDeniedLabel] = useState<string | null>(null);
   const [createSheetOpen, setCreateSheetOpen] = useState(false);
+  const [reportSheetOpen, setReportSheetOpen] = useState(false);
 
   // The second tab adapts to what the user actually has, in priority order:
   // Orders, then Payments, Verify, Deposits, Production, BackDate. Labelling
@@ -57,10 +58,16 @@ export default function BottomBar({
   // several open the chooser sheet.
   const createTargets = createTargetsFor(user);
 
-  // Where Reports goes for THIS user: the sales daily report when they hold
-  // it, otherwise the Payments Dashboard. Null when they have neither, so the
-  // tab shows the permission dialog instead of navigating somewhere refused.
-  const reports = resolveReportsRoute(user);
+  /*
+   * Every report this user may open.
+   *
+   * A LIST, NOT ONE ROUTE. The tab used to resolve to the first match and
+   * nothing else, so anybody holding the sales daily report could never reach
+   * the Payments & Expenses board from it — and that board's key is held
+   * almost entirely by administrators, who hold the daily report too. One
+   * opens directly; several offer the choice, exactly as Create already does.
+   */
+  const reportTargets = reportTargetsFor(user);
 
   // Highlight the tab that matches the current route, so the global bar shows
   // the right active tab on every screen. An explicit `active` prop wins.
@@ -85,6 +92,14 @@ export default function BottomBar({
   };
 
   /** Open one create destination, closing the sheet first if it was showing. */
+  const openReportTarget = (target: (typeof reportTargets)[number]) => {
+    setReportSheetOpen(false);
+    // Through the same guard as every other tab: the sheet only lists what
+    // this user may open, but the guard is what makes that a rule rather
+    // than a filter somebody could get wrong later.
+    guarded(target.screen, target.label, () => router.push(target.route as never));
+  };
+
   const openCreateTarget = (target: (typeof createTargets)[number]) => {
     setCreateSheetOpen(false);
     guarded(target.screen, target.label, () => {
@@ -157,13 +172,15 @@ export default function BottomBar({
       label: "Reports",
       icon: "bar-chart-outline",
       onPress: () => {
-        if (!reports) {
+        if (reportTargets.length === 0) {
           setDeniedLabel("Reports");
           return;
         }
-        guarded(reports.screen, reports.label, () =>
-          router.push(reports.route as never),
-        );
+        if (reportTargets.length === 1) {
+          openReportTarget(reportTargets[0]);
+          return;
+        }
+        setReportSheetOpen(true);
       },
     },
     {
@@ -296,6 +313,56 @@ export default function BottomBar({
                   size={18}
                   color={COLORS.textSecondary}
                 />
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* The same sheet for Reports, when this user may open more than one.
+          Built from the same rows so the two choosers cannot drift apart. */}
+      <Modal
+        visible={reportSheetOpen}
+        transparent
+        animationType="slide"
+        statusBarTranslucent
+        onRequestClose={() => setReportSheetOpen(false)}
+      >
+        <TouchableOpacity
+          style={styles.sheetBackdrop}
+          activeOpacity={1}
+          onPress={() => setReportSheetOpen(false)}
+        >
+          <TouchableOpacity style={styles.sheet} activeOpacity={1} onPress={() => {}}>
+            <View style={styles.sheetHandle} />
+            <Text style={styles.sheetTitle}>Reports</Text>
+
+            <ScrollView
+              style={styles.sheetList}
+              contentContainerStyle={styles.sheetListContent}
+              showsVerticalScrollIndicator={false}
+              bounces={false}
+            >
+              {reportTargets.map((target) => (
+                <TouchableOpacity
+                  key={target.key}
+                  style={styles.sheetRow}
+                  activeOpacity={0.8}
+                  onPress={() => openReportTarget(target)}
+                >
+                  <View style={styles.sheetIcon}>
+                    <Ionicons
+                      name={target.icon as keyof typeof Ionicons.glyphMap}
+                      size={20}
+                      color={COLORS.primary}
+                    />
+                  </View>
+                  <View style={styles.sheetRowText}>
+                    <Text style={styles.sheetRowLabel}>{target.label}</Text>
+                    <Text style={styles.sheetRowDesc}>{target.description}</Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={18} color={COLORS.textSecondary} />
                 </TouchableOpacity>
               ))}
             </ScrollView>

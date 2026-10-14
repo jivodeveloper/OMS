@@ -1,5 +1,6 @@
 import { storage } from '../utils/storage';
 import {api} from './api';
+import { orderProblem } from "./orderFailure";
 
 export interface Party {
  value: string;
@@ -120,6 +121,38 @@ export interface PartyFlowSettings {
  auditor_enabled: boolean;
  rate_conditions: string[];
 }
+
+/**
+ * One customer PO attached to a sales order.
+ *
+ * The shape is `attachments.serializers.AttachmentSerializer`, shared with
+ * payment and deposit images — the same store, the same checks, the same
+ * permission-checked download. THERE IS NO PATH: the network location is the
+ * server's business and is never sent to a client.
+ *
+ * `download_url` is already `/api/payments/attachments/<id>/download/`, which
+ * is why the app opens one through `paymentsService.downloadAttachment`
+ * rather than growing a second downloader for the same endpoint.
+ */
+export interface OrderAttachment {
+ id: number;
+ attachment_type: string;
+ type_display: string;
+ /** The stored extension, lower-cased: "pdf", "jpg". No filename. */
+ file_type: string;
+ uploaded_by: number;
+ uploaded_by_name: string;
+ download_url: string;
+ created_at: string;
+}
+
+/**
+ * The server's own caps (`orders/views/attachments.py`, `attachments/storage`).
+ *
+ * Mirrored so a user is told before a slow upload rather than after it; the
+ * server re-checks all of it, and sniffs the file's magic bytes besides.
+ */
+export const MAX_PO_FILES = 5;
 
 export const orderService = {
  getParties: async (): Promise<Party[]> => {
@@ -362,7 +395,62 @@ export const orderService = {
 },
 addScheme: async (payload: { scheme_name: string; item_code: string,state_code:string }) => {
  return await api.post('/orders/create_scheme/', payload);
-}
+},
+
+ /* ── The order's customer PO ──────────────────────────────────────────
+  * Attached when the order is raised, read by every desk that reviews it.
+  * The server decides who may do which (`Order.can_be_viewed_by` to read;
+  * the creator or an admin to change, and only while the order is still
+  * editable) — this client asks and reports, it does not guess.
+  *
+  * EVERY ONE OF THESE GOES THROUGH `orderProblem`. `api` RESOLVES a refused
+  * request with `{success: false, message}` instead of throwing, so an
+  * unguarded `await` reads a 403 as a success and tells the user their PO
+  * was attached when nothing was stored.
+  */
+
+ /** The PO files on this order, or [] when it has none. */
+ orderAttachments: async (orderId: number): Promise<OrderAttachment[]> => {
+ const answer = await api.get(`/orders/${orderId}/attachments/`);
+ const problem = orderProblem(answer, "Could not read this order's PO files.");
+ if (problem) throw new Error(problem);
+ return Array.isArray(answer) ? (answer as OrderAttachment[]) : [];
+ },
+
+ /**
+  * Attach one or more PO files.
+  *
+  * ALL OF THEM IN ONE REQUEST, under the field name `file`, because the
+  * server validates every file before storing any: sent one at a time, a
+  * second file the server refuses would leave the first one attached on its
+  * own, which is the half-done state the endpoint was written to avoid.
+  */
+ uploadOrderAttachments: async (
+ orderId: number,
+ files: { uri: string; name: string; mimeType: string }[],
+ ): Promise<OrderAttachment[]> => {
+ const form = new FormData();
+ for (const file of files) {
+ // React Native's FormData takes this triple for a file part; it is what
+ // `pickAttachment` already produces, so nothing is reshaped here.
+ form.append("file", {
+ uri: file.uri,
+ name: file.name,
+ type: file.mimeType,
+ } as unknown as Blob);
+ }
+ const answer = await api.post(`/orders/${orderId}/attachments/`, form as unknown as object);
+ const problem = orderProblem(answer, "The PO could not be attached.");
+ if (problem) throw new Error(problem);
+ return Array.isArray(answer) ? (answer as OrderAttachment[]) : [];
+ },
+
+ /** Remove one PO file. The server answers 204, so there is no body to read. */
+ deleteOrderAttachment: async (orderId: number, attachmentId: number): Promise<void> => {
+ const answer = await api.delete(`/orders/${orderId}/attachments/${attachmentId}/`);
+ const problem = orderProblem(answer, "That PO file could not be removed.");
+ if (problem) throw new Error(problem);
+ },
 
  
 };

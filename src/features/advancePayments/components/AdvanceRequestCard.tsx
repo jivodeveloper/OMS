@@ -2,10 +2,12 @@ import { Ionicons } from "@expo/vector-icons";
 import React from "react";
 import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 
-import { COLORS } from "@/src/constants/theme";
+import { COLORS, RADIUS } from "@/src/constants/theme";
 import { fs, ms, sp } from "@/src/utils/responsive";
 
 import {
+  billOrAdvance,
+  creditPeriod,
   payeeOf,
   paymentAgainstLabel,
   requestAmount,
@@ -103,6 +105,39 @@ export default function AdvanceRequestCard({
           <Text style={styles.partyCode}>
             {typeLabel(form)} · {paymentAgainstLabel(form)}
           </Text>
+          {/* BILL OR ADVANCE, on the card and not only inside the request.
+              Scanning a desk, this is what tells an approver which rows are
+              money going out ahead of any bill — the ones worth opening
+              first — without opening each of them to find out. */}
+          {billOrAdvance(form) ? (
+            <View style={styles.kindRow}>
+              <View
+                style={[
+                  styles.kindChip,
+                  billOrAdvance(form) === "Bill" ? styles.kindBill : styles.kindAdvance,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.kindText,
+                    billOrAdvance(form) === "Bill"
+                      ? styles.kindTextBill
+                      : styles.kindTextAdvance,
+                  ]}
+                >
+                  {billOrAdvance(form)}
+                </Text>
+              </View>
+              {/* The vendor's agreed credit period, where SAP holds one: an
+                  advance to a vendor who already gives 30 days is a different
+                  request from one to a vendor who gives none. */}
+              {creditPeriod(entry.api.credit_terms) ? (
+                <Text style={styles.creditText} numberOfLines={1}>
+                  Credit: {creditPeriod(entry.api.credit_terms)}
+                </Text>
+              ) : null}
+            </View>
+          ) : null}
         </View>
         <View style={styles.chipRow}>
           <View style={styles.chip}>
@@ -300,6 +335,28 @@ const styles = StyleSheet.create({
   },
   partyCol: { flexShrink: 1, minWidth: ms(150) },
   party: { fontSize: fs(14), fontWeight: "700", color: COLORS.text },
+  kindRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: sp(6),
+    marginTop: sp(3),
+    // `flexShrink` on the text below needs a row that may itself be narrow.
+    flexWrap: "nowrap",
+  },
+  kindChip: {
+    paddingHorizontal: sp(6),
+    paddingVertical: 1,
+    borderRadius: RADIUS.sm,
+  },
+  kindBill: { backgroundColor: "#E0F2FE" },
+  kindAdvance: { backgroundColor: "#FEF3C7" },
+  kindText: { fontSize: fs(10), fontWeight: "800", letterSpacing: 0.3 },
+  kindTextBill: { color: "#075985" },
+  kindTextAdvance: { color: "#B45309" },
+  // `flexShrink` so a long terms string is cut rather than pushing the chip
+  // off the card.
+  creditText: { flexShrink: 1, fontSize: fs(10.5), color: COLORS.textSecondary },
+
   partyCode: { fontSize: fs(12), color: COLORS.textSecondary, marginTop: 2 },
   chipRow: {
     flexDirection: "row",

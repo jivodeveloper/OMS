@@ -23,6 +23,9 @@ import Dropdown from "@/src/components/common/DropdownProps";
 import StateWrapper from "@/src/components/common/StateWrapper";
 import { appAlert } from "@/src/components/common/AppDialog";
 import { showToast } from "@/src/components/common/Toast";
+import AttachmentPicker from "@/app/(main)/payments/_components/AttachmentPicker";
+import type { AttachmentStub } from "@/app/(main)/payments/_lib/types";
+import { MAX_PO_FILES, orderService as poOrderService } from "@/src/services/order.service";
 import { api } from "@/src/services/api";
 import { storage } from "@/src/utils/storage";
 import {
@@ -625,6 +628,21 @@ export function OrderEntryScreen({
   const [branch, setBranch] = useState<number | null>(null);
   const [poNumber, setPoNumber] = useState("");
   const [comment, setComment] = useState("");
+
+  /*
+   * THE CUSTOMER'S OWN PURCHASE ORDER.
+   *
+   * Picked here, uploaded AFTER the order saves: the files hang off the
+   * order, so there is no id to attach them to until the server has answered.
+   * A failed upload is therefore reported, never treated as a failed save —
+   * the order exists either way, and saying otherwise would have somebody
+   * place it a second time.
+   *
+   * On an EDIT the files already attached are listed separately: they are on
+   * the server, so removing one is a request, not a change to this array.
+   */
+  const [poFiles, setPoFiles] = useState<AttachmentStub[]>([]);
+  const [existingPo, setExistingPo] = useState<{ id: number; file_type: string }[]>([]);
   const [delivery, setDeliveryDate] = useState(getDefaultDeliveryDate());
   const [showPicker, setShowPicker] = useState(false);
   const [showAdditionalOrderDetails, setShowAdditionalOrderDetails] =
@@ -1212,6 +1230,81 @@ export function OrderEntryScreen({
         console.log("Error loading template orders", e);
       }
     }
+  };
+
+  // What is already attached to the order being edited. A failure here is
+  // left silent: the PO list is not why the user opened the edit form, and
+  // the section simply shows nothing rather than an error over the form.
+  useEffect(() => {
+    if (!isEditMode || !editOrderId) return;
+    let alive = true;
+    poOrderService
+      .orderAttachments(Number(editOrderId))
+      .then((rows) => {
+        if (alive) setExistingPo(rows.map((r) => ({ id: r.id, file_type: r.file_type })));
+      })
+      .catch(() => {
+        if (alive) setExistingPo([]);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [isEditMode, editOrderId]);
+
+  /**
+   * Send the picked PO files up to the order that has just been saved.
+   *
+   * NEVER THROWS. By the time this runs the order is on the server; a PO that
+   * did not attach is worth saying out loud, but it is not a failed order and
+   * must not be reported as one.
+   */
+  const uploadPickedPo = async (orderId: number | null | undefined) => {
+    if (poFiles.length === 0) return;
+    if (!orderId) {
+      showToast("The order was saved, but its PO could not be attached.", "error");
+      return;
+    }
+    try {
+      await poOrderService.uploadOrderAttachments(Number(orderId), poFiles);
+      setPoFiles([]);
+    } catch (err) {
+      showToast(
+        err instanceof Error
+          ? `Order saved. The PO was not attached: ${err.message}`
+          : "Order saved, but the PO was not attached.",
+        "error",
+      );
+    }
+  };
+
+  /**
+   * Take an already-attached PO off the order being edited.
+   *
+   * IT IS A REQUEST, not a local change: these files are on the server, so
+   * the row only disappears once the server says it has gone. Asking first
+   * because it cannot be undone from here — the file would have to be picked
+   * and uploaded again.
+   */
+  const removeAttachedPo = (attachmentId: number) => {
+    if (!editOrderId) return;
+    appAlert("Remove this PO file?", "It will be taken off the order. This cannot be undone.", [
+      { text: "Keep it", style: "cancel" },
+      {
+        text: "Remove",
+        style: "destructive",
+        onPress: async () => {
+          try {
+            await poOrderService.deleteOrderAttachment(Number(editOrderId), attachmentId);
+            setExistingPo((current) => current.filter((f) => f.id !== attachmentId));
+          } catch (err) {
+            appAlert(
+              "Could not remove it",
+              err instanceof Error ? err.message : "That PO file could not be removed.",
+            );
+          }
+        },
+      },
+    ]);
   };
 
   const handleTemplateOrderChange = async (orderId: number) => {
@@ -3071,6 +3164,10 @@ export function OrderEntryScreen({
           // success dialog here (that stays for newly CREATED orders only).
           const updatedOrderId = Number(response.id || editOrderId);
 
+          // Any newly picked PO goes up before leaving, so the details screen
+          // this replaces onto already shows it.
+          await uploadPickedPo(updatedOrderId);
+
           // The edit POSTs to /orders/create/, so make sure the details screen
           // reads the updated order rather than its cached copy.
           await refreshOrderData();
@@ -3088,6 +3185,8 @@ export function OrderEntryScreen({
         console.log("Create order payload:", JSON.stringify(payload, null, 2));
         const response = await orderService.createOrder(payload);
         if (response?.order_number || response?.message?.includes("Order sent")) {
+          // Before the form is cleared below, which drops the picked files.
+          await uploadPickedPo(response?.id);
           setOrderResult({
             orderNumber: response.order_number || "",
             message: response.message || "Order created successfully",
@@ -3342,6 +3441,9 @@ export function OrderEntryScreen({
     setCompany(companies.length === 1 ? companies[0].value : null);
     setPoNumber("");
     setComment("");
+    // The picked PO belongs to the order that was just placed, or to the one
+    // being abandoned — either way it must not carry into the next order.
+    setPoFiles([]);
     setItemRows([]);
     setOrderItems([]);
     setBillToAddresses([]);
@@ -4585,6 +4687,83 @@ export function OrderEntryScreen({
             />
           </Surface>
 
+          {/* ── The customer's purchase order ──────────────────────────────
+              OPTIONAL, because plenty of orders arrive by phone. Where there
+              IS a PO it is the paper the order is raised from — the rates and
+              quantities the customer actually asked for — and every desk that
+              reviews the order is checking it against exactly this. Attaching
+              it here is what stops it being emailed round separately.
+
+              PICKED NOW, SENT AFTER THE SAVE: the files hang off the order,
+              which has no id until the server answers. See `uploadPickedPo`. */}
+          <Surface style={styles.card}>
+            <AttachmentPicker
+              label="Customer PO (Optional)"
+              attachments={poFiles}
+              // The server's own cap, counting what is already attached: on an
+              // edit the two together must not exceed it, or the upload is
+              // refused after the order has already saved.
+              maxFiles={Math.max(0, MAX_PO_FILES - existingPo.length)}
+              onAdd={(added) =>
+                setPoFiles((current) => {
+                  const next = [...current];
+                  for (const file of added) {
+                    if (next.length + existingPo.length >= MAX_PO_FILES) break;
+                    // The same file twice is a mis-tap, not a second document.
+                    if (next.some((f) => f.name === file.name && f.size === file.size)) {
+                      continue;
+                    }
+                    next.push({
+                      id: `${file.name}-${file.size}`,
+                      name: file.name,
+                      uri: file.uri,
+                      mimeType: file.mimeType,
+                      size: file.size,
+                    });
+                  }
+                  return next;
+                })
+              }
+              onRemove={(id) =>
+                setPoFiles((current) => current.filter((f) => f.id !== id))
+              }
+            />
+            {/* Already on the server, from a previous save. Listed rather than
+                shown as tiles because they are not local files: there is
+                nothing here to preview and nothing to remove without asking
+                the server, which is the details screen's job. */}
+            {existingPo.length > 0 ? (
+              <View style={styles.poAttachedList}>
+                <Text style={styles.poAttachedNote}>
+                  Already attached to this order
+                </Text>
+                {existingPo.map((file, index) => (
+                  <View key={file.id} style={styles.poAttachedRow}>
+                    <Ionicons
+                      name={
+                        file.file_type === "pdf" ? "document-text-outline" : "image-outline"
+                      }
+                      size={16}
+                      color={COLORS.primary}
+                    />
+                    <Text style={styles.poAttachedName} numberOfLines={1}>
+                      PO {index + 1}
+                      {file.file_type ? ` · ${file.file_type.toUpperCase()}` : ""}
+                    </Text>
+                    <TouchableOpacity
+                      onPress={() => removeAttachedPo(file.id)}
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Remove PO ${index + 1}`}
+                    >
+                      <Ionicons name="close-circle" size={18} color={COLORS.error} />
+                    </TouchableOpacity>
+                  </View>
+                ))}
+              </View>
+            ) : null}
+          </Surface>
+
           <View style={{ height: 120 }} />
         </ScrollView>
 
@@ -5169,6 +5348,27 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: "500",
   },
+  poAttachedList: { marginTop: 10, gap: 6 },
+  poAttachedNote: {
+    fontSize: 11,
+    fontWeight: "700",
+    letterSpacing: 0.4,
+    textTransform: "uppercase",
+    color: COLORS.textSecondary,
+  },
+  poAttachedRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: RADIUS.md,
+  },
+  // `minWidth: 0` so a long line is cut rather than pushing the remove icon
+  // off the row.
+  poAttachedName: { flex: 1, minWidth: 0, fontSize: 12.5, color: COLORS.text },
   commentInput: { minHeight: 80 },
   addBtn: {
     flexDirection: "row",

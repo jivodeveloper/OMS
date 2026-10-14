@@ -459,6 +459,9 @@ const HISTORY_MARK: Record<
   REJECTED: { icon: "close-circle", tone: REJECTED_RED },
   RETURNED: { icon: "arrow-undo-circle", tone: PENDING_ORANGE },
   SENT_BACK: { icon: "arrow-back-circle", tone: PENDING_ORANGE },
+  // An approver took their own approval back: the request turned around and
+  // came back to them. Orange, like the other actions that reverse a move.
+  RECALLED: { icon: "arrow-undo-circle", tone: PENDING_ORANGE },
   CANCELLED: { icon: "ban", tone: FUTURE_GREY },
   PAYOUT_UPDATED: { icon: "wallet", tone: INFO_BLUE },
   UTR_RECORDED: { icon: "receipt", tone: DONE_GREEN },
@@ -535,6 +538,15 @@ function HistoryBox({ request }: { request: ApiRequest }) {
                   </Text>
                   {log.remarks ? (
                     <Text style={styles.historyRemarks}>{log.remarks}</Text>
+                  ) : null}
+                  {/* Where it was when the approval was taken back. Without
+                      it the row says a decision was reversed but not what it
+                      was reversed out of, which is the only part a reader
+                      cannot work out from the stage column. */}
+                  {log.action === "RECALLED" && log.data?.was_waiting_at ? (
+                    <Text style={styles.historyRemarks}>
+                      Was waiting at {String(log.data.was_waiting_at)}
+                    </Text>
                   ) : null}
                   <ManualAccountFlag log={log} />
                   <EditChangeRows log={log} />

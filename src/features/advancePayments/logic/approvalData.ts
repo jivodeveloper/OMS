@@ -90,6 +90,26 @@ export function paymentAgainstLabel(form: RequestForm): string {
   return PAYMENT_AGAINST_OPTIONS.find((o) => o.value === form.paymentAgainst)?.label ?? "—";
 }
 
+/**
+ * What the money is for, in one word: a BILL already received (Against Bill),
+ * or an ADVANCE paid before it (Against PO, or Advance). "" for anything else
+ * (a ledger refund, an expense, "All").
+ */
+export function billOrAdvance(form: RequestForm): "Bill" | "Advance" | "" {
+  if (form.paymentAgainst === "AGAINST_BILL") return "Bill";
+  if (form.paymentAgainst === "AGAINST_PO" || form.paymentAgainst === "ADVANCE") return "Advance";
+  return "";
+}
+
+/** The payee's credit period, as approvers read it: "NET-30 · 30 days credit". */
+export function creditPeriod(
+  terms: { terms: string; days: number; set: boolean } | null | undefined,
+): string {
+  if (!terms) return "";
+  if (!terms.set) return "Not set in SAP";
+  return terms.days ? `${terms.terms} · ${terms.days} days credit` : terms.terms;
+}
+
 export function returnMethodLabel(form: RequestForm): string {
   if (form.returnMethod === "CUSTOM") return form.returnMethodOther || "Other";
   return RETURN_METHODS.find((m) => m.value === form.returnMethod)?.label ?? "—";

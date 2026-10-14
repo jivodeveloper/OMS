@@ -82,6 +82,19 @@ const PROMPT: Record<
     confirmLabel: "Cancel Request",
     remarksRequired: false,
   },
+  "change-decision": {
+    icon: "arrow-undo-circle",
+    accent: COLORS.warning,
+    title: "Change Your Decision",
+    // WHAT IT COSTS, not what it is called: the request leaves the desk it is
+    // sitting on and comes back to this one, where it must be decided again.
+    subtitle:
+      "Your approval is taken back and the request waits at your stage again, for you to approve, reject or return.",
+    confirmLabel: "Take Back Approval",
+    // Optional, as on the web: an approver changing their own mind owes an
+    // explanation to the log, not to a validator.
+    remarksRequired: false,
+  },
   resubmit: {
     icon: "refresh-circle",
     accent: COLORS.primary,

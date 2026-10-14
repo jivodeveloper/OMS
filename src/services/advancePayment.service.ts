@@ -817,6 +817,14 @@ export interface RequestAbilities {
   reject: boolean;
   return_to_creator: boolean;
   send_back: boolean;
+  /**
+   * You approved it and it waits at the VERY NEXT stage, which has not
+   * decided: you may take the approval back and decide again.
+   *
+   * Optional: a server from before 2026-10-13 does not send it, and an
+   * absent ability must read as "no", never as "yes".
+   */
+  change_decision?: boolean;
   edit_payout: boolean;
   record_utr: boolean;
   /**
@@ -999,6 +1007,16 @@ export interface ApiRequest extends ApiRequestFields {
     returned_after_approval?: boolean;
   } | null;
   can: RequestAbilities;
+  /**
+   * The payee's credit period: its SAP payment terms ("NET-30", 30 days).
+   *
+   * `set` is false on SAP's default "ADVANCE/CASH/0 DAYS", which most vendors
+   * carry only because nobody chose terms for them — so it is shown as not
+   * set rather than as a credit period somebody agreed. Null for an employee,
+   * a payee not in SAP, or when SAP could not be reached: the server never
+   * fails a request over it.
+   */
+  credit_terms?: { terms: string; days: number; set: boolean } | null;
   /** The SAP outgoing payment, once Final's approval has posted it. */
   voucher: ApiVoucher | null;
   /**
@@ -1043,8 +1061,156 @@ export interface ApiRequest extends ApiRequestFields {
  * still the creator's and deciding still the current stage user's, and the
  * server enforces both whatever this says.
  */
+
+/* ------------------------------------------------------------------ *
+ * Payments & Expenses board
+ * ------------------------------------------------------------------ */
+
+/**
+ * ONE RANKED LINE of a breakdown — a category, a budget head, an account.
+ *
+ * `share` is already a percentage of the period's total, worked out by the
+ * server, so two clients cannot round it differently.
+ */
+export interface ExpenseRanked {
+  name: string;
+  amount: number;
+  entries: number;
+  share: number;
+}
+
+/** One SAP expense posting, as the board lists the largest of them. */
+export interface ExpenseRow {
+  date: string | null;
+  doc_num: number | null;
+  trans_id: number | null;
+  budget: string;
+  sub_budget: string;
+  variety: string;
+  account: string;
+  branch: string;
+  kind: string;
+  category: string;
+  amount: number;
+  remarks: string;
+}
+
+/** A budget head, with what it was in the period before and what sits under it. */
+export interface ExpenseHead extends ExpenseRanked {
+  previous: number;
+  /** Percent change on the period before; null when it had nothing. */
+  change: number | null;
+  accounts: ExpenseRanked[];
+  sub_budgets: ExpenseRanked[];
+  rows: ExpenseRow[];
+}
+
+/**
+ * SAP's ACTUAL expenses for a period (`/expense-dashboard/`).
+ *
+ * The money that really left, read from SAP's postings — not what OMS was
+ * asked to pay. `oms` carries the OMS requests beside them so the two can be
+ * read together, which is the point of the board.
+ */
+export interface ExpenseDashboard {
+  period: {
+    from: string;
+    to: string;
+    days: number;
+    previous_from: string;
+    previous_to: string;
+  };
+  filters: {
+    branch: string;
+    kind: "all" | "direct" | "indirect";
+    include_salary: boolean;
+    branches: string[];
+  };
+  kpis: {
+    total: number;
+    previous: number;
+    /** Percent change on the period before; null when it had nothing. */
+    change: number | null;
+    direct: number;
+    indirect: number;
+    entries: number;
+    per_day: number;
+    salary: number;
+    salary_included: boolean;
+    top_head: { name: string; amount: number; share: number } | null;
+  };
+  trend: { month: string; label: string; direct: number; indirect: number; total: number }[];
+  categories: ExpenseRanked[];
+  heads: ExpenseHead[];
+  accounts: ExpenseRanked[];
+  varieties: ExpenseRanked[];
+  branches: ExpenseRanked[];
+  largest: ExpenseRow[];
+  oms: {
+    by_status: Record<string, { count: number; amount: number }>;
+    waiting: { stage: string; count: number; amount: number }[];
+    latest: {
+      id: number;
+      request_no: string;
+      company: string;
+      payee: string;
+      budget: string;
+      amount: number;
+      status: string;
+      stage: string;
+      created_on: string;
+    }[];
+  };
+}
+
+/** The OMS side of the board: this system's own payment requests. */
+export interface OmsDashboard {
+  period: ExpenseDashboard["period"];
+  filters: { company: string; companies: string[] };
+  kpis: {
+    raised: { count: number; amount: number; previous: number; change: number | null };
+    paid: { count: number; amount: number; previous: number; change: number | null };
+    pending: { count: number; amount: number; returned: number };
+    rejected: { count: number; amount: number };
+    /** Average days from raised to paid, for those paid in the period. */
+    days_to_pay: number | null;
+  };
+  trend: { month: string; label: string; raised: number; paid: number }[];
+  by_type: ExpenseRanked[];
+  bill_or_advance: ExpenseRanked[];
+  by_company: ExpenseRanked[];
+  top_payees: ExpenseRanked[];
+  /** Raised this period, by payment purpose ("Expense" for an Expense request). */
+  by_purpose: ExpenseRanked[];
+  /** Raised this period, by budget head. */
+  by_budget: ExpenseRanked[];
+  waiting_at: ExpenseRanked[];
+  waiting_on: ExpenseRanked[];
+  ageing: { name: string; entries: number; amount: number }[];
+  oldest: {
+    id: number;
+    request_no: string;
+    company: string;
+    payee: string;
+    type: string;
+    kind: string;
+    amount: number;
+    stage: string;
+    waiting_on: string;
+    created_on: string;
+  }[];
+}
+
 export type RequestScope = "mine" | "desk" | "all";
-export type StageAction = "approve" | "reject" | "return" | "send-back" | "cancel" | "resubmit";
+export type StageAction =
+  | "approve"
+  | "reject"
+  | "return"
+  | "send-back"
+  | "cancel"
+  | "resubmit"
+  /** Take back your approval while the very next stage has not decided. */
+  | "change-decision";
 
 
 /* ------------------------------------------------------------------ *
@@ -1333,6 +1499,58 @@ export const advancePaymentService = {
     rows<SapPartnerCompanyBalance>(
       guard(
         await api.get(`${BASE}/partner-balances/${query({ company, card_code: cardCode })}`),
+      ),
+    ),
+
+  /**
+   * SAP's actual expenses for a period, with the OMS requests beside them.
+   *
+   * READ ONLY, and gated server-side on `Expense_Dashboard`. Dates are
+   * YYYY-MM-DD; sending none asks for this month so far, which is what the
+   * server defaults to.
+   */
+  expenseDashboard: async (q: {
+    from?: string;
+    to?: string;
+    branch?: string;
+    kind?: "all" | "direct" | "indirect";
+    salary?: boolean;
+  }): Promise<ExpenseDashboard> =>
+    unwrap<ExpenseDashboard>(
+      guard(
+        await api.get(
+          `${BASE}/expense-dashboard/${query({
+            from: q.from || "",
+            to: q.to || "",
+            branch: q.branch || "",
+            kind: q.kind || "all",
+            // The server reads this as a flag, so it is sent as one rather
+            // than as the word "false", which would read as true.
+            salary: q.salary ? "1" : "",
+          })}`,
+          undefined,
+          FRESH,
+        ),
+      ),
+    ),
+
+  /** The OMS side of the same board: requests raised, paid and pending. */
+  omsDashboard: async (q: {
+    from?: string;
+    to?: string;
+    company?: string;
+  }): Promise<OmsDashboard> =>
+    unwrap<OmsDashboard>(
+      guard(
+        await api.get(
+          `${BASE}/oms-dashboard/${query({
+            from: q.from || "",
+            to: q.to || "",
+            company: q.company || "",
+          })}`,
+          undefined,
+          FRESH,
+        ),
       ),
     ),
 

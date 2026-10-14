@@ -21,6 +21,7 @@ import {
 import AttachmentPicker from "@/app/(main)/payments/_components/AttachmentPicker";
 import type { AttachmentStub } from "@/app/(main)/payments/_lib/types";
 import { appAlert } from "@/src/components/common/AppDialog";
+import { showToast } from "@/src/components/common/Toast";
 import { useAuth } from "@/src/context/AuthContext";
 import { COLORS } from "@/src/constants/theme";
 import useBackToOrigin, { useOriginName } from "@/src/hooks/useBackToOrigin";
@@ -59,6 +60,8 @@ import { monthLabel } from "../components/ExpenseLines";
 import PayoutEditor, { type PayoutStatus } from "../components/PayoutEditor";
 import {
   paidAmount,
+  billOrAdvance,
+  creditPeriod,
   paymentAgainstLabel,
   requestAmount,
   returnMethodLabel,
@@ -488,6 +491,19 @@ export default function AdvanceDetailsScreen() {
         return;
       }
 
+      /*
+       * TAKING AN APPROVAL BACK ENDS NOTHING — it hands the request back to
+       * the reader, who must now decide it again. A "Done" sheet closing onto
+       * the list would take them away from the one page they need. The screen
+       * has already been re-rendered from the server's answer, so Approve,
+       * Reject and Return are on it; a toast says what just happened without
+       * costing a tap.
+       */
+      if (action === "change-decision") {
+        showToast("Approval taken back — decide it again below.", "success");
+        return;
+      }
+
       setDone({
         action,
         requestNo: next.request_no,
@@ -669,6 +685,26 @@ export default function AdvanceDetailsScreen() {
       needsRemarks: true,
       run: () => setAsking("send-back"),
     },
+    /*
+     * TAKING AN APPROVAL BACK.
+     *
+     * Only the server decides this is possible (`can.change_decision`): you
+     * approved it, it waits at the VERY NEXT stage, and that stage has not
+     * decided yet. Once it moves further on, or that stage acts, the decision
+     * stands — so there is nothing for this screen to work out, and nothing it
+     * could get right that the server has not already answered.
+     *
+     * It is never shown beside Approve/Reject: those appear when the request
+     * waits on YOU, and this appears only when it does not.
+     */
+    can.change_decision && {
+      key: "change-decision" as const,
+      label: "Change decision",
+      icon: "arrow-undo-outline" as const,
+      colour: COLORS.warning,
+      needsRemarks: false,
+      run: () => setAsking("change-decision"),
+    },
   ].filter(Boolean) as ActionSpec[];
   const turned =
     entry.decision &&
@@ -827,6 +863,40 @@ export default function AdvanceDetailsScreen() {
               value={paymentAgainstLabel(form)}
               tone="badge"
             />
+            {/* THE QUESTION AN APPROVER ASKS FIRST: is this money going out
+                against a bill already received, or ahead of one? It is in
+                "Payment Against" already, but only to somebody who knows that
+                Against PO means no bill yet. Said plainly, it is the one line
+                that changes how the rest of the page is read. */}
+            {billOrAdvance(form) ? (
+              <Field
+                icon={billOrAdvance(form) === "Bill" ? "document-text-outline" : "time-outline"}
+                label="Bill or Advance"
+                value={
+                  billOrAdvance(form) === "Bill"
+                    ? "Bill: paying a bill already received"
+                    : "Advance: paying before the bill"
+                }
+                full
+              />
+            ) : null}
+            {/* The vendor's own payment terms in SAP, beside the request to
+                pay them now. `set` false is SAP's default "ADVANCE/CASH/0
+                DAYS", which most vendors carry because nobody chose terms for
+                them — so it says so rather than passing it off as agreed. */}
+            {request.credit_terms ? (
+              <Field
+                icon="calendar-outline"
+                label="Credit Period"
+                value={creditPeriod(request.credit_terms)}
+                sub={
+                  request.credit_terms.set
+                    ? "The vendor's payment terms in SAP"
+                    : `SAP shows ${request.credit_terms.terms}, its default`
+                }
+                full
+              />
+            ) : null}
           </View>
 
           <View style={styles.divider} />
@@ -1468,7 +1538,11 @@ export default function AdvanceDetailsScreen() {
             to be found is a box people do not write in. Whatever is here is
             carried into the confirmation dialog, where a rejection insists on
             it. Same field as the receipt's approval remarks. */}
-        {can.approve || can.reject || can.return_to_creator || can.send_back ? (
+        {can.approve ||
+        can.reject ||
+        can.return_to_creator ||
+        can.send_back ||
+        can.change_decision ? (
           <View ref={remarksCard} style={styles.card}>
             <View style={styles.cardHeader}>
               <View style={styles.headerIcon}>

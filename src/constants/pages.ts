@@ -189,6 +189,15 @@ export const ASSIGNABLE_PAGES: AppPage[] = [
     screens: ["advance-payments/dispatch", "advance-payments/dispatch-review"],
   },
   {
+    // The Payments & Expenses board. READ ONLY and entirely its own key: it
+    // opens no request and decides nothing, it reads SAP's actual expense
+    // postings beside OMS's requests. None of the other advance-payment keys
+    // admit here, and holding this one admits nowhere else.
+    key: "Expense_Dashboard",
+    label: "Payments & Expenses — dashboard (read only)",
+    screens: ["advance-payments/expense-dashboard"],
+  },
+  {
     // Production Orders — SAP plans them, OMS approves them.
     //
     // There is no "create" screen to grant, and there never will be: a planner
@@ -398,6 +407,11 @@ export const SCREEN_KEYS: Record<string, string[]> = {
   "advance-payments/dispatch": ["Advance_Payment_Dispatch"],
   // Step two of the same page, reached from its Next button: the same key.
   "advance-payments/dispatch-review": ["Advance_Payment_Dispatch"],
+  // The Payments & Expenses board: SAP's actual expense postings beside OMS's
+  // own payment requests. READ ONLY, and its own key — holding it says nothing
+  // about raising or approving anything, which is why it admits none of the
+  // other advance-payment keys and they do not admit here.
+  "advance-payments/expense-dashboard": ["Expense_Dashboard"],
 
   // Credit Limit — two keys, spelled as the backend registry issues them
   // (`credit_limit/permissions.py`). Raising and approving are unrelated jobs,
@@ -855,24 +869,77 @@ export const resolveWorkQueueRoute = (
  * "no permission" dialog against the label the user actually tapped rather
  * than sending them to a screen that would refuse them.
  */
+/** One thing the Reports tab can open. Same shape the Create sheet uses. */
+export interface ReportTarget {
+  key: "daily" | "payments" | "expenses";
+  label: string;
+  description: string;
+  icon: string;
+  screen: string;
+  route: string;
+}
+
+/**
+ * Every report this user may open, best first.
+ *
+ * IT IS A LIST NOW, NOT ONE ROUTE. A single resolver returned the first match
+ * and nothing else, so anybody holding the sales daily report could never
+ * reach the Payments & Expenses board from the tab — and since the board's
+ * key is held almost entirely by administrators, who hold the daily report
+ * too, that meant almost nobody could open it at all. The tab opens one
+ * directly and offers a choice when there is more than one, exactly as the
+ * Create button already does.
+ *
+ * Order is deliberate: the sales daily report is the one most people come to
+ * Reports for, the two dashboards are the deeper reads.
+ */
+const REPORT_TARGETS: ReportTarget[] = [
+  {
+    key: "daily",
+    label: "Daily Report",
+    description: "The day's sales, by branch and by party",
+    icon: "bar-chart-outline",
+    screen: "reports/daily-report",
+    route: "/reports/daily-report",
+  },
+  {
+    key: "payments",
+    label: "Payments Dashboard",
+    description: "Money collected and banked, by person and company",
+    icon: "cash-outline",
+    screen: "payments/dashboard",
+    route: "/(main)/payments/dashboard",
+  },
+  {
+    key: "expenses",
+    label: "Payments & Expenses",
+    description: "SAP's actual expenses, with OMS's payment requests beside them",
+    icon: "pie-chart-outline",
+    screen: "advance-payments/expense-dashboard",
+    route: "/(main)/advance-payments/expense-dashboard",
+  },
+];
+
+export const reportTargetsFor = (
+  user: User | null | undefined,
+): ReportTarget[] => REPORT_TARGETS.filter((t) => canAccessScreen(t.screen, user));
+
+/**
+ * The single best report for this user, or null when they have none.
+ *
+ * Kept for callers that want one destination rather than a choice; the bottom
+ * bar uses `reportTargetsFor` so it can offer all of them.
+ */
 export const resolveReportsRoute = (
   user: User | null | undefined,
 ): (AppRoute & { label: string }) | null => {
-  const reach = (screen: string) => canAccessScreen(screen, user);
-
-  if (reach("reports/daily-report")) {
-    return {
-      screen: "reports/daily-report",
-      route: "/reports/daily-report",
-      label: "Reports",
-    };
-  }
-  if (reach("payments/dashboard")) {
-    return {
-      screen: "payments/dashboard",
-      route: "/(main)/payments/dashboard",
-      label: "Payments Dashboard",
-    };
-  }
-  return null;
+  const [first] = reportTargetsFor(user);
+  if (!first) return null;
+  // "Reports" rather than "Daily Report" for the sales one: that is what the
+  // tab has always been called, and the label is used in the denial dialog.
+  return {
+    screen: first.screen,
+    route: first.route,
+    label: first.key === "daily" ? "Reports" : first.label,
+  };
 };
